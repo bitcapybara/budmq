@@ -18,10 +18,10 @@ impl Display for Error {
 }
 
 pub struct Message {
-    client_id: u64,
-    packet: protocol::Packet,
-    res_tx: Option<oneshot::Sender<protocol::Packet>>,
-    client_tx: Option<mpsc::Sender<protocol::Packet>>,
+    pub client_id: u64,
+    pub packet: protocol::Packet,
+    pub res_tx: Option<oneshot::Sender<protocol::Packet>>,
+    pub client_tx: Option<mpsc::Sender<protocol::Packet>>,
 }
 
 pub struct Broker {}
