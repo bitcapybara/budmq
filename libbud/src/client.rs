@@ -126,7 +126,7 @@ impl Client {
         while let Some(stream) = acceptor.accept_bidirectional_stream().await? {
             let mut framed = Framed::new(stream, protocol::Codec);
             match framed.next().await.ok_or(Error::StreamClosed)?? {
-                Packet::Connect => framed.send(Packet::error("Already connected")).await?,
+                Packet::Connect => framed.send(Packet::fail("Already connected")).await?,
                 Packet::Disconnect => return Err(Error::ClientDisconnect),
                 _ => return Err(Error::UnexpectedPacket),
             }

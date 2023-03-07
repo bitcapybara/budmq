@@ -46,6 +46,7 @@ pub enum PacketType {
     Subscribe,
     Unsubscribe,
     Publish,
+    Ack,
     ControlFlow,
     Disconnect,
 }
@@ -57,7 +58,12 @@ pub enum Packet {
 }
 
 impl Packet {
-    pub fn error(msg: &str) -> Self {
+    pub fn fail(msg: &str) -> Self {
         Packet::Fail(msg.to_string())
     }
+}
+
+struct Header {
+    packet_type: PacketType,
+    remain_len: usize,
 }
