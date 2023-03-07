@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::protocol;
+use crate::protocol::{self, ReturnCode};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -20,7 +20,7 @@ impl Display for Error {
 pub struct Message {
     pub client_id: u64,
     pub packet: protocol::Packet,
-    pub res_tx: Option<oneshot::Sender<protocol::Packet>>,
+    pub res_tx: Option<oneshot::Sender<ReturnCode>>,
     pub client_tx: Option<mpsc::Sender<protocol::Packet>>,
 }
 
