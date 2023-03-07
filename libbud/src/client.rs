@@ -1,3 +1,5 @@
+mod reader;
+
 use std::{fmt::Display, time::Duration};
 
 use futures::{future, FutureExt, SinkExt, StreamExt};
@@ -18,8 +20,9 @@ use crate::{
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 
+use self::reader::Reader;
+
 const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
-const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -125,8 +128,8 @@ impl Client {
         let (handle, acceptor) = self.conn.split();
 
         // read
-        let (read_task, read_handle) =
-            read(self.id, acceptor, self.keepalive, self.broker_tx).remote_handle();
+        let reader = Reader::new(self.id, self.broker_tx, acceptor, self.keepalive);
+        let (read_task, read_handle) = reader.read().remote_handle();
         tokio::spawn(read_task);
 
         // write
@@ -137,44 +140,6 @@ impl Client {
         future::try_join(read_handle, write_handle).await?;
         Ok(())
     }
-}
-
-/// accept new stream to read a packet
-async fn read(
-    id: u64,
-    mut acceptor: StreamAcceptor,
-    keepalive: u16,
-    broker_tx: mpsc::UnboundedSender<broker::Message>,
-) -> Result<()> {
-    while let Some(stream) = timeout(
-        Duration::from_millis(keepalive as u64),
-        acceptor.accept_bidirectional_stream(),
-    )
-    .await
-    .map_err(|_| Error::ClientIdleTimeout)??
-    {
-        let mut framed = Framed::new(stream, PacketCodec);
-        match framed.next().await.ok_or(Error::StreamClosed)?? {
-            Packet::Connect(c) => {
-                // Do not allow duplicate connections
-                framed.send(c.ack(ReturnCode::AlreadyConnected)).await?
-            }
-            Packet::Subscribe(sub) => {
-                let req_id = sub.request_id;
-                process_packet(
-                    id,
-                    req_id,
-                    broker_tx.clone(),
-                    Packet::Subscribe(sub),
-                    framed,
-                )
-                .await?;
-            }
-            Packet::Disconnect => return Err(Error::ClientDisconnect),
-            _ => return Err(Error::UnexpectedPacket),
-        }
-    }
-    Ok(())
 }
 
 /// messages sent from server to client
@@ -188,37 +153,5 @@ async fn write(mut client_rx: mpsc::Receiver<protocol::Packet>, mut handle: Hand
         let framed = Framed::new(stream, PacketCodec);
         // send to client: framed.send(Packet) async? error log?
     }
-    Ok(())
-}
-
-async fn process_packet(
-    client_id: u64,
-    req_id: u64,
-    broker_tx: mpsc::UnboundedSender<broker::Message>,
-    packet: Packet,
-    mut framed: Framed<BidirectionalStream, PacketCodec>,
-) -> Result<()> {
-    let (res_tx, res_rx) = oneshot::channel();
-    // send to broker
-    broker_tx.send(broker::Message {
-        client_id,
-        packet,
-        res_tx: Some(res_tx),
-        client_tx: None,
-    })?;
-    // wait for response in coroutine
-    tokio::spawn(async move {
-        match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-            Ok(Ok(code)) => {
-                if let Err(e) = framed.send(Packet::ack(req_id, code)).await {
-                    error!("send reply to request {} error: {}", req_id, e)
-                }
-            }
-            Ok(Err(e)) => {
-                error!("request {} reply error: {}", req_id, e)
-            }
-            Err(_) => error!("request {} wait for reply timeout", req_id),
-        }
-    });
     Ok(())
 }
