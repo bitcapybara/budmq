@@ -3,11 +3,11 @@ use bytes::Bytes;
 use super::{Codec, Packet, Result, ReturnCode};
 
 pub struct Publish {
-    request_id: u64,
+    pub request_id: u64,
     /// Ensure that the message sent by the producer is unique
-    sequence_id: u64,
+    pub sequence_id: u64,
     /// message content
-    payload: Bytes,
+    pub payload: Bytes,
 }
 
 impl Publish {

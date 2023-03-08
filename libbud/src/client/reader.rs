@@ -41,6 +41,14 @@ impl Reader {
 
     /// accept new stream to read a packet
     pub async fn read(mut self) -> Result<()> {
+        // macro to simplify code
+        macro_rules! send {
+            ($c: expr, $d:expr, $f: expr) => {
+                let req_id = $c.request_id;
+                let packet = $d($c);
+                self.send(req_id, packet, $f).await?;
+            };
+        }
         while let Some(stream) = timeout(
             Duration::from_millis(self.keepalive as u64),
             self.acceptor.accept_bidirectional_stream(),
@@ -54,17 +62,36 @@ impl Reader {
                     // Do not allow duplicate connections
                     framed.send(c.ack(ReturnCode::AlreadyConnected)).await?
                 }
-                Packet::Subscribe(sub) => {
-                    let req_id = sub.request_id;
-                    let packet = Packet::Subscribe(sub);
-                    self.send(req_id, packet, framed).await?;
+                Packet::Subscribe(s) => {
+                    send!(s, Packet::Subscribe, framed);
                 }
-                Packet::Unsubscribe(unsub) => {
-                    let req_id = unsub.request_id;
-                    let packet = Packet::Unsubscribe(unsub);
-                    self.send(req_id, packet, framed).await?;
+                Packet::Unsubscribe(u) => {
+                    send!(u, Packet::Unsubscribe, framed);
                 }
-                Packet::Disconnect => return Err(Error::ClientDisconnect),
+                Packet::Publish(p) => {
+                    send!(p, Packet::Publish, framed);
+                }
+                Packet::ConsumeAck(c) => {
+                    send!(c, Packet::ConsumeAck, framed);
+                }
+                Packet::ControlFlow(c) => {
+                    send!(c, Packet::ControlFlow, framed);
+                }
+                Packet::Ping => {
+                    tokio::spawn(async move {
+                        if let Err(e) = framed.send(Packet::Pong).await {
+                            error!("send pong packet error: {e}")
+                        }
+                    });
+                }
+                Packet::Disconnect => {
+                    self.broker_tx.send(broker::Message {
+                        client_id: self.client_id,
+                        packet: Packet::Disconnect,
+                        res_tx: None,
+                        client_tx: None,
+                    })?;
+                }
                 _ => return Err(Error::UnexpectedPacket),
             }
         }

@@ -1,8 +1,9 @@
 use super::{Codec, Packet, Result, ReturnCode};
 
 pub struct ControlFlow {
-    request_id: u64,
-    permits: u32,
+    pub request_id: u64,
+    /// number of additional messages requested
+    pub permits: u32,
 }
 
 impl ControlFlow {

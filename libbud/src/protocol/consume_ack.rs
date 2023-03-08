@@ -1,9 +1,9 @@
 use super::{Codec, Result};
 
 pub struct ConsumeAck {
-    request_id: u64,
+    pub request_id: u64,
     /// which message to ack
-    message_id: u64,
+    pub message_id: u64,
 }
 
 impl Codec for ConsumeAck {
