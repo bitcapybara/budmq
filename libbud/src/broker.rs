@@ -17,11 +17,39 @@ impl Display for Error {
     }
 }
 
-pub struct Message {
+/// messages from client to broker
+pub struct ClientMessage {
     pub client_id: u64,
     pub packet: protocol::Packet,
     pub res_tx: Option<oneshot::Sender<ReturnCode>>,
-    pub client_tx: Option<mpsc::Sender<protocol::Packet>>,
+    pub client_tx: Option<mpsc::UnboundedSender<BrokerMessage>>,
 }
 
-pub struct Broker {}
+/// messages from broker to client
+pub struct BrokerMessage {
+    pub packet: protocol::Packet,
+    pub res_tx: Option<oneshot::Sender<ReturnCode>>,
+}
+
+pub struct Broker {
+    broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
+}
+
+impl Broker {
+    pub fn new(broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Self {
+        Self { broker_rx }
+    }
+
+    pub async fn run(mut self) -> Result<()> {
+        while let Some(msg) = self.broker_rx.recv().await {
+            let client_id = msg.client_id;
+            match msg.packet {
+                protocol::Packet::Connect(c) => {
+                    todo!()
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+}

@@ -12,13 +12,8 @@ use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 
 pub use self::{
-    ack::{Ack, ReturnCode},
-    connect::Connect,
-    consume_ack::ConsumeAck,
-    control_flow::ControlFlow,
-    publish::Publish,
-    subscribe::Subscribe,
-    unsubscribe::Unsubscribe,
+    ack::ReturnCode, connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow,
+    publish::Publish, subscribe::Subscribe, unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
@@ -86,19 +81,10 @@ pub enum Packet {
     Publish(Publish),
     ConsumeAck(ConsumeAck),
     ControlFlow(ControlFlow),
-    Ack(Ack),
+    ReturnCode(ReturnCode),
     Ping,
     Pong,
     Disconnect,
-}
-
-impl Packet {
-    pub fn ack(request_id: u64, return_code: ReturnCode) -> Self {
-        Packet::Ack(Ack {
-            request_id,
-            return_code,
-        })
-    }
 }
 
 struct Header {

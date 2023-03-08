@@ -98,7 +98,7 @@ impl Server {
         local: String,
         client_id: u64,
         conn: Connection,
-        broker_tx: mpsc::UnboundedSender<broker::Message>,
+        broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     ) {
         match Client::handshake(client_id, conn, broker_tx).await {
             Ok(client) => {

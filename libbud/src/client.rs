@@ -1,4 +1,5 @@
 mod reader;
+mod writer;
 
 use std::{fmt::Display, time::Duration};
 
@@ -16,13 +17,14 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use crate::{
-    broker,
+    broker::{self, BrokerMessage, ClientMessage},
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 
-use self::reader::Reader;
+use self::{reader::Reader, writer::Writer};
 
 const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
+const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -73,9 +75,9 @@ pub struct Client {
     id: u64,
     conn: Connection,
     /// packet send to broker
-    broker_tx: mpsc::UnboundedSender<broker::Message>,
+    broker_tx: mpsc::UnboundedSender<ClientMessage>,
     /// packet receive from broker
-    client_rx: mpsc::Receiver<protocol::Packet>,
+    client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
     /// keepalive setting: ms
     keepalive: u16,
 }
@@ -84,7 +86,7 @@ impl Client {
     pub async fn handshake(
         id: u64,
         mut conn: Connection,
-        broker_tx: mpsc::UnboundedSender<broker::Message>,
+        broker_tx: mpsc::UnboundedSender<ClientMessage>,
     ) -> Result<Self> {
         let stream = conn
             .accept_bidirectional_stream()
@@ -98,9 +100,9 @@ impl Client {
         match handshake {
             Packet::Connect(connect) => {
                 let (res_tx, res_rx) = oneshot::channel();
-                let (client_tx, client_rx) = mpsc::channel(1);
+                let (client_tx, client_rx) = mpsc::unbounded_channel();
                 // send to broker
-                broker_tx.send(broker::Message {
+                broker_tx.send(ClientMessage {
                     client_id: id,
                     packet: Packet::Connect(connect),
                     res_tx: Some(res_tx),
@@ -108,7 +110,7 @@ impl Client {
                 })?;
                 // wait for reply
                 let code = res_rx.await?;
-                framed.send(connect.ack(code)).await?;
+                framed.send(Packet::ReturnCode(code)).await?;
                 if !matches!(code, ReturnCode::Success) {
                     return Err(Error::Server(code));
                 }
@@ -125,33 +127,21 @@ impl Client {
     }
 
     pub async fn start(self) -> Result<()> {
+        let local = self.conn.local_addr()?.to_string();
         let (handle, acceptor) = self.conn.split();
 
         // read
-        let reader = Reader::new(self.id, self.broker_tx, acceptor, self.keepalive);
+        let reader = Reader::new(self.id, &local, self.broker_tx, acceptor, self.keepalive);
         let (read_task, read_handle) = reader.read().remote_handle();
         tokio::spawn(read_task);
 
         // write
-        let (write_task, write_handle) = write(self.client_rx, handle).remote_handle();
+        let writer = Writer::new(&local, self.client_rx, handle);
+        let (write_task, write_handle) = writer.write().remote_handle();
         tokio::spawn(write_task);
 
         // wait until the end
         future::try_join(read_handle, write_handle).await?;
         Ok(())
     }
-}
-
-/// messages sent from server to client
-/// need to open a new stream to send messages
-/// client_rx: receive message from broker
-async fn write(mut client_rx: mpsc::Receiver<protocol::Packet>, mut handle: Handle) -> Result<()> {
-    // * push message to client
-    // * disconnect message (due to ping/pong timeout etc...)
-    while let Some(message) = client_rx.recv().await {
-        let stream = handle.open_bidirectional_stream().await?;
-        let framed = Framed::new(stream, PacketCodec);
-        // send to client: framed.send(Packet) async? error log?
-    }
-    Ok(())
 }

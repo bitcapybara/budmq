@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use super::{Codec, Result};
 
 #[derive(Debug, Clone, Copy)]
@@ -6,12 +8,13 @@ pub enum ReturnCode {
     AlreadyConnected = 1,
 }
 
-pub struct Ack {
-    pub request_id: u64,
-    pub return_code: ReturnCode,
+impl Display for ReturnCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
 
-impl Codec for Ack {
+impl Codec for ReturnCode {
     fn decode(buf: &mut bytes::BytesMut) -> Result<Self> {
         todo!()
     }

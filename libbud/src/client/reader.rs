@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use log::error;
@@ -9,17 +9,16 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use super::{Error, Result};
+use super::{Error, Result, WAIT_REPLY_TIMEOUT};
 use crate::{
     broker,
     protocol::{Packet, PacketCodec, ReturnCode},
 };
 
-const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
-
 pub struct Reader {
     client_id: u64,
-    broker_tx: mpsc::UnboundedSender<broker::Message>,
+    local_addr: String,
+    broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     acceptor: StreamAcceptor,
     keepalive: u16,
 }
@@ -27,12 +26,14 @@ pub struct Reader {
 impl Reader {
     pub fn new(
         client_id: u64,
-        broker_tx: mpsc::UnboundedSender<broker::Message>,
+        local_addr: &str,
+        broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
         acceptor: StreamAcceptor,
         keepalive: u16,
     ) -> Self {
         Self {
             client_id,
+            local_addr: local_addr.to_string(),
             broker_tx,
             acceptor,
             keepalive,
@@ -41,16 +42,10 @@ impl Reader {
 
     /// accept new stream to read a packet
     pub async fn read(mut self) -> Result<()> {
-        // macro to simplify code
-        macro_rules! send {
-            ($c: expr, $d:expr, $f: expr) => {
-                let req_id = $c.request_id;
-                let packet = $d($c);
-                self.send(req_id, packet, $f).await?;
-            };
-        }
+        // 1.5 times keepalive value
+        let keepalive = self.keepalive + self.keepalive / 2;
         while let Some(stream) = timeout(
-            Duration::from_millis(self.keepalive as u64),
+            Duration::from_millis(keepalive as u64),
             self.acceptor.accept_bidirectional_stream(),
         )
         .await
@@ -60,22 +55,15 @@ impl Reader {
             match framed.next().await.ok_or(Error::StreamClosed)?? {
                 Packet::Connect(c) => {
                     // Do not allow duplicate connections
-                    framed.send(c.ack(ReturnCode::AlreadyConnected)).await?
+                    let code = ReturnCode::AlreadyConnected;
+                    framed.send(Packet::ReturnCode(code)).await?
                 }
-                Packet::Subscribe(s) => {
-                    send!(s, Packet::Subscribe, framed);
-                }
-                Packet::Unsubscribe(u) => {
-                    send!(u, Packet::Unsubscribe, framed);
-                }
-                Packet::Publish(p) => {
-                    send!(p, Packet::Publish, framed);
-                }
-                Packet::ConsumeAck(c) => {
-                    send!(c, Packet::ConsumeAck, framed);
-                }
-                Packet::ControlFlow(c) => {
-                    send!(c, Packet::ControlFlow, framed);
+                p @ (Packet::Subscribe(_)
+                | Packet::Unsubscribe(_)
+                | Packet::Publish(_)
+                | Packet::ConsumeAck(_)
+                | Packet::ControlFlow(_)) => {
+                    self.send(p, framed).await?;
                 }
                 Packet::Ping => {
                     tokio::spawn(async move {
@@ -85,7 +73,7 @@ impl Reader {
                     });
                 }
                 Packet::Disconnect => {
-                    self.broker_tx.send(broker::Message {
+                    self.broker_tx.send(broker::ClientMessage {
                         client_id: self.client_id,
                         packet: Packet::Disconnect,
                         res_tx: None,
@@ -100,30 +88,31 @@ impl Reader {
 
     async fn send(
         &self,
-        req_id: u64,
         packet: Packet,
         mut framed: Framed<BidirectionalStream, PacketCodec>,
     ) -> Result<()> {
         let (res_tx, res_rx) = oneshot::channel();
         // send to broker
-        self.broker_tx.send(broker::Message {
+        self.broker_tx.send(broker::ClientMessage {
             client_id: self.client_id,
             packet,
             res_tx: Some(res_tx),
             client_tx: None,
         })?;
         // wait for response in coroutine
+        let local = self.local_addr.clone();
         tokio::spawn(async move {
+            // wait for reply from broker
             match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
                 Ok(Ok(code)) => {
-                    if let Err(e) = framed.send(Packet::ack(req_id, code)).await {
-                        error!("send reply to request {} error: {}", req_id, e)
+                    if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
+                        error!("send reply to client {local} error: {e}",)
                     }
                 }
                 Ok(Err(e)) => {
-                    error!("request {} reply error: {}", req_id, e)
+                    error!("recv client {local} reply error: {e}")
                 }
-                Err(_) => error!("request {} wait for reply timeout", req_id),
+                Err(_) => error!("process client {local} timeout"),
             }
         });
         Ok(())
