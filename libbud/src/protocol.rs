@@ -12,8 +12,13 @@ use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 
 pub use self::{
-    ack::ReturnCode, connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow,
-    publish::Publish, subscribe::Subscribe, unsubscribe::Unsubscribe,
+    ack::{ReturnCode, ReturnCodeResult},
+    connect::Connect,
+    consume_ack::ConsumeAck,
+    control_flow::ControlFlow,
+    publish::Publish,
+    subscribe::Subscribe,
+    unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;

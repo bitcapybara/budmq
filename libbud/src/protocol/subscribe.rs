@@ -1,11 +1,6 @@
-use super::{Codec, Packet, Result, ReturnCode};
+use crate::subscription::SubType;
 
-pub enum SubType {
-    /// Each subscription is only allowed to contain one client
-    Exclusive,
-    /// Each subscription allows multiple clients
-    Shared,
-}
+use super::{Codec, Result};
 
 pub struct Subscribe {
     /// subscribe topic
