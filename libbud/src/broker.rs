@@ -49,13 +49,25 @@ pub struct BrokerMessage {
     pub res_tx: Option<oneshot::Sender<ReturnCode>>,
 }
 
+struct SubInfo {
+    sub_id: String,
+    topic: String
+}
+
+/// One session per clientg
+struct Session {
+    client_id: u64,
+    /// key = consumer_id, value = sub_id
+    consumers: HashMap<u64, SubInfo>,
+}
+
 pub struct Broker {
-    /// store client_ids to avoid repeated logins
-    clients: HashSet<u64>,
+    /// key = client_id
+    clients: HashMap<u64, Session>,
     /// key = topic
     topics: HashMap<String, Topic>,
-    /// key = sub_id, value = topic
-    subscriptions: HashMap<String, String>,
+    // /// key = sub_id, value = topic
+    // subscriptions: HashMap<String, String>,
     /// channel to receive client messages
     broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
 }
@@ -63,10 +75,10 @@ pub struct Broker {
 impl Broker {
     pub fn new(broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Self {
         Self {
-            clients: HashSet::new(),
+            clients: HashMap::new(),
             broker_rx,
             topics: HashMap::new(),
-            subscriptions: HashMap::new(),
+            // subscriptions: HashMap::new(),
         }
     }
 
@@ -88,6 +100,14 @@ impl Broker {
     /// DO NOT BLOCK!!!
     fn process_packet(&mut self, client_id: u64, packet: Packet) -> ReturnCodeResult {
         match packet {
+            Packet::Connect(c) => {
+                if self.clients.contains_key(&client_id) {
+                    return Err(ReturnCode::AlreadyConnected);
+                }
+                self.clients.insert(client_id, Session {
+                    
+                });
+            }
             Packet::Subscribe(sub) => {
                 // add subscription into topic
                 match self.topics.get(&sub.topic) {
@@ -108,12 +128,15 @@ impl Broker {
                         self.topics.insert(sub.topic.clone(), topic);
                     }
                 }
-                self.subscriptions.insert(sub.sub_id, sub.topic);
+                self.clients.get()
             }
-            Packet::Unsubscribe(Unsubscribe { sub_id }) => {
-                if let Some(topic) = self.subscriptions.remove(&sub_id) {
-                    if let Some(tp) = self.topics.get(&topic) {
+            Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
+                if let Some(session) = self.clients.get(&client_id) {
+                    let Some(info) = session.consumers.get(consumer_id) {
+                        
+                    if let Some(tp) = self.topics.get(&info.topic) {
                         tp.del_subscription(&sub_id);
+                    }
                     }
                 }
             }

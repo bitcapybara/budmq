@@ -1,8 +1,8 @@
 use super::{Codec, Packet, Result, ReturnCode};
 
 pub struct Unsubscribe {
-    /// subscription id
-    pub sub_id: String,
+    /// consumer id
+    pub consumer_id: String,
 }
 
 impl Codec for Unsubscribe {

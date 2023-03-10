@@ -3,6 +3,8 @@ use crate::subscription::SubType;
 use super::{Codec, Result};
 
 pub struct Subscribe {
+    /// consumer_id
+    pub consumer_id: u64,
     /// subscribe topic
     pub topic: String,
     /// subscription id

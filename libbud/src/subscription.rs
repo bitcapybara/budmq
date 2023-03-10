@@ -30,7 +30,7 @@ pub enum SubType {
 }
 
 /// clients sub to this subscription
-/// Internal data is client_id
+/// Internal data is consumer_id
 #[derive(Debug, Clone)]
 pub enum SubClients {
     Exclusive(u64),
@@ -45,13 +45,13 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    pub fn from_subscribe(client_id: u64, sub: &Subscribe) -> Self {
+    pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Self {
         Self {
             topic: sub.topic.clone(),
             sub_id: sub.sub_id.clone(),
             clients: match sub.sub_type {
-                SubType::Exclusive => SubClients::Exclusive(client_id),
-                SubType::Shared => SubClients::Shard(vec![client_id]),
+                SubType::Exclusive => SubClients::Exclusive(consumer_id),
+                SubType::Shared => SubClients::Shard(vec![consumer_id]),
             },
         }
     }
