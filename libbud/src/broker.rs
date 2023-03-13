@@ -71,6 +71,10 @@ impl Session {
             },
         );
     }
+
+    fn del_consumer(&mut self, consumer_id: u64) {
+        self.consumers.remove(&consumer_id);
+    }
 }
 
 pub struct Broker {
@@ -154,11 +158,12 @@ impl Broker {
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
-                if let Some(session) = self.clients.get(&client_id) {
+                if let Some(session) = self.clients.get_mut(&client_id) {
                     if let Some(info) = session.consumers.get(&consumer_id) {
                         if let Some(tp) = self.topics.get_mut(&info.topic_name) {
                             tp.del_subscription(&info.sub_name);
                         }
+                        session.del_consumer(consumer_id);
                     }
                 }
             }
