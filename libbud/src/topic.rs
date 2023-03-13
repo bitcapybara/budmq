@@ -23,7 +23,7 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn from_publish(publish: &Publish) -> Self {
+    pub fn from_publish(publish: Publish) -> Self {
         Self {
             seq_id: publish.sequence_id,
             payload: publish.payload,

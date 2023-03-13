@@ -66,6 +66,7 @@ impl Reader {
                     self.send(p, framed).await?;
                 }
                 Packet::Ping => {
+                    // return pong packet directly
                     tokio::spawn(async move {
                         if let Err(e) = framed.send(Packet::Pong).await {
                             error!("send pong packet error: {e}")

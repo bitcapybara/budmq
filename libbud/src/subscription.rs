@@ -48,7 +48,7 @@ impl Subscription {
     pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Self {
         Self {
             topic: sub.topic.clone(),
-            sub_id: sub.sub_id.clone(),
+            sub_id: sub.sub_name.clone(),
             clients: match sub.sub_type {
                 SubType::Exclusive => SubClients::Exclusive(consumer_id),
                 SubType::Shared => SubClients::Shard(vec![consumer_id]),

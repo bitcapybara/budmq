@@ -10,6 +10,8 @@ pub enum ReturnCode {
     AlreadyConnected = 1,
     SubOnExlusive = 2,
     UnexpectedSubType = 3,
+    ConsumerDuplicated = 4,
+    NotConnected = 5,
 }
 
 impl Display for ReturnCode {

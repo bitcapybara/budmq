@@ -1,16 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Subscribe, Unsubscribe},
-    subscription::{
-        self, check_pub_subject, check_sub_subject, RawSubscription, SubClients, SubType,
-        Subscription,
-    },
+    protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Unsubscribe},
+    subscription::{self, Subscription},
     topic::Topic,
 };
 
@@ -19,6 +13,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     ReplyChanClosed,
+    ConsumerDuplicateSubscribed,
 }
 
 impl std::error::Error for Error {}
@@ -30,7 +25,7 @@ impl Display for Error {
 }
 
 impl From<subscription::Error> for Error {
-    fn from(value: subscription::Error) -> Self {
+    fn from(e: subscription::Error) -> Self {
         todo!()
     }
 }
@@ -50,15 +45,32 @@ pub struct BrokerMessage {
 }
 
 struct SubInfo {
-    sub_id: String,
-    topic: String
+    sub_name: String,
+    topic_name: String,
 }
 
-/// One session per clientg
+/// One session per client
+/// Save a client's connection information
 struct Session {
     client_id: u64,
     /// key = consumer_id, value = sub_id
     consumers: HashMap<u64, SubInfo>,
+}
+
+impl Session {
+    fn has_consumer(&self, consumer_id: u64) -> bool {
+        self.consumers.contains_key(&consumer_id)
+    }
+
+    fn add_consumer(&mut self, consumer_id: u64, sub_name: &str, topic_name: &str) {
+        self.consumers.insert(
+            consumer_id,
+            SubInfo {
+                sub_name: sub_name.to_string(),
+                topic_name: topic_name.to_string(),
+            },
+        );
+    }
 }
 
 pub struct Broker {
@@ -100,18 +112,28 @@ impl Broker {
     /// DO NOT BLOCK!!!
     fn process_packet(&mut self, client_id: u64, packet: Packet) -> ReturnCodeResult {
         match packet {
-            Packet::Connect(c) => {
+            Packet::Connect(_) => {
                 if self.clients.contains_key(&client_id) {
                     return Err(ReturnCode::AlreadyConnected);
                 }
-                self.clients.insert(client_id, Session {
-                    
-                });
+                self.clients.insert(
+                    client_id,
+                    Session {
+                        client_id,
+                        consumers: HashMap::new(),
+                    },
+                );
             }
             Packet::Subscribe(sub) => {
+                let Some( session) = self.clients.get_mut(&client_id) else {
+                    return Err(ReturnCode::NotConnected);
+                };
+                if session.consumers.contains_key(&sub.consumer_id) {
+                    return Err(ReturnCode::ConsumerDuplicated);
+                }
                 // add subscription into topic
-                match self.topics.get(&sub.topic) {
-                    Some(topic) => match topic.get_mut_subscription(&sub.sub_id) {
+                match self.topics.get_mut(&sub.topic) {
+                    Some(topic) => match topic.get_mut_subscription(&sub.sub_name) {
                         Some(sp) => {
                             sp.add_client(client_id, sub.sub_type)?;
                         }
@@ -128,15 +150,15 @@ impl Broker {
                         self.topics.insert(sub.topic.clone(), topic);
                     }
                 }
-                self.clients.get()
+                // add consumer to session
+                session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
                 if let Some(session) = self.clients.get(&client_id) {
-                    let Some(info) = session.consumers.get(consumer_id) {
-                        
-                    if let Some(tp) = self.topics.get(&info.topic) {
-                        tp.del_subscription(&sub_id);
-                    }
+                    if let Some(info) = session.consumers.get(&consumer_id) {
+                        if let Some(tp) = self.topics.get_mut(&info.topic_name) {
+                            tp.del_subscription(&info.sub_name);
+                        }
                     }
                 }
             }

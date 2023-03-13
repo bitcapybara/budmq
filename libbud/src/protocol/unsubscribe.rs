@@ -2,7 +2,7 @@ use super::{Codec, Packet, Result, ReturnCode};
 
 pub struct Unsubscribe {
     /// consumer id
-    pub consumer_id: String,
+    pub consumer_id: u64,
 }
 
 impl Codec for Unsubscribe {

@@ -2,13 +2,14 @@ use crate::subscription::SubType;
 
 use super::{Codec, Result};
 
+/// Each consumer corresponds to a subscription
 pub struct Subscribe {
-    /// consumer_id
+    /// consumer_id, unique within one connection
     pub consumer_id: u64,
     /// subscribe topic
     pub topic: String,
     /// subscription id
-    pub sub_id: String,
+    pub sub_name: String,
     /// subscribe type
     pub sub_type: SubType,
 }
