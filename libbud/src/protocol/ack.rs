@@ -12,6 +12,7 @@ pub enum ReturnCode {
     UnexpectedSubType = 3,
     ConsumerDuplicated = 4,
     NotConnected = 5,
+    TopicNotExists = 6,
 }
 
 impl Display for ReturnCode {

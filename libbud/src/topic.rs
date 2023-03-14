@@ -35,12 +35,14 @@ impl Message {
 /// Save subscription associated with this topic in memory
 pub struct Topic {
     topic: String,
+    seq_id: u64,
 }
 
 impl Topic {
     pub fn new(topic: &str) -> Self {
         Self {
             topic: topic.to_string(),
+            seq_id: 0,
         }
     }
 
@@ -57,6 +59,12 @@ impl Topic {
     }
 
     pub fn get_mut_subscription(&self, sub_id: &str) -> Option<&mut Subscription> {
+        todo!()
+    }
+
+    /// save message in topic
+    pub fn add_message(&mut self, msg: Message) {
+        // notify subscriptions
         todo!()
     }
 }

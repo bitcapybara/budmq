@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::{
     protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Unsubscribe},
     subscription::{self, Subscription},
-    topic::Topic,
+    topic::{self, Message, Topic},
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -14,6 +14,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     ReplyChanClosed,
     ConsumerDuplicateSubscribed,
+    ReturnCode(ReturnCode),
 }
 
 impl std::error::Error for Error {}
@@ -26,6 +27,12 @@ impl Display for Error {
 
 impl From<subscription::Error> for Error {
     fn from(e: subscription::Error) -> Self {
+        todo!()
+    }
+}
+
+impl From<topic::Error> for Error {
+    fn from(value: topic::Error) -> Self {
         todo!()
     }
 }
@@ -105,11 +112,11 @@ impl Broker {
             match msg.packet {
                 Packet::Connect(_) => {
                     let Some(res_tx) = msg.res_tx else {
-                    unreachable!()
-                };
+                        unreachable!()
+                    };
                     let Some(client_tx) = msg.client_tx else {
-                    unreachable!()
-                };
+                        unreachable!()
+                    };
                     if self.clients.contains_key(&client_id) {
                         res_tx
                             .send(ReturnCode::AlreadyConnected)
@@ -124,10 +131,11 @@ impl Broker {
                     );
                 }
                 _ => {
-                    let code = self
-                        .process_packet(client_id, msg.packet)
-                        .err()
-                        .unwrap_or(ReturnCode::Success);
+                    let code = match self.process_packet(client_id, msg.packet) {
+                        Ok(_) => ReturnCode::Success,
+                        Err(Error::ReturnCode(code)) => code,
+                        Err(e) => Err(e)?,
+                    };
                     if let Some(res_tx) = msg.res_tx {
                         res_tx.send(code).map_err(|_| Error::ReplyChanClosed)?;
                     }
@@ -139,14 +147,14 @@ impl Broker {
 
     /// process packets from client
     /// DO NOT BLOCK!!!
-    fn process_packet(&mut self, client_id: u64, packet: Packet) -> ReturnCodeResult {
+    fn process_packet(&mut self, client_id: u64, packet: Packet) -> Result<()> {
         match packet {
             Packet::Subscribe(sub) => {
                 let Some( session) = self.clients.get_mut(&client_id) else {
-                    return Err(ReturnCode::NotConnected);
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
                 };
                 if session.consumers.contains_key(&sub.consumer_id) {
-                    return Err(ReturnCode::ConsumerDuplicated);
+                    return Err(Error::ReturnCode(ReturnCode::ConsumerDuplicated));
                 }
                 // add subscription into topic
                 match self.topics.get_mut(&sub.topic) {
@@ -155,14 +163,14 @@ impl Broker {
                             sp.add_consumer(sub.consumer_id, sub.sub_type)?;
                         }
                         None => {
-                            let mut sp = Subscription::from_subscribe(client_id, &sub);
+                            let mut sp = Subscription::from_subscribe(client_id, &sub)?;
                             sp.add_consumer(sub.consumer_id, sub.sub_type)?;
                             topic.add_subscription(sp);
                         }
                     },
                     None => {
                         let mut topic = Topic::new(&sub.topic);
-                        let sp = Subscription::from_subscribe(client_id, &sub);
+                        let sp = Subscription::from_subscribe(client_id, &sub)?;
                         topic.add_subscription(sp);
                         self.topics.insert(sub.topic.clone(), topic);
                     }
@@ -180,12 +188,14 @@ impl Broker {
                     }
                 }
             }
-            Packet::Publish(Publish {
-                topic,
-                sequence_id,
-                payload,
-            }) => {
+            Packet::Publish(p) => {
                 // add to topic
+                let topic = p.topic.clone();
+                let message = Message::from_publish(p);
+                match self.topics.get_mut(&topic) {
+                    Some(topic) => topic.add_message(message),
+                    None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
+                }
             }
             _ => unreachable!(),
         }

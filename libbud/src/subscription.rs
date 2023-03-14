@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use tokio::sync::mpsc;
+
 use crate::protocol::{ReturnCode, Subscribe};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -21,7 +23,16 @@ impl From<Error> for ReturnCode {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+/// Save consumption progress information
+#[derive(Debug, Clone)]
+struct Cursor {}
+
+impl Cursor {
+    fn new() -> Self {
+        Self {}
+    }
+}
+
 pub enum SubType {
     /// Each subscription is only allowed to contain one client
     Exclusive,
@@ -29,33 +40,67 @@ pub enum SubType {
     Shared,
 }
 
+/// task:
+/// 1. receive consumer add/remove cmd
+/// 2. dispatch messages to consumers
+struct Dispatcher {
+    /// consumer_rx
+    /// notify_rx
+    /// send_task_tx: Sender<(message_id, consumer_id)>, recv_task_rx in broker
+    consumers: Option<Consumers>,
+    cursor: Cursor,
+}
+
+impl Dispatcher {
+    fn new(consumers: Option<Consumers>) -> Self {
+        Self {
+            consumers: None,
+            cursor: Cursor::new(),
+        }
+    }
+
+    async fn run(self) -> Result<()> {
+        Ok(())
+    }
+}
+
+struct Consumer {
+    id: u64,
+    permits: u64,
+}
+
+impl Consumer {
+    fn new(id: u64) -> Self {
+        Self { id, permits: 0 }
+    }
+}
+
 /// clients sub to this subscription
 /// Internal data is consumer_id
-#[derive(Debug, Clone)]
-pub enum Consumers {
-    Exclusive(u64),
-    Shard(Vec<u64>),
+enum Consumers {
+    Exclusive(Consumer),
+    Shard(Vec<Consumer>),
 }
 
 /// save cursor in persistent
 /// save consumers in memory
-#[derive(Debug, Clone)]
 pub struct Subscription {
     pub topic: String,
     pub sub_id: String,
-    pub consumers: Consumers,
+    dispatcher: Dispatcher,
 }
 
 impl Subscription {
-    pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Self {
-        Self {
+    pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Result<Self> {
+        let consumers = match sub.sub_type {
+            SubType::Exclusive => Consumers::Exclusive(Consumer::new(consumer_id)),
+            SubType::Shared => Consumers::Shard(vec![Consumer::new(consumer_id)]),
+        };
+        Ok(Self {
             topic: sub.topic.clone(),
             sub_id: sub.sub_name.clone(),
-            consumers: match sub.sub_type {
-                SubType::Exclusive => Consumers::Exclusive(consumer_id),
-                SubType::Shared => Consumers::Shard(vec![consumer_id]),
-            },
-        }
+            dispatcher: Dispatcher::new(Some(consumers)),
+        })
     }
 
     pub fn add_consumer(&mut self, consumer_id: u64, sub_type: SubType) -> Result<()> {
