@@ -31,7 +31,8 @@ impl Message {
     }
 }
 
-/// Save all messages associated with this topic
+/// Save all messages associated with this topic in subscription
+/// Save subscription associated with this topic in memory
 pub struct Topic {
     topic: String,
 }

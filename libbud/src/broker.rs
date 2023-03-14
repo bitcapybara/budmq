@@ -52,7 +52,7 @@ struct SubInfo {
 /// One session per client
 /// Save a client's connection information
 struct Session {
-    client_id: u64,
+    client_tx: mpsc::UnboundedSender<BrokerMessage>,
     /// key = consumer_id, value = sub_id
     consumers: HashMap<u64, SubInfo>,
 }
@@ -101,12 +101,37 @@ impl Broker {
     pub async fn run(mut self) -> Result<()> {
         while let Some(msg) = self.broker_rx.recv().await {
             let client_id = msg.client_id;
-            if let Some(res_tx) = msg.res_tx {
-                let code = self
-                    .process_packet(client_id, msg.packet)
-                    .err()
-                    .unwrap_or(ReturnCode::Success);
-                res_tx.send(code).map_err(|_| Error::ReplyChanClosed)?;
+            // handshake process
+            match msg.packet {
+                Packet::Connect(_) => {
+                    let Some(res_tx) = msg.res_tx else {
+                    unreachable!()
+                };
+                    let Some(client_tx) = msg.client_tx else {
+                    unreachable!()
+                };
+                    if self.clients.contains_key(&client_id) {
+                        res_tx
+                            .send(ReturnCode::AlreadyConnected)
+                            .map_err(|_| Error::ReplyChanClosed)?;
+                    }
+                    self.clients.insert(
+                        client_id,
+                        Session {
+                            client_tx,
+                            consumers: HashMap::new(),
+                        },
+                    );
+                }
+                _ => {
+                    let code = self
+                        .process_packet(client_id, msg.packet)
+                        .err()
+                        .unwrap_or(ReturnCode::Success);
+                    if let Some(res_tx) = msg.res_tx {
+                        res_tx.send(code).map_err(|_| Error::ReplyChanClosed)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -116,18 +141,6 @@ impl Broker {
     /// DO NOT BLOCK!!!
     fn process_packet(&mut self, client_id: u64, packet: Packet) -> ReturnCodeResult {
         match packet {
-            Packet::Connect(_) => {
-                if self.clients.contains_key(&client_id) {
-                    return Err(ReturnCode::AlreadyConnected);
-                }
-                self.clients.insert(
-                    client_id,
-                    Session {
-                        client_id,
-                        consumers: HashMap::new(),
-                    },
-                );
-            }
             Packet::Subscribe(sub) => {
                 let Some( session) = self.clients.get_mut(&client_id) else {
                     return Err(ReturnCode::NotConnected);
@@ -139,11 +152,11 @@ impl Broker {
                 match self.topics.get_mut(&sub.topic) {
                     Some(topic) => match topic.get_mut_subscription(&sub.sub_name) {
                         Some(sp) => {
-                            sp.add_client(client_id, sub.sub_type)?;
+                            sp.add_consumer(sub.consumer_id, sub.sub_type)?;
                         }
                         None => {
                             let mut sp = Subscription::from_subscribe(client_id, &sub);
-                            sp.add_client(client_id, sub.sub_type)?;
+                            sp.add_consumer(sub.consumer_id, sub.sub_type)?;
                             topic.add_subscription(sp);
                         }
                     },
@@ -171,7 +184,9 @@ impl Broker {
                 topic,
                 sequence_id,
                 payload,
-            }) => {}
+            }) => {
+                // add to topic
+            }
             _ => unreachable!(),
         }
         Ok(())

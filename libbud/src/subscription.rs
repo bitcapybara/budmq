@@ -32,16 +32,18 @@ pub enum SubType {
 /// clients sub to this subscription
 /// Internal data is consumer_id
 #[derive(Debug, Clone)]
-pub enum SubClients {
+pub enum Consumers {
     Exclusive(u64),
     Shard(Vec<u64>),
 }
 
+/// save cursor in persistent
+/// save consumers in memory
 #[derive(Debug, Clone)]
 pub struct Subscription {
     pub topic: String,
     pub sub_id: String,
-    pub clients: SubClients,
+    pub consumers: Consumers,
 }
 
 impl Subscription {
@@ -49,14 +51,14 @@ impl Subscription {
         Self {
             topic: sub.topic.clone(),
             sub_id: sub.sub_name.clone(),
-            clients: match sub.sub_type {
-                SubType::Exclusive => SubClients::Exclusive(consumer_id),
-                SubType::Shared => SubClients::Shard(vec![consumer_id]),
+            consumers: match sub.sub_type {
+                SubType::Exclusive => Consumers::Exclusive(consumer_id),
+                SubType::Shared => Consumers::Shard(vec![consumer_id]),
             },
         }
     }
 
-    pub fn add_client(&mut self, client_id: u64, sub_type: SubType) -> Result<()> {
+    pub fn add_consumer(&mut self, consumer_id: u64, sub_type: SubType) -> Result<()> {
         todo!()
     }
 }
