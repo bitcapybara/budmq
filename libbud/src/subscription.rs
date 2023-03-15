@@ -1,7 +1,5 @@
 use std::fmt::Display;
 
-use tokio::sync::mpsc;
-
 use crate::protocol::{ReturnCode, Subscribe};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -45,16 +43,23 @@ pub enum SubType {
 /// 2. dispatch messages to consumers
 struct Dispatcher {
     /// consumer_rx
-    /// notify_rx
+    /// notify_rx(topic latest added message id)
     /// send_task_tx: Sender<(message_id, consumer_id)>, recv_task_rx in broker
     consumers: Option<Consumers>,
     cursor: Cursor,
 }
 
 impl Dispatcher {
-    fn new(consumers: Option<Consumers>) -> Self {
+    fn new() -> Self {
         Self {
             consumers: None,
+            cursor: Cursor::new(),
+        }
+    }
+
+    fn with_consumers(consumers: Consumers) -> Self {
+        Self {
+            consumers: Some(consumers),
             cursor: Cursor::new(),
         }
     }
@@ -99,11 +104,15 @@ impl Subscription {
         Ok(Self {
             topic: sub.topic.clone(),
             sub_id: sub.sub_name.clone(),
-            dispatcher: Dispatcher::new(Some(consumers)),
+            dispatcher: Dispatcher::with_consumers(consumers),
         })
     }
 
     pub fn add_consumer(&mut self, consumer_id: u64, sub_type: SubType) -> Result<()> {
+        todo!()
+    }
+
+    pub fn additional_permits(&mut self, consumer_id: u64, permits: u32) {
         todo!()
     }
 }

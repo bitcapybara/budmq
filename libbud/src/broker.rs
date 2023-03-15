@@ -150,7 +150,7 @@ impl Broker {
     fn process_packet(&mut self, client_id: u64, packet: Packet) -> Result<()> {
         match packet {
             Packet::Subscribe(sub) => {
-                let Some( session) = self.clients.get_mut(&client_id) else {
+                let Some(session) = self.clients.get_mut(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected));
                 };
                 if session.consumers.contains_key(&sub.consumer_id) {
@@ -196,6 +196,22 @@ impl Broker {
                     Some(topic) => topic.add_message(message),
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
+            }
+            Packet::ControlFlow(c) => {
+                // add permits to subscription
+                let Some(session) = self.clients.get(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
+                };
+                let Some(info) = session.consumers.get(&c.consumer_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound));
+                };
+                let Some(topic) = self.topics.get(&info.topic_name) else {
+                    unreachable!()
+                };
+                let Some(sp) = topic.get_mut_subscription(&info.sub_name) else {
+                    unreachable!()
+                };
+                sp.additional_permits(c.consumer_id, c.permits);
             }
             _ => unreachable!(),
         }

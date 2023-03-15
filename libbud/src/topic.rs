@@ -64,7 +64,7 @@ impl Topic {
 
     /// save message in topic
     pub fn add_message(&mut self, msg: Message) {
-        // notify subscriptions
+        // notify_tx send latest message id to subscriptions
         todo!()
     }
 }

@@ -13,6 +13,7 @@ pub enum ReturnCode {
     ConsumerDuplicated = 4,
     NotConnected = 5,
     TopicNotExists = 6,
+    ConsumerNotFound = 7,
 }
 
 impl Display for ReturnCode {
