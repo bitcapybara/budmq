@@ -50,7 +50,7 @@ impl Topic {
         todo!()
     }
 
-    pub fn del_subscription(&mut self, sub_id: &str) {
+    pub fn del_subscription(&mut self, sub_id: &str) -> Option<Subscription> {
         todo!()
     }
 

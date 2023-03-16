@@ -112,6 +112,10 @@ impl Subscription {
         todo!()
     }
 
+    pub fn del_consumer(&mut self, consumer_id: u64) {
+        todo!()
+    }
+
     pub fn additional_permits(&mut self, consumer_id: u64, permits: u32) {
         todo!()
     }

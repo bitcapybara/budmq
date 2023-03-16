@@ -60,7 +60,7 @@ struct SubInfo {
 /// Save a client's connection information
 struct Session {
     client_tx: mpsc::UnboundedSender<BrokerMessage>,
-    /// key = consumer_id, value = sub_id
+    /// key = consumer_id, value = sub_info
     consumers: HashMap<u64, SubInfo>,
 }
 
@@ -81,6 +81,10 @@ impl Session {
 
     fn del_consumer(&mut self, consumer_id: u64) {
         self.consumers.remove(&consumer_id);
+    }
+
+    fn consumers(self) -> HashMap<u64, SubInfo> {
+        self.consumers
     }
 }
 
@@ -129,6 +133,21 @@ impl Broker {
                             consumers: HashMap::new(),
                         },
                     );
+                }
+                Packet::Disconnect => {
+                    let Some(session) = self.clients.remove(&client_id) else {
+                      continue;  
+                    };
+                    let consumers = session.consumers();
+                    for (consumer_id, sub_info) in consumers {
+                        let Some(mut topic) = self.topics.remove(&sub_info.topic_name) else {
+                            continue;
+                        };
+                        let Some(mut sp) = topic.del_subscription(&sub_info.sub_name) else {
+                            continue;
+                        };
+                        sp.del_consumer(consumer_id);
+                    }
                 }
                 _ => {
                     let code = match self.process_packet(client_id, msg.packet) {
@@ -179,14 +198,16 @@ impl Broker {
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
-                if let Some(session) = self.clients.get_mut(&client_id) {
-                    if let Some(info) = session.consumers.get(&consumer_id) {
-                        if let Some(tp) = self.topics.get_mut(&info.topic_name) {
-                            tp.del_subscription(&info.sub_name);
-                        }
-                        session.del_consumer(consumer_id);
-                    }
+                let Some(session) = self.clients.get_mut(&client_id) else {
+                    return Ok(());
+                };
+                let Some(info) = session.consumers.get(&consumer_id) else {
+                    return Ok(());
+                };
+                if let Some(tp) = self.topics.get_mut(&info.topic_name) {
+                    tp.del_subscription(&info.sub_name);
                 }
+                session.del_consumer(consumer_id);
             }
             Packet::Publish(p) => {
                 // add to topic
