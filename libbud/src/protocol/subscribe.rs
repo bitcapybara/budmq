@@ -1,4 +1,4 @@
-use crate::subscription::SubType;
+use crate::subscription::{InitialPostion, SubType};
 
 use super::{Codec, Result};
 
@@ -12,6 +12,8 @@ pub struct Subscribe {
     pub sub_name: String,
     /// subscribe type
     pub sub_type: SubType,
+    /// consume init position
+    pub initial_position: InitialPostion,
 }
 
 impl Codec for Subscribe {

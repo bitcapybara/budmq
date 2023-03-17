@@ -38,6 +38,11 @@ pub enum SubType {
     Shared,
 }
 
+pub enum InitialPostion {
+    Latest,
+    Earliest,
+}
+
 /// task:
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
@@ -91,7 +96,7 @@ enum Consumers {
 /// save consumers in memory
 pub struct Subscription {
     pub topic: String,
-    pub sub_id: String,
+    pub name: String,
     dispatcher: Dispatcher,
 }
 
@@ -103,7 +108,7 @@ impl Subscription {
         };
         Ok(Self {
             topic: sub.topic.clone(),
-            sub_id: sub.sub_name.clone(),
+            name: sub.sub_name.clone(),
             dispatcher: Dispatcher::with_consumers(consumers),
         })
     }
@@ -117,6 +122,10 @@ impl Subscription {
     }
 
     pub fn additional_permits(&mut self, consumer_id: u64, permits: u32) {
+        todo!()
+    }
+
+    pub fn message_notify(&mut self, message_id: u64) -> Result<()> {
         todo!()
     }
 }
