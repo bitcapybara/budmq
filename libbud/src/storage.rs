@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use crate::topic::Message;
 
@@ -16,10 +19,13 @@ impl Display for Error {
 }
 
 /// Singleton mode, clone reference everywhere
-#[derive(Clone)]
-pub struct KVStorage {}
+pub struct BaseStorage {}
 
-impl KVStorage {}
+impl BaseStorage {
+    pub fn new(path: &Path) -> Result<Self> {
+        Ok(Self {})
+    }
+}
 
 pub struct TopicStorage {}
 

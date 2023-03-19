@@ -11,7 +11,9 @@ use crate::{
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    ProducerMessageDuplicated,
+}
 
 impl std::error::Error for Error {}
 
@@ -34,7 +36,9 @@ impl From<subscription::Error> for Error {
 }
 
 pub struct Message {
+    /// producer sequence id
     pub seq_id: u64,
+    /// message payload
     pub payload: Bytes,
 }
 
@@ -50,9 +54,12 @@ impl Message {
 /// Save all messages associated with this topic in subscription
 /// Save subscription associated with this topic in memory
 pub struct Topic {
-    name: String,
+    /// topic name
+    pub name: String,
+    /// producer message sequence id
     seq_id: u64,
     /// all subscriptions in memory
+    /// key = sub_name
     subscriptions: HashMap<String, Subscription>,
     /// message storage
     storage: TopicStorage,
@@ -86,7 +93,11 @@ impl Topic {
 
     /// save message in topic
     pub fn add_message(&mut self, message: Message) -> Result<()> {
+        if message.seq_id <= self.seq_id {
+            return Err(Error::ProducerMessageDuplicated);
+        }
         let message_id = self.storage.add_message(message)?;
+        self.seq_id = message.seq_id;
         for (_, sub) in self.subscriptions {
             sub.message_notify(message_id)?;
         }

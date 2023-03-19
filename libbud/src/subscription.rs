@@ -1,11 +1,14 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::protocol::{ReturnCode, Subscribe};
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    SubscribeOnExclusive,
+    SubTypeMissMatch,
+}
 
 impl std::error::Error for Error {}
 
@@ -21,7 +24,9 @@ impl From<Error> for ReturnCode {
     }
 }
 
-/// Save consumption progress information
+/// Save consumption progress
+/// persistent
+/// memory
 #[derive(Debug, Clone)]
 struct Cursor {}
 
@@ -50,7 +55,9 @@ struct Dispatcher {
     /// consumer_rx
     /// notify_rx(topic latest added message id)
     /// send_task_tx: Sender<(message_id, consumer_id)>, recv_task_rx in broker
+    /// save all consumers in memory
     consumers: Option<Consumers>,
+    /// save all subscription consume progress
     cursor: Cursor,
 }
 
@@ -69,7 +76,37 @@ impl Dispatcher {
         }
     }
 
-    async fn run(self) -> Result<()> {
+    fn add_consumer(&mut self, sub_type: SubType, consumer: Consumer) -> Result<()> {
+        match self.consumers {
+            Some(consumers) => match consumers {
+                Consumers::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
+                Consumers::Shared(shared) => match sub_type {
+                    SubType::Exclusive => return Err(Error::SubTypeMissMatch),
+                    SubType::Shared => {
+                        shared.insert(consumer.id, consumer);
+                    }
+                },
+            },
+            None => self.consumers = Some(Consumers::new(sub_type, consumer)),
+        }
+        Ok(())
+    }
+
+    fn del_consumer(&mut self, consumer_id: u64) {
+        if let Some(consumers) = self.consumers {
+            match consumers {
+                Consumers::Exclusive(c) if c.id == consumer_id => {
+                    self.consumers.take();
+                }
+                Consumers::Shared(s) => {
+                    s.remove(&consumer_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn run(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -89,7 +126,20 @@ impl Consumer {
 /// Internal data is consumer_id
 enum Consumers {
     Exclusive(Consumer),
-    Shard(Vec<Consumer>),
+    Shared(HashMap<u64, Consumer>),
+}
+
+impl Consumers {
+    fn new(sub_type: SubType, consumer: Consumer) -> Self {
+        match sub_type {
+            SubType::Exclusive => Self::Exclusive(consumer),
+            SubType::Shared => {
+                let mut consumers = HashMap::new();
+                consumers.insert(consumer.id, consumer);
+                Self::Shared(consumers)
+            }
+        }
+    }
 }
 
 /// save cursor in persistent
@@ -102,10 +152,7 @@ pub struct Subscription {
 
 impl Subscription {
     pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Result<Self> {
-        let consumers = match sub.sub_type {
-            SubType::Exclusive => Consumers::Exclusive(Consumer::new(consumer_id)),
-            SubType::Shared => Consumers::Shard(vec![Consumer::new(consumer_id)]),
-        };
+        let consumers = Consumers::new(sub.sub_type, Consumer::new(consumer_id));
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
@@ -114,11 +161,13 @@ impl Subscription {
     }
 
     pub fn add_consumer(&mut self, consumer_id: u64, sub_type: SubType) -> Result<()> {
-        todo!()
+        self.dispatcher
+            .add_consumer(sub_type, Consumer::new(consumer_id))?;
+        Ok(())
     }
 
     pub fn del_consumer(&mut self, consumer_id: u64) {
-        todo!()
+        self.dispatcher.del_consumer(consumer_id);
     }
 
     pub fn additional_permits(&mut self, consumer_id: u64, permits: u32) {
