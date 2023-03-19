@@ -3,6 +3,7 @@ mod connect;
 mod consume_ack;
 mod control_flow;
 mod publish;
+mod send;
 mod subscribe;
 mod unsubscribe;
 
@@ -17,6 +18,7 @@ pub use self::{
     consume_ack::ConsumeAck,
     control_flow::ControlFlow,
     publish::Publish,
+    send::Send,
     subscribe::Subscribe,
     unsubscribe::Unsubscribe,
 };
@@ -72,6 +74,7 @@ pub enum PacketType {
     Subscribe,
     Unsubscribe,
     Publish,
+    Send,
     ConsumeAck,
     ControlFlow,
     Ack,
@@ -84,6 +87,7 @@ pub enum Packet {
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
     Publish(Publish),
+    Send(Send),
     ConsumeAck(ConsumeAck),
     ControlFlow(ControlFlow),
     ReturnCode(ReturnCode),

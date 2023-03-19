@@ -1,10 +1,15 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use tokio::sync::{mpsc, oneshot};
+use futures::{future, FutureExt};
+use log::error;
+use tokio::{
+    sync::{mpsc, oneshot, RwLock},
+    time::timeout,
+};
 
 use crate::{
-    protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Unsubscribe},
-    subscription::{self, Subscription},
+    protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Send, Unsubscribe},
+    subscription::{self, PublishEvent, Subscription},
     topic::{self, Message, Topic},
 };
 
@@ -33,6 +38,12 @@ impl From<subscription::Error> for Error {
 
 impl From<topic::Error> for Error {
     fn from(value: topic::Error) -> Self {
+        todo!()
+    }
+}
+
+impl<T> From<mpsc::error::SendError<T>> for Error {
+    fn from(value: mpsc::error::SendError<T>) -> Self {
         todo!()
     }
 }
@@ -88,29 +99,75 @@ impl Session {
     }
 }
 
+#[derive(Clone)]
 pub struct Broker {
     /// key = client_id
-    clients: HashMap<u64, Session>,
+    clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
-    topics: HashMap<String, Topic>,
-    // /// key = sub_id, value = topic
-    // subscriptions: HashMap<String, String>,
-    /// channel to receive client messages
-    broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
+    topics: Arc<RwLock<HashMap<String, Topic>>>,
 }
 
 impl Broker {
-    pub fn new(broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Self {
+    pub fn new() -> Self {
         Self {
-            clients: HashMap::new(),
-            broker_rx,
-            topics: HashMap::new(),
-            // subscriptions: HashMap::new(),
+            clients: Arc::new(RwLock::new(HashMap::new())),
+            topics: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        while let Some(msg) = self.broker_rx.recv().await {
+    async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Result<()> {
+        // subscription task
+        let (publish_tx, publish_rx) = mpsc::unbounded_channel();
+        let (sub_task, sub_handle) = self
+            .clone()
+            .receive_subscription(publish_rx)
+            .remote_handle();
+        tokio::spawn(sub_task);
+
+        // client task
+        let (client_task, client_handle) = self
+            .clone()
+            .receive_client(publish_tx, broker_rx)
+            .remote_handle();
+        tokio::spawn(client_task);
+
+        future::try_join(sub_handle, client_handle).await?;
+        Ok(())
+    }
+
+    async fn receive_subscription(
+        self,
+        mut publish_rx: mpsc::UnboundedReceiver<PublishEvent>,
+    ) -> Result<()> {
+        while let Some(event) = publish_rx.recv().await {
+            let topics = self.topics.read().await;
+            let Some(topic) = topics.get(&event.topic_name) else {
+                unreachable!()
+            };
+            let Some(message) = topic.get_message(event.message_id).await? else {
+                unreachable!()
+            };
+            let clients = self.clients.read().await;
+            if let Some(session) = clients.get(&event.client_id) {
+                // TODO wait for reply?
+                session.client_tx.send(BrokerMessage {
+                    packet: Packet::Send(Send {
+                        consumer_id: event.consumer_id,
+                        payload: message.payload,
+                    }),
+                    res_tx: None,
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn receive_client(
+        self,
+        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
+    ) -> Result<()> {
+        while let Some(msg) = broker_rx.recv().await {
             let client_id = msg.client_id;
             // handshake process
             match msg.packet {
@@ -121,12 +178,13 @@ impl Broker {
                     let Some(client_tx) = msg.client_tx else {
                         unreachable!()
                     };
-                    if self.clients.contains_key(&client_id) {
+                    let mut clients = self.clients.write().await;
+                    if clients.contains_key(&client_id) {
                         res_tx
                             .send(ReturnCode::AlreadyConnected)
                             .map_err(|_| Error::ReplyChanClosed)?;
                     }
-                    self.clients.insert(
+                    clients.insert(
                         client_id,
                         Session {
                             client_tx,
@@ -135,22 +193,27 @@ impl Broker {
                     );
                 }
                 Packet::Disconnect => {
-                    let Some(session) = self.clients.remove(&client_id) else {
-                      continue;  
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.remove(&client_id) else {
+                        continue;
                     };
                     let consumers = session.consumers();
+                    let mut topics = self.topics.write().await;
                     for (consumer_id, sub_info) in consumers {
-                        let Some(mut topic) = self.topics.remove(&sub_info.topic_name) else {
+                        let Some(mut topic) = topics.remove(&sub_info.topic_name) else {
                             continue;
                         };
                         let Some(mut sp) = topic.del_subscription(&sub_info.sub_name) else {
                             continue;
                         };
-                        sp.del_consumer(consumer_id);
+                        sp.del_consumer(client_id, consumer_id).await?;
                     }
                 }
                 _ => {
-                    let code = match self.process_packet(client_id, msg.packet).await {
+                    let code = match self
+                        .process_packet(publish_tx.clone(), client_id, msg.packet)
+                        .await
+                    {
                         Ok(_) => ReturnCode::Success,
                         Err(Error::ReturnCode(code)) => code,
                         Err(e) => Err(e)?,
@@ -166,69 +229,91 @@ impl Broker {
 
     /// process packets from client
     /// DO NOT BLOCK!!!
-    async fn process_packet(&mut self, client_id: u64, packet: Packet) -> Result<()> {
+    async fn process_packet(
+        &self,
+        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        client_id: u64,
+        packet: Packet,
+    ) -> Result<()> {
         match packet {
             Packet::Subscribe(sub) => {
-                let Some(session) = self.clients.get_mut(&client_id) else {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.get_mut(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected));
                 };
                 if session.consumers.contains_key(&sub.consumer_id) {
                     return Err(Error::ReturnCode(ReturnCode::ConsumerDuplicated));
                 }
                 // add subscription into topic
-                match self.topics.get_mut(&sub.topic) {
+                let mut topics = self.topics.write().await;
+                match topics.get_mut(&sub.topic) {
                     Some(topic) => match topic.get_mut_subscription(&sub.sub_name) {
                         Some(sp) => {
-                            sp.add_consumer(&sub).await?;
+                            sp.add_consumer(client_id, &sub).await?;
                         }
                         None => {
-                            let mut sp = Subscription::from_subscribe(client_id, &sub)?;
-                            sp.add_consumer(&sub).await?;
+                            let mut sp = Subscription::from_subscribe(
+                                client_id,
+                                sub.consumer_id,
+                                &sub,
+                                publish_tx.clone(),
+                            )?;
+                            sp.add_consumer(client_id, &sub).await?;
                             topic.add_subscription(sp);
                         }
                     },
                     None => {
                         let mut topic = Topic::new(&sub.topic);
-                        let sp = Subscription::from_subscribe(client_id, &sub)?;
+                        let sp = Subscription::from_subscribe(
+                            client_id,
+                            sub.consumer_id,
+                            &sub,
+                            publish_tx.clone(),
+                        )?;
                         topic.add_subscription(sp);
-                        self.topics.insert(sub.topic.clone(), topic);
+                        topics.insert(sub.topic.clone(), topic);
                     }
                 }
                 // add consumer to session
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
-                let Some(session) = self.clients.get_mut(&client_id) else {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.get_mut(&client_id) else {
                     return Ok(());
                 };
                 let Some(info) = session.consumers.get(&consumer_id) else {
                     return Ok(());
                 };
-                if let Some(tp) = self.topics.get_mut(&info.topic_name) {
+                let mut topics = self.topics.write().await;
+                if let Some(tp) = topics.get_mut(&info.topic_name) {
                     tp.del_subscription(&info.sub_name);
                 }
                 session.del_consumer(consumer_id);
             }
             Packet::Publish(p) => {
                 // add to topic
+                let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
                 let message = Message::from_publish(p);
-                match self.topics.get_mut(&topic) {
+                match topics.get_mut(&topic) {
                     Some(topic) => {
                         topic.add_message(message);
-                    },
+                    }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
             }
             Packet::ControlFlow(c) => {
+                let clients = self.clients.read().await;
                 // add permits to subscription
-                let Some(session) = self.clients.get(&client_id) else {
+                let Some(session) = clients.get(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected));
                 };
                 let Some(info) = session.consumers.get(&c.consumer_id) else {
                     return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound));
                 };
-                let Some(topic) = self.topics.get(&info.topic_name) else {
+                let mut topics = self.topics.write().await;
+                let Some(topic) = topics.get_mut(&info.topic_name) else {
                     unreachable!()
                 };
                 let Some(sp) = topic.get_mut_subscription(&info.sub_name) else {

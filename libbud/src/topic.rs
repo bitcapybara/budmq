@@ -87,7 +87,7 @@ impl Topic {
         self.subscriptions.get(sub_name)
     }
 
-    pub fn get_mut_subscription(&self, sub_name: &str) -> Option<&mut Subscription> {
+    pub fn get_mut_subscription(&mut self, sub_name: &str) -> Option<&mut Subscription> {
         self.subscriptions.get_mut(sub_name)
     }
 
@@ -96,11 +96,15 @@ impl Topic {
         if message.seq_id <= self.seq_id {
             return Err(Error::ProducerMessageDuplicated);
         }
-        let message_id = self.storage.add_message(message)?;
+        let message_id = self.storage.add_message(&message)?;
         self.seq_id = message.seq_id;
-        for (_, sub) in self.subscriptions {
+        for (_, sub) in &self.subscriptions {
             sub.message_notify(message_id)?;
         }
         Ok(())
+    }
+
+    pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
+        todo!()
     }
 }

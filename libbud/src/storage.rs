@@ -33,7 +33,7 @@ impl TopicStorage {
     pub fn new() -> Self {
         Self {}
     }
-    pub fn add_message(&mut self, message: Message) -> Result<u64> {
+    pub fn add_message(&mut self, message: &Message) -> Result<u64> {
         Ok(0)
     }
 }
