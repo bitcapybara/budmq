@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
+
+use tokio::sync::{mpsc, RwLock};
 
 use crate::protocol::{ReturnCode, Subscribe};
 
@@ -36,6 +38,7 @@ impl Cursor {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum SubType {
     /// Each subscription is only allowed to contain one client
     Exclusive,
@@ -43,6 +46,7 @@ pub enum SubType {
     Shared,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum InitialPostion {
     Latest,
     Earliest,
@@ -52,11 +56,10 @@ pub enum InitialPostion {
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
 struct Dispatcher {
-    /// consumer_rx
     /// notify_rx(topic latest added message id)
     /// send_task_tx: Sender<(message_id, consumer_id)>, recv_task_rx in broker
     /// save all consumers in memory
-    consumers: Option<Consumers>,
+    consumers: Arc<RwLock<Consumers>>,
     /// save all subscription consume progress
     cursor: Cursor,
 }
@@ -64,41 +67,43 @@ struct Dispatcher {
 impl Dispatcher {
     fn new() -> Self {
         Self {
-            consumers: None,
+            consumers: Arc::new(RwLock::new(Consumers(None))),
             cursor: Cursor::new(),
         }
     }
 
-    fn with_consumers(consumers: Consumers) -> Self {
+    fn with_consumer(consumer: Consumer) -> Self {
         Self {
-            consumers: Some(consumers),
+            consumers: Arc::new(RwLock::new(Consumers::new(consumer.into()))),
             cursor: Cursor::new(),
         }
     }
 
-    fn add_consumer(&mut self, sub_type: SubType, consumer: Consumer) -> Result<()> {
-        match self.consumers {
-            Some(consumers) => match consumers {
-                Consumers::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
-                Consumers::Shared(shared) => match sub_type {
+    async fn add_consumer(&mut self, consumer: Consumer) -> Result<()> {
+        let mut consumers = self.consumers.write().await;
+        match consumers.as_mut() {
+            Some(cms) => match cms {
+                ConsumersType::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
+                ConsumersType::Shared(shared) => match consumer.sub_type {
                     SubType::Exclusive => return Err(Error::SubTypeMissMatch),
                     SubType::Shared => {
                         shared.insert(consumer.id, consumer);
                     }
                 },
             },
-            None => self.consumers = Some(Consumers::new(sub_type, consumer)),
+            None => consumers.set(consumer.into()),
         }
         Ok(())
     }
 
-    fn del_consumer(&mut self, consumer_id: u64) {
-        if let Some(consumers) = self.consumers {
-            match consumers {
-                Consumers::Exclusive(c) if c.id == consumer_id => {
-                    self.consumers.take();
+    async fn del_consumer(&mut self, consumer_id: u64) {
+        let mut consumers = self.consumers.write().await;
+        if let Some(cms) = consumers.as_mut() {
+            match cms {
+                ConsumersType::Exclusive(c) if c.id == consumer_id => {
+                    consumers.clear();
                 }
-                Consumers::Shared(s) => {
+                ConsumersType::Shared(s) => {
                     s.remove(&consumer_id);
                 }
                 _ => {}
@@ -114,24 +119,51 @@ impl Dispatcher {
 struct Consumer {
     id: u64,
     permits: u64,
+    sub_type: SubType,
+    init_pos: InitialPostion,
 }
 
 impl Consumer {
-    fn new(id: u64) -> Self {
-        Self { id, permits: 0 }
+    fn new(id: u64, sub_type: SubType, init_pos: InitialPostion) -> Self {
+        Self {
+            id,
+            permits: 0,
+            sub_type,
+            init_pos,
+        }
+    }
+}
+
+struct Consumers(Option<ConsumersType>);
+
+impl Consumers {
+    fn new(consumers: ConsumersType) -> Self {
+        Self(Some(consumers))
+    }
+    fn set(&mut self, consumers: ConsumersType) {
+        self.0 = Some(consumers)
+    }
+    fn clear(&mut self) {
+        self.0.take();
+    }
+}
+
+impl AsMut<Option<ConsumersType>> for Consumers {
+    fn as_mut(&mut self) -> &mut Option<ConsumersType> {
+        &mut self.0
     }
 }
 
 /// clients sub to this subscription
 /// Internal data is consumer_id
-enum Consumers {
+enum ConsumersType {
     Exclusive(Consumer),
     Shared(HashMap<u64, Consumer>),
 }
 
-impl Consumers {
-    fn new(sub_type: SubType, consumer: Consumer) -> Self {
-        match sub_type {
+impl From<Consumer> for ConsumersType {
+    fn from(consumer: Consumer) -> Self {
+        match consumer.sub_type {
             SubType::Exclusive => Self::Exclusive(consumer),
             SubType::Shared => {
                 let mut consumers = HashMap::new();
@@ -152,17 +184,22 @@ pub struct Subscription {
 
 impl Subscription {
     pub fn from_subscribe(consumer_id: u64, sub: &Subscribe) -> Result<Self> {
-        let consumers = Consumers::new(sub.sub_type, Consumer::new(consumer_id));
+        let consumer = Consumer::new(consumer_id, sub.sub_type, sub.initial_position);
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
-            dispatcher: Dispatcher::with_consumers(consumers),
+            dispatcher: Dispatcher::with_consumer(consumer),
         })
     }
 
-    pub fn add_consumer(&mut self, consumer_id: u64, sub_type: SubType) -> Result<()> {
+    pub async fn add_consumer(&mut self, sub: &Subscribe) -> Result<()> {
         self.dispatcher
-            .add_consumer(sub_type, Consumer::new(consumer_id))?;
+            .add_consumer(Consumer::new(
+                sub.consumer_id,
+                sub.sub_type,
+                sub.initial_position,
+            ))
+            .await?;
         Ok(())
     }
 

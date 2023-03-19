@@ -150,7 +150,7 @@ impl Broker {
                     }
                 }
                 _ => {
-                    let code = match self.process_packet(client_id, msg.packet) {
+                    let code = match self.process_packet(client_id, msg.packet).await {
                         Ok(_) => ReturnCode::Success,
                         Err(Error::ReturnCode(code)) => code,
                         Err(e) => Err(e)?,
@@ -166,7 +166,7 @@ impl Broker {
 
     /// process packets from client
     /// DO NOT BLOCK!!!
-    fn process_packet(&mut self, client_id: u64, packet: Packet) -> Result<()> {
+    async fn process_packet(&mut self, client_id: u64, packet: Packet) -> Result<()> {
         match packet {
             Packet::Subscribe(sub) => {
                 let Some(session) = self.clients.get_mut(&client_id) else {
@@ -179,11 +179,11 @@ impl Broker {
                 match self.topics.get_mut(&sub.topic) {
                     Some(topic) => match topic.get_mut_subscription(&sub.sub_name) {
                         Some(sp) => {
-                            sp.add_consumer(sub.consumer_id, sub.sub_type)?;
+                            sp.add_consumer(&sub).await?;
                         }
                         None => {
                             let mut sp = Subscription::from_subscribe(client_id, &sub)?;
-                            sp.add_consumer(sub.consumer_id, sub.sub_type)?;
+                            sp.add_consumer(&sub).await?;
                             topic.add_subscription(sp);
                         }
                     },
@@ -214,7 +214,9 @@ impl Broker {
                 let topic = p.topic.clone();
                 let message = Message::from_publish(p);
                 match self.topics.get_mut(&topic) {
-                    Some(topic) => topic.add_message(message),
+                    Some(topic) => {
+                        topic.add_message(message);
+                    },
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
             }
