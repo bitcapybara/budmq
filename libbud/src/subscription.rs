@@ -33,6 +33,12 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
+impl<T> From<mpsc::error::SendError<T>> for Error {
+    fn from(value: mpsc::error::SendError<T>) -> Self {
+        todo!()
+    }
+}
+
 /// Save consumption progress
 /// persistent
 /// memory
@@ -70,7 +76,11 @@ enum Notify {
     /// new message id
     NewMessage(u64),
     /// consumer permits
-    AddPermits { consumer_id: u64, add_permits: u32 },
+    AddPermits {
+        client_id: u64,
+        consumer_id: u64,
+        add_permits: u32,
+    },
 }
 
 enum ConsumerEvent {
@@ -120,17 +130,45 @@ impl Dispatcher {
         Ok(())
     }
 
-    async fn del_consumer(&self, client_id: u64) {
+    async fn del_consumer(&self, client_id: u64, consumer_id: u64) {
         let mut consumers = self.consumers.write().await;
         if let Some(cms) = consumers.as_mut() {
             match cms {
-                ConsumersType::Exclusive(c) if c.client_id == client_id => {
+                ConsumersType::Exclusive(c)
+                    if c.client_id == client_id && c.consumer_id == consumer_id =>
+                {
                     consumers.clear();
                 }
                 ConsumersType::Shared(s) => {
-                    s.remove(&client_id);
+                    let Some(c) = s.get(&client_id) else {
+                        return
+                    };
+                    if c.consumer_id == consumer_id {
+                        s.remove(&client_id);
+                    }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    async fn add_consumer_permits(&self, client_id: u64, consumer_id: u64, add_permits: u32) {
+        let mut consumers = self.consumers.write().await;
+        if let Some(cms) = consumers.as_mut() {
+            match cms {
+                ConsumersType::Exclusive(ex) => {
+                    if client_id == ex.client_id && consumer_id == ex.consumer_id {
+                        ex.permits += add_permits;
+                    }
+                }
+                ConsumersType::Shared(shared) => {
+                    let Some(c) = shared.get_mut(&client_id) else {
+                        return
+                    };
+                    if c.consumer_id == consumer_id {
+                        c.permits += add_permits;
+                    }
+                }
             }
         }
     }
@@ -166,14 +204,16 @@ impl Dispatcher {
         while let Some(consumer_event) = consumer_rx.recv().await {
             match consumer_event {
                 ConsumerEvent::Add { consumer, res_tx } => {
-                    res_tx.send(self.add_consumer(consumer).await);
+                    let res = self.add_consumer(consumer).await;
+                    res_tx.send(res).ok();
                 }
                 ConsumerEvent::Del {
                     consumer_id,
                     res_tx,
                     client_id,
                 } => {
-                    res_tx.send(self.del_consumer(client_id).await);
+                    self.del_consumer(client_id, consumer_id).await;
+                    res_tx.send(()).ok();
                 }
             }
         }
@@ -188,11 +228,15 @@ impl Dispatcher {
     ) -> Result<()> {
         while let Some(notify) = notify_rx.recv().await {
             match notify {
-                Notify::NewMessage(_) => todo!(),
+                Notify::NewMessage(msg_id) => todo!(),
                 Notify::AddPermits {
                     consumer_id,
                     add_permits,
-                } => todo!(),
+                    client_id,
+                } => {
+                    self.add_consumer_permits(client_id, consumer_id, add_permits)
+                        .await;
+                }
             }
         }
         Ok(())
@@ -202,7 +246,7 @@ impl Dispatcher {
 struct Consumer {
     client_id: u64,
     consumer_id: u64,
-    permits: u64,
+    permits: u32,
     sub_type: SubType,
     init_pos: InitialPostion,
 }
@@ -306,7 +350,7 @@ impl Subscription {
             ),
             res_tx,
         };
-        self.consumer_tx.send(event);
+        self.consumer_tx.send(event)?;
         res_rx.await??;
         Ok(())
     }
@@ -318,23 +362,27 @@ impl Subscription {
             consumer_id,
             res_tx,
         };
-        self.consumer_tx.send(event);
+        self.consumer_tx.send(event)?;
         res_rx.await?;
         Ok(())
     }
 
-    pub fn additional_permits(&self, consumer_id: u64, add_permits: u32) {
+    pub fn additional_permits(
+        &self,
+        client_id: u64,
+        consumer_id: u64,
+        add_permits: u32,
+    ) -> Result<()> {
         self.notify_tx.send(Notify::AddPermits {
+            client_id,
             consumer_id,
             add_permits,
-        });
+        })?;
+        Ok(())
     }
 
     pub fn message_notify(&self, message_id: u64) -> Result<()> {
-        todo!()
-    }
-
-    async fn start_dispatch(&self, dispatcher: Dispatcher) -> Result<()> {
+        self.notify_tx.send(Notify::NewMessage(message_id))?;
         Ok(())
     }
 }

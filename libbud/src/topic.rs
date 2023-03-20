@@ -98,7 +98,7 @@ impl Topic {
         }
         let message_id = self.storage.add_message(&message)?;
         self.seq_id = message.seq_id;
-        for (_, sub) in &self.subscriptions {
+        for sub in self.subscriptions.values() {
             sub.message_notify(message_id)?;
         }
         Ok(())

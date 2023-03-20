@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use super::{Codec, Result};
 
-pub type ReturnCodeResult = std::result::Result<(), ReturnCode>;
-
 #[derive(Debug, Clone, Copy)]
 pub enum ReturnCode {
     Success = 0,

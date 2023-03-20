@@ -1,14 +1,10 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use futures::{future, FutureExt};
-use log::error;
-use tokio::{
-    sync::{mpsc, oneshot, RwLock},
-    time::timeout,
-};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::{
-    protocol::{self, Packet, Publish, ReturnCode, ReturnCodeResult, Send, Unsubscribe},
+    protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
     subscription::{self, PublishEvent, Subscription},
     topic::{self, Message, Topic},
 };
@@ -298,7 +294,7 @@ impl Broker {
                 let message = Message::from_publish(p);
                 match topics.get_mut(&topic) {
                     Some(topic) => {
-                        topic.add_message(message);
+                        topic.add_message(message)?;
                     }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
@@ -319,7 +315,7 @@ impl Broker {
                 let Some(sp) = topic.get_mut_subscription(&info.sub_name) else {
                     unreachable!()
                 };
-                sp.additional_permits(c.consumer_id, c.permits);
+                sp.additional_permits(client_id, c.consumer_id, c.permits)?;
             }
             _ => unreachable!(),
         }
