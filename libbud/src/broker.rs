@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::{
     protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
-    subscription::{self, PublishEvent, Subscription},
+    subscription::{self, SendEvent, Subscription},
     topic::{self, Message, Topic},
 };
 
@@ -113,17 +113,14 @@ impl Broker {
 
     async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Result<()> {
         // subscription task
-        let (publish_tx, publish_rx) = mpsc::unbounded_channel();
-        let (sub_task, sub_handle) = self
-            .clone()
-            .receive_subscription(publish_rx)
-            .remote_handle();
+        let (send_tx, send_rx) = mpsc::unbounded_channel();
+        let (sub_task, sub_handle) = self.clone().receive_subscription(send_rx).remote_handle();
         tokio::spawn(sub_task);
 
         // client task
         let (client_task, client_handle) = self
             .clone()
-            .receive_client(publish_tx, broker_rx)
+            .receive_client(send_tx, broker_rx)
             .remote_handle();
         tokio::spawn(client_task);
 
@@ -133,9 +130,9 @@ impl Broker {
 
     async fn receive_subscription(
         self,
-        mut publish_rx: mpsc::UnboundedReceiver<PublishEvent>,
+        mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
     ) -> Result<()> {
-        while let Some(event) = publish_rx.recv().await {
+        while let Some(event) = send_rx.recv().await {
             let topics = self.topics.read().await;
             let Some(topic) = topics.get(&event.topic_name) else {
                 unreachable!()
@@ -145,7 +142,7 @@ impl Broker {
             };
             let clients = self.clients.read().await;
             if let Some(session) = clients.get(&event.client_id) {
-                // TODO wait for reply?
+                // TODO wait for reply
                 session.client_tx.send(BrokerMessage {
                     packet: Packet::Send(Send {
                         consumer_id: event.consumer_id,
@@ -160,7 +157,7 @@ impl Broker {
 
     async fn receive_client(
         self,
-        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        publish_tx: mpsc::UnboundedSender<SendEvent>,
         mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
     ) -> Result<()> {
         while let Some(msg) = broker_rx.recv().await {
@@ -227,7 +224,7 @@ impl Broker {
     /// DO NOT BLOCK!!!
     async fn process_packet(
         &self,
-        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        publish_tx: mpsc::UnboundedSender<SendEvent>,
         client_id: u64,
         packet: Packet,
     ) -> Result<()> {

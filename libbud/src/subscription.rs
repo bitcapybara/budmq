@@ -42,12 +42,38 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
 /// Save consumption progress
 /// persistent
 /// memory
-#[derive(Debug, Clone)]
-struct Cursor {}
+#[derive(Debug, Default, Clone)]
+struct Cursor {
+    /// current read cursor position
+    /// init by init_position arg
+    read_position: u64,
+    /// high water mark
+    latest_message_id: u64,
+    /// low water mark
+    delete_position: u64,
+}
 
 impl Cursor {
     fn new() -> Self {
-        Self {}
+        Self::default()
+    }
+
+    fn peek_message(&self) -> Option<u64> {
+        if self.read_position >= self.latest_message_id {
+            return None;
+        }
+        Some(self.read_position + 1)
+    }
+
+    fn read_advance(&mut self) {
+        if self.read_position >= self.latest_message_id {
+            return;
+        }
+        self.read_position += 1;
+    }
+
+    fn new_message(&mut self, message_id: u64) {
+        self.latest_message_id = message_id;
     }
 }
 
@@ -65,7 +91,7 @@ pub enum InitialPostion {
     Earliest,
 }
 
-pub struct PublishEvent {
+pub struct SendEvent {
     pub client_id: u64,
     pub topic_name: String,
     pub message_id: u64,
@@ -132,43 +158,69 @@ impl Dispatcher {
 
     async fn del_consumer(&self, client_id: u64, consumer_id: u64) {
         let mut consumers = self.consumers.write().await;
-        if let Some(cms) = consumers.as_mut() {
-            match cms {
-                ConsumersType::Exclusive(c)
-                    if c.client_id == client_id && c.consumer_id == consumer_id =>
-                {
-                    consumers.clear();
-                }
-                ConsumersType::Shared(s) => {
-                    let Some(c) = s.get(&client_id) else {
+        let Some(cms) = consumers.as_mut() else {
+            return;
+        };
+        match cms {
+            ConsumersType::Exclusive(c)
+                if c.client_id == client_id && c.consumer_id == consumer_id =>
+            {
+                consumers.clear();
+            }
+            ConsumersType::Shared(s) => {
+                let Some(c) = s.get(&client_id) else {
                         return
                     };
-                    if c.consumer_id == consumer_id {
-                        s.remove(&client_id);
-                    }
+                if c.consumer_id == consumer_id {
+                    s.remove(&client_id);
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
 
     async fn add_consumer_permits(&self, client_id: u64, consumer_id: u64, add_permits: u32) {
         let mut consumers = self.consumers.write().await;
-        if let Some(cms) = consumers.as_mut() {
-            match cms {
-                ConsumersType::Exclusive(ex) => {
-                    if client_id == ex.client_id && consumer_id == ex.consumer_id {
-                        ex.permits += add_permits;
-                    }
+        let Some(cms) = consumers.as_mut() else {
+            return;
+        };
+        match cms {
+            ConsumersType::Exclusive(ex) => {
+                if client_id == ex.client_id && consumer_id == ex.consumer_id {
+                    ex.permits += add_permits;
                 }
-                ConsumersType::Shared(shared) => {
-                    let Some(c) = shared.get_mut(&client_id) else {
+            }
+            ConsumersType::Shared(shared) => {
+                let Some(c) = shared.get_mut(&client_id) else {
                         return
                     };
-                    if c.consumer_id == consumer_id {
-                        c.permits += add_permits;
+                if c.consumer_id == consumer_id {
+                    c.permits += add_permits;
+                }
+            }
+        }
+    }
+
+    async fn available_consumer(&self) -> Option<Consumer> {
+        let consumers = self.consumers.read().await;
+        let Some(cms) = consumers.as_ref() else {
+            return None;
+        };
+        match cms {
+            ConsumersType::Exclusive(c) => {
+                if c.permits > 0 {
+                    Some(c.clone())
+                } else {
+                    None
+                }
+            }
+            ConsumersType::Shared(cs) => {
+                for c in cs.values() {
+                    if c.permits > 0 {
+                        return Some(c.clone());
                     }
                 }
+                None
             }
         }
     }
@@ -178,7 +230,7 @@ impl Dispatcher {
         cursor: Cursor,
         consumer_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
         notify_rx: mpsc::UnboundedReceiver<Notify>,
-        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        publish_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<()> {
         // consumer loop
         let (consumer_task, consumer_handle) =
@@ -222,13 +274,13 @@ impl Dispatcher {
 
     async fn receive_notify(
         self,
-        cursor: Cursor,
+        mut cursor: Cursor,
         mut notify_rx: mpsc::UnboundedReceiver<Notify>,
-        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<()> {
         while let Some(notify) = notify_rx.recv().await {
             match notify {
-                Notify::NewMessage(msg_id) => todo!(),
+                Notify::NewMessage(msg_id) => cursor.new_message(msg_id),
                 Notify::AddPermits {
                     consumer_id,
                     add_permits,
@@ -238,23 +290,45 @@ impl Dispatcher {
                         .await;
                 }
             }
+            while let Some(next_message) = cursor.peek_message() {
+                let Some(consumer) = self.available_consumer().await else {
+                    return Ok(());
+                };
+                // TODO wait for reply and read advance by send result
+                send_tx.send(SendEvent {
+                    client_id: consumer.client_id,
+                    topic_name: consumer.topic_name,
+                    message_id: next_message,
+                    consumer_id: consumer.consumer_id,
+                })?;
+                cursor.read_advance();
+            }
         }
         Ok(())
     }
 }
 
+#[derive(Debug, Clone)]
 struct Consumer {
     client_id: u64,
     consumer_id: u64,
     permits: u32,
+    topic_name: String,
     sub_type: SubType,
     init_pos: InitialPostion,
 }
 
 impl Consumer {
-    fn new(client_id: u64, consumer_id: u64, sub_type: SubType, init_pos: InitialPostion) -> Self {
+    fn new(
+        client_id: u64,
+        consumer_id: u64,
+        topic_name: &str,
+        sub_type: SubType,
+        init_pos: InitialPostion,
+    ) -> Self {
         Self {
             permits: 0,
+            topic_name: topic_name.to_string(),
             sub_type,
             init_pos,
             client_id,
@@ -280,6 +354,12 @@ impl Consumers {
 impl AsMut<Option<ConsumersType>> for Consumers {
     fn as_mut(&mut self) -> &mut Option<ConsumersType> {
         &mut self.0
+    }
+}
+
+impl AsRef<Option<ConsumersType>> for Consumers {
+    fn as_ref(&self) -> &Option<ConsumersType> {
+        &self.0
     }
 }
 
@@ -322,12 +402,18 @@ impl Subscription {
         client_id: u64,
         consumer_id: u64,
         sub: &Subscribe,
-        publish_tx: mpsc::UnboundedSender<PublishEvent>,
+        publish_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<Self> {
         // start dispatch
         let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
-        let consumer = Consumer::new(client_id, consumer_id, sub.sub_type, sub.initial_position);
+        let consumer = Consumer::new(
+            client_id,
+            consumer_id,
+            &sub.topic,
+            sub.sub_type,
+            sub.initial_position,
+        );
         let dispatcher = Dispatcher::with_consumer(consumer);
         let cursor = Cursor::new();
         tokio::spawn(dispatcher.run(cursor, consumer_rx, notify_rx, publish_tx));
@@ -345,6 +431,7 @@ impl Subscription {
             consumer: Consumer::new(
                 client_id,
                 sub.consumer_id,
+                &sub.topic,
                 sub.sub_type,
                 sub.initial_position,
             ),
