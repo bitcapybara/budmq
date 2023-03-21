@@ -160,12 +160,16 @@ impl Broker {
                 tokio::spawn(async move {
                     match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
                         Ok(Ok(Ok(_))) => {
-                            event.res_tx.send(true);
+                            if event.res_tx.send(true).is_err() {
+                                error!("broker reply ok to send event error")
+                            }
                             return;
                         }
                         Ok(Ok(Err(e))) => {
                             if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
-                                event.res_tx.send(true);
+                                if event.res_tx.send(true).is_err() {
+                                    error!("broker reply ok to send event error")
+                                }
                                 return;
                             }
                         }
@@ -176,7 +180,9 @@ impl Broker {
                             error!("wait client SEND reply timout")
                         }
                     }
-                    event.res_tx.send(false);
+                    if event.res_tx.send(false).is_err() {
+                        error!("broker reply non-ok to send event error")
+                    }
                 });
             }
         }

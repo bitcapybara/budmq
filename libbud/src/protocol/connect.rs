@@ -1,4 +1,4 @@
-use super::{Codec, Packet, Result, ReturnCode};
+use super::{Codec, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Connect {

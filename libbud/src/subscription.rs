@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use futures::{future, FutureExt};
-use log::error;
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
@@ -338,7 +337,8 @@ impl Dispatcher {
                 })?;
                 if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
                     cursor.read_advance();
-                    self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1);
+                    self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
+                        .await;
                 }
             }
         }

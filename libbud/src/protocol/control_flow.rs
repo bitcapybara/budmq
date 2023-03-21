@@ -1,4 +1,4 @@
-use super::{Codec, Packet, Result, ReturnCode};
+use super::{Codec, Result};
 
 pub struct ControlFlow {
     pub consumer_id: u64,

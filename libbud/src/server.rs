@@ -1,23 +1,10 @@
-use std::{fmt::Display, io, net::SocketAddr, time::Duration};
+use std::{fmt::Display, io, net::SocketAddr};
 
-use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use log::error;
-use s2n_quic::{
-    connection::{self, Handle, StreamAcceptor},
-    provider, Connection,
-};
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::timeout,
-};
-use tokio_util::codec::Framed;
+use s2n_quic::{connection, provider, Connection};
+use tokio::sync::mpsc;
 
-use crate::{
-    broker,
-    client::Client,
-    mtls::MtlsProvider,
-    protocol::{self, Codec, Packet},
-};
+use crate::{broker, client::Client, mtls::MtlsProvider};
 
 type Result<T> = std::result::Result<T, Error>;
 
