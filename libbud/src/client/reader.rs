@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use log::error;
@@ -9,10 +9,11 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use super::{Error, Result, WAIT_REPLY_TIMEOUT};
+use super::{Error, Result};
 use crate::{
     broker,
     protocol::{Packet, PacketCodec, ReturnCode},
+    WAIT_REPLY_TIMEOUT,
 };
 
 pub struct Reader {
@@ -53,7 +54,7 @@ impl Reader {
         {
             let mut framed = Framed::new(stream, PacketCodec);
             match framed.next().await.ok_or(Error::StreamClosed)?? {
-                Packet::Connect(c) => {
+                Packet::Connect(_) => {
                     // Do not allow duplicate connections
                     let code = ReturnCode::AlreadyConnected;
                     framed.send(Packet::ReturnCode(code)).await?

@@ -1,9 +1,16 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use futures::{future, FutureExt};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use log::error;
+use tokio::{
+    sync::{mpsc, oneshot, RwLock},
+    time::timeout,
+};
 
-use crate::protocol::{ReturnCode, Subscribe};
+use crate::{
+    protocol::{ReturnCode, Subscribe},
+    WAIT_REPLY_TIMEOUT,
+};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -96,6 +103,8 @@ pub struct SendEvent {
     pub topic_name: String,
     pub message_id: u64,
     pub consumer_id: u64,
+    /// true if send to client successfully
+    pub res_tx: oneshot::Sender<bool>,
 }
 
 enum Notify {
@@ -179,7 +188,23 @@ impl Dispatcher {
         }
     }
 
-    async fn add_consumer_permits(&self, client_id: u64, consumer_id: u64, add_permits: u32) {
+    async fn increase_consumer_permits(&self, client_id: u64, consumer_id: u64, increase: u32) {
+        self.update_consumer_permits(client_id, consumer_id, true, increase)
+            .await
+    }
+
+    async fn decrease_consumer_permits(&self, client_id: u64, consumer_id: u64, decrease: u32) {
+        self.update_consumer_permits(client_id, consumer_id, false, decrease)
+            .await
+    }
+
+    async fn update_consumer_permits(
+        &self,
+        client_id: u64,
+        consumer_id: u64,
+        addition: bool,
+        update: u32,
+    ) {
         let mut consumers = self.consumers.write().await;
         let Some(cms) = consumers.as_mut() else {
             return;
@@ -187,7 +212,11 @@ impl Dispatcher {
         match cms {
             ConsumersType::Exclusive(ex) => {
                 if client_id == ex.client_id && consumer_id == ex.consumer_id {
-                    ex.permits += add_permits;
+                    if addition {
+                        ex.permits += update;
+                    } else {
+                        ex.permits -= update;
+                    }
                 }
             }
             ConsumersType::Shared(shared) => {
@@ -195,7 +224,11 @@ impl Dispatcher {
                         return
                     };
                 if c.consumer_id == consumer_id {
-                    c.permits += add_permits;
+                    if addition {
+                        c.permits += update;
+                    } else {
+                        c.permits -= update;
+                    }
                 }
             }
         }
@@ -286,7 +319,7 @@ impl Dispatcher {
                     add_permits,
                     client_id,
                 } => {
-                    self.add_consumer_permits(client_id, consumer_id, add_permits)
+                    self.increase_consumer_permits(client_id, consumer_id, add_permits)
                         .await;
                 }
             }
@@ -294,14 +327,19 @@ impl Dispatcher {
                 let Some(consumer) = self.available_consumer().await else {
                     return Ok(());
                 };
-                // TODO wait for reply and read advance by send result
+                // serial processing
+                let (res_tx, res_rx) = oneshot::channel();
                 send_tx.send(SendEvent {
                     client_id: consumer.client_id,
                     topic_name: consumer.topic_name,
                     message_id: next_message,
                     consumer_id: consumer.consumer_id,
+                    res_tx,
                 })?;
-                cursor.read_advance();
+                if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                    cursor.read_advance();
+                    self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1);
+                }
             }
         }
         Ok(())
@@ -334,6 +372,10 @@ impl Consumer {
             client_id,
             consumer_id,
         }
+    }
+
+    fn reduce_permit(&mut self) {
+        self.permits -= 1;
     }
 }
 

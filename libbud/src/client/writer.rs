@@ -7,10 +7,11 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use super::{Result, WAIT_REPLY_TIMEOUT};
+use super::{Error, Result};
 use crate::{
     broker::BrokerMessage,
     protocol::{Packet, PacketCodec, ReturnCode},
+    WAIT_REPLY_TIMEOUT,
 };
 
 pub struct Writer {
@@ -42,7 +43,7 @@ impl Writer {
             let framed = Framed::new(stream, PacketCodec);
             // send to client: framed.send(Packet) async? error log?
             match message.packet {
-                p @ Packet::Publish(_) => self.send(message.res_tx, framed, p).await?,
+                p @ Packet::Send(_) => self.send(message.res_tx, framed, p).await?,
                 _ => unreachable!(),
             }
         }
@@ -51,7 +52,7 @@ impl Writer {
 
     async fn send(
         &self,
-        res_tx: Option<oneshot::Sender<ReturnCode>>,
+        res_tx: Option<oneshot::Sender<Result<()>>>,
         mut framed: Framed<BidirectionalStream, PacketCodec>,
         packet: Packet,
     ) -> Result<()> {
@@ -65,21 +66,33 @@ impl Writer {
                     }
                     match timeout(WAIT_REPLY_TIMEOUT, framed.next()).await {
                         Ok(Some(Ok(Packet::ReturnCode(code)))) => {
-                            if let Err(e) = tx.send(code) {
-                                error!("send reply to broker error: {e}")
+                            let res = match code {
+                                ReturnCode::Success => Ok(()),
+                                _ => Err(Error::Client(code)),
+                            };
+                            if let Err(e) = tx.send(res) {
+                                error!("send SEND reply to broker error: {e:?}")
                             }
                         }
                         Ok(Some(Ok(_))) => {
-                            error!("recv unexpected packet from client {local}")
+                            if tx.send(Err(Error::UnexpectedPacket)).is_err() {
+                                error!("recv unexpected packet from client {local}")
+                            }
                         }
                         Ok(Some(Err(e))) => {
-                            error!("recv reply from client {local} error: {e}")
+                            if let Err(e) = tx.send(Err(e.into())) {
+                                error!("recv reply from client {local} error: {e:?}")
+                            }
                         }
                         Ok(None) => {
-                            error!("client {local} stream closed")
+                            if tx.send(Err(Error::StreamClosed)).is_err() {
+                                error!("client {local} stream closed")
+                            }
                         }
-                        Err(_) => {
-                            error!("wait for client {local} reply timout")
+                        Err(e) => {
+                            if tx.send(Err(e.into())).is_err() {
+                                error!("wait for client {local} reply timout")
+                            }
                         }
                     }
                 });

@@ -4,29 +4,23 @@ mod writer;
 use std::{fmt::Display, time::Duration};
 
 use futures::{future, FutureExt, SinkExt, StreamExt};
-use log::error;
-use s2n_quic::{
-    connection::{self, Handle, StreamAcceptor},
-    stream::BidirectionalStream,
-    Connection,
-};
+use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
-    time::{error::Elapsed, timeout},
+    time::timeout,
 };
 use tokio_util::codec::Framed;
 
 use crate::{
-    broker::{self, BrokerMessage, ClientMessage},
+    broker::{BrokerMessage, ClientMessage},
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 
 use self::{reader::Reader, writer::Writer};
 
 const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
-const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 
-type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -36,6 +30,7 @@ pub enum Error {
     ClientDisconnect,
     ClientIdleTimeout,
     Server(ReturnCode),
+    Client(ReturnCode),
     StreamClosed,
 }
 
@@ -67,6 +62,12 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
 
 impl From<oneshot::error::RecvError> for Error {
     fn from(value: oneshot::error::RecvError) -> Self {
+        todo!()
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(value: tokio::time::error::Elapsed) -> Self {
         todo!()
     }
 }

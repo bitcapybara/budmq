@@ -1,12 +1,18 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use futures::{future, FutureExt};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use log::error;
+use tokio::{
+    sync::{mpsc, oneshot, RwLock},
+    time::timeout,
+};
 
 use crate::{
+    client,
     protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
     subscription::{self, SendEvent, Subscription},
     topic::{self, Message, Topic},
+    WAIT_REPLY_TIMEOUT,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -55,7 +61,7 @@ pub struct ClientMessage {
 /// messages from broker to client
 pub struct BrokerMessage {
     pub packet: protocol::Packet,
-    pub res_tx: Option<oneshot::Sender<ReturnCode>>,
+    pub res_tx: Option<oneshot::Sender<client::Result<()>>>,
 }
 
 struct SubInfo {
@@ -128,6 +134,7 @@ impl Broker {
         Ok(())
     }
 
+    /// process send event from all subscriptions
     async fn receive_subscription(
         self,
         mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
@@ -142,14 +149,35 @@ impl Broker {
             };
             let clients = self.clients.read().await;
             if let Some(session) = clients.get(&event.client_id) {
-                // TODO wait for reply
+                let (res_tx, res_rx) = oneshot::channel();
                 session.client_tx.send(BrokerMessage {
                     packet: Packet::Send(Send {
                         consumer_id: event.consumer_id,
                         payload: message.payload,
                     }),
-                    res_tx: None,
+                    res_tx: Some(res_tx),
                 })?;
+                tokio::spawn(async move {
+                    match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                        Ok(Ok(Ok(_))) => {
+                            event.res_tx.send(true);
+                            return;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
+                                event.res_tx.send(true);
+                                return;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            error!("recving SEND reply from client error: {e}")
+                        }
+                        Err(_) => {
+                            error!("wait client SEND reply timout")
+                        }
+                    }
+                    event.res_tx.send(false);
+                });
             }
         }
         Ok(())
