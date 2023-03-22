@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    path::{Path, PathBuf},
-};
+use std::{fmt::Display, path::Path};
 
 use crate::topic::Message;
 

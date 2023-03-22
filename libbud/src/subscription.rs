@@ -117,18 +117,6 @@ enum Notify {
     },
 }
 
-enum ConsumerEvent {
-    Add {
-        consumer: Consumer,
-        res_tx: oneshot::Sender<Result<()>>,
-    },
-    Del {
-        client_id: u64,
-        consumer_id: u64,
-        res_tx: oneshot::Sender<()>,
-    },
-}
-
 /// task:
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
@@ -136,6 +124,8 @@ enum ConsumerEvent {
 struct Dispatcher {
     /// save all consumers in memory
     consumers: Arc<RwLock<Consumers>>,
+    /// cursor
+    cursor: Arc<RwLock<Cursor>>,
 }
 
 impl Dispatcher {
@@ -144,7 +134,7 @@ impl Dispatcher {
         todo!()
     }
 
-    fn with_consumer(consumer: Consumer) -> Self {
+    fn with_consumer(consumer: Consumer, cursor: Cursor) -> Self {
         todo!()
     }
     async fn add_consumer(&self, consumer: Consumer) -> Result<()> {
@@ -259,60 +249,15 @@ impl Dispatcher {
 
     async fn run(
         self,
-        cursor: Cursor,
-        consumer_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
-        notify_rx: mpsc::UnboundedReceiver<Notify>,
-        publish_tx: mpsc::UnboundedSender<SendEvent>,
-    ) -> Result<()> {
-        // consumer loop
-        let (consumer_task, consumer_handle) =
-            self.clone().receive_consumer(consumer_rx).remote_handle();
-        tokio::spawn(consumer_task);
-
-        // notify loop
-        let (notify_task, notify_handle) = self
-            .clone()
-            .receive_notify(cursor, notify_rx, publish_tx)
-            .remote_handle();
-        tokio::spawn(notify_task);
-
-        // join
-        future::try_join(consumer_handle, notify_handle).await?;
-        Ok(())
-    }
-
-    async fn receive_consumer(
-        self,
-        mut consumer_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
-    ) -> Result<()> {
-        while let Some(consumer_event) = consumer_rx.recv().await {
-            match consumer_event {
-                ConsumerEvent::Add { consumer, res_tx } => {
-                    let res = self.add_consumer(consumer).await;
-                    res_tx.send(res).ok();
-                }
-                ConsumerEvent::Del {
-                    consumer_id,
-                    res_tx,
-                    client_id,
-                } => {
-                    self.del_consumer(client_id, consumer_id).await;
-                    res_tx.send(()).ok();
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn receive_notify(
-        self,
-        mut cursor: Cursor,
         mut notify_rx: mpsc::UnboundedReceiver<Notify>,
         send_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<()> {
         while let Some(notify) = notify_rx.recv().await {
             match notify {
-                Notify::NewMessage(msg_id) => cursor.new_message(msg_id),
+                Notify::NewMessage(msg_id) => {
+                    let mut cursor = self.cursor.write().await;
+                    cursor.new_message(msg_id);
+                }
                 Notify::AddPermits {
                     consumer_id,
                     add_permits,
@@ -322,6 +267,7 @@ impl Dispatcher {
                         .await;
                 }
             }
+            let mut cursor = self.cursor.write().await;
             while let Some(next_message) = cursor.peek_message() {
                 let Some(consumer) = self.available_consumer().await else {
                     return Ok(());
@@ -430,7 +376,7 @@ impl From<Consumer> for ConsumersType {
 pub struct Subscription {
     pub topic: String,
     pub name: String,
-    consumer_tx: mpsc::UnboundedSender<ConsumerEvent>,
+    dispatcher: Dispatcher,
     notify_tx: mpsc::UnboundedSender<Notify>,
 }
 
@@ -447,7 +393,6 @@ impl Subscription {
         publish_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<Self> {
         // start dispatch
-        let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(
             client_id,
@@ -456,43 +401,31 @@ impl Subscription {
             sub.sub_type,
             sub.initial_position,
         );
-        let dispatcher = Dispatcher::with_consumer(consumer);
         let cursor = Cursor::new();
-        tokio::spawn(dispatcher.run(cursor, consumer_rx, notify_rx, publish_tx));
+        let dispatcher = Dispatcher::with_consumer(consumer, cursor);
+        tokio::spawn(dispatcher.clone().run(notify_rx, publish_tx));
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
-            consumer_tx,
             notify_tx,
+            dispatcher,
         })
     }
 
-    pub async fn add_consumer(&mut self, client_id: u64, sub: &Subscribe) -> Result<()> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let event = ConsumerEvent::Add {
-            consumer: Consumer::new(
+    pub async fn add_consumer(&self, client_id: u64, sub: &Subscribe) -> Result<()> {
+        self.dispatcher
+            .add_consumer(Consumer::new(
                 client_id,
                 sub.consumer_id,
                 &sub.topic,
                 sub.sub_type,
                 sub.initial_position,
-            ),
-            res_tx,
-        };
-        self.consumer_tx.send(event)?;
-        res_rx.await??;
-        Ok(())
+            ))
+            .await
     }
 
-    pub async fn del_consumer(&mut self, client_id: u64, consumer_id: u64) -> Result<()> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let event = ConsumerEvent::Del {
-            client_id,
-            consumer_id,
-            res_tx,
-        };
-        self.consumer_tx.send(event)?;
-        res_rx.await?;
+    pub async fn del_consumer(&self, client_id: u64, consumer_id: u64) -> Result<()> {
+        self.dispatcher.del_consumer(client_id, consumer_id).await;
         Ok(())
     }
 
