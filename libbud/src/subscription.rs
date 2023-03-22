@@ -514,4 +514,8 @@ impl Subscription {
         self.notify_tx.send(Notify::NewMessage(message_id))?;
         Ok(())
     }
+
+    pub fn consume_ack(&self) -> Result<()> {
+        todo!()
+    }
 }

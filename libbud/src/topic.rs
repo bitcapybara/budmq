@@ -87,10 +87,6 @@ impl Topic {
         self.subscriptions.get(sub_name)
     }
 
-    pub fn get_mut_subscription(&mut self, sub_name: &str) -> Option<&mut Subscription> {
-        self.subscriptions.get_mut(sub_name)
-    }
-
     /// save message in topic
     pub fn add_message(&mut self, message: Message) -> Result<()> {
         if message.seq_id <= self.seq_id {

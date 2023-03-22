@@ -274,7 +274,7 @@ impl Broker {
                 // add subscription into topic
                 let mut topics = self.topics.write().await;
                 match topics.get_mut(&sub.topic) {
-                    Some(topic) => match topic.get_mut_subscription(&sub.sub_name) {
+                    Some(topic) => match topic.get_subscription(&sub.sub_name) {
                         Some(sp) => {
                             sp.add_consumer(client_id, &sub).await?;
                         }
@@ -343,10 +343,27 @@ impl Broker {
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
                     unreachable!()
                 };
-                let Some(sp) = topic.get_mut_subscription(&info.sub_name) else {
+                let Some(sp) = topic.get_subscription(&info.sub_name) else {
                     unreachable!()
                 };
                 sp.additional_permits(client_id, c.consumer_id, c.permits)?;
+            }
+            Packet::ConsumeAck(c) => {
+                let clients = self.clients.read().await;
+                let Some(session) = clients.get(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected))
+                };
+                let Some(info) = session.consumers.get(&c.consumer_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound))
+                };
+                let mut topics = self.topics.write().await;
+                let Some(topic) = topics.get_mut(&info.topic_name) else {
+                    unreachable!()
+                };
+                let Some(sp) = topic.get_subscription(&info.sub_name) else {
+                    unreachable!()
+                };
+                sp.consume_ack()?;
             }
             _ => unreachable!(),
         }
