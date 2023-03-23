@@ -279,7 +279,7 @@ impl Broker {
                             sp.add_consumer(client_id, &sub).await?;
                         }
                         None => {
-                            let mut sp = Subscription::from_subscribe(
+                            let sp = Subscription::from_subscribe(
                                 client_id,
                                 sub.consumer_id,
                                 &sub,
@@ -331,6 +331,7 @@ impl Broker {
                 }
             }
             Packet::ControlFlow(c) => {
+                // TODO simplify code
                 let clients = self.clients.read().await;
                 // add permits to subscription
                 let Some(session) = clients.get(&client_id) else {
@@ -339,8 +340,8 @@ impl Broker {
                 let Some(info) = session.consumers.get(&c.consumer_id) else {
                     return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound));
                 };
-                let mut topics = self.topics.write().await;
-                let Some(topic) = topics.get_mut(&info.topic_name) else {
+                let topics = self.topics.read().await;
+                let Some(topic) = topics.get(&info.topic_name) else {
                     unreachable!()
                 };
                 let Some(sp) = topic.get_subscription(&info.sub_name) else {
@@ -349,6 +350,7 @@ impl Broker {
                 sp.additional_permits(client_id, c.consumer_id, c.permits)?;
             }
             Packet::ConsumeAck(c) => {
+                // TODO simplify code
                 let clients = self.clients.read().await;
                 let Some(session) = clients.get(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected))
@@ -360,10 +362,7 @@ impl Broker {
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
                     unreachable!()
                 };
-                let Some(sp) = topic.get_subscription(&info.sub_name) else {
-                    unreachable!()
-                };
-                sp.consume_ack()?;
+                topic.consume_ack(&info.sub_name, c.message_id).await?;
             }
             _ => unreachable!(),
         }

@@ -1,6 +1,5 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use futures::{future, FutureExt};
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
@@ -80,6 +79,10 @@ impl Cursor {
 
     fn new_message(&mut self, message_id: u64) {
         self.latest_message_id = message_id;
+    }
+
+    fn ack(&mut self, message_id: u64) {
+        todo!()
     }
 }
 
@@ -245,6 +248,12 @@ impl Dispatcher {
                 None
             }
         }
+    }
+
+    async fn consume_ack(&self, message_id: u64) -> Result<()> {
+        let mut cursor = self.cursor.write().await;
+        cursor.ack(message_id);
+        Ok(())
     }
 
     async fn run(
@@ -448,7 +457,7 @@ impl Subscription {
         Ok(())
     }
 
-    pub fn consume_ack(&self) -> Result<()> {
-        todo!()
+    pub async fn consume_ack(&self, message_id: u64) -> Result<()> {
+        self.dispatcher.consume_ack(message_id).await
     }
 }

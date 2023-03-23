@@ -103,4 +103,15 @@ impl Topic {
     pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
         todo!()
     }
+
+    pub async fn consume_ack(&mut self, sub_name: &str, message_id: u64) -> Result<()> {
+        let Some(sp) = self.subscriptions.get(sub_name) else {
+            return Ok(());
+        };
+
+        sp.consume_ack(message_id).await?;
+
+        // TODO delete message under low water mark
+        Ok(())
+    }
 }
