@@ -63,6 +63,8 @@ pub struct Topic {
     subscriptions: HashMap<String, Subscription>,
     /// message storage
     storage: TopicStorage,
+    /// delete position
+    delete_position: u64,
 }
 
 impl Topic {
@@ -72,6 +74,7 @@ impl Topic {
             seq_id: 0,
             subscriptions: HashMap::new(),
             storage: TopicStorage::new(),
+            delete_position: 0,
         }
     }
 
@@ -101,7 +104,7 @@ impl Topic {
     }
 
     pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
-        todo!()
+        Ok(self.storage.get_message(message_id)?)
     }
 
     pub async fn consume_ack(&mut self, sub_name: &str, message_id: u64) -> Result<()> {
@@ -109,9 +112,25 @@ impl Topic {
             return Ok(());
         };
 
+        // ack
         sp.consume_ack(message_id).await?;
 
-        // TODO delete message under low water mark
+        // remove acked messages
+        const DELETE_BATCH: u64 = 100;
+        let mut lowest_mark = u64::MAX;
+        for sub in self.subscriptions.values() {
+            let delete_position = sub.delete_position().await;
+            if delete_position < lowest_mark {
+                lowest_mark = delete_position;
+            }
+            if delete_position - self.delete_position <= DELETE_BATCH {
+                break;
+            }
+        }
+
+        if lowest_mark - self.delete_position > DELETE_BATCH {
+            self.storage.delete_range(..lowest_mark).await?;
+        }
         Ok(())
     }
 }

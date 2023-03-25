@@ -276,6 +276,11 @@ impl Dispatcher {
         Ok(())
     }
 
+    async fn delete_position(&self) -> u64 {
+        let cursor = self.cursor.read().await;
+        cursor.delete_position
+    }
+
     async fn run(
         self,
         mut notify_rx: mpsc::UnboundedReceiver<Notify>,
@@ -479,5 +484,9 @@ impl Subscription {
 
     pub async fn consume_ack(&self, message_id: u64) -> Result<()> {
         self.dispatcher.consume_ack(message_id).await
+    }
+
+    pub async fn delete_position(&self) -> u64 {
+        self.dispatcher.delete_position().await
     }
 }

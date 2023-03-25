@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::Path};
+use std::{fmt::Display, ops::RangeBounds, path::Path};
 
 use crate::topic::Message;
 
@@ -32,5 +32,13 @@ impl TopicStorage {
     }
     pub fn add_message(&mut self, message: &Message) -> Result<u64> {
         Ok(0)
+    }
+
+    pub fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
+        Ok(None)
+    }
+
+    pub async fn delete_range(&mut self, range: impl RangeBounds<u64>) -> Result<()> {
+        Ok(())
     }
 }
