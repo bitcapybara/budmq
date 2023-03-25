@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
+use roaring::{RoaringBitmap, RoaringTreemap};
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
@@ -56,6 +57,8 @@ struct Cursor {
     latest_message_id: u64,
     /// low water mark
     delete_position: u64,
+    /// message ack info
+    bits: RoaringTreemap,
 }
 
 impl Cursor {
@@ -82,7 +85,24 @@ impl Cursor {
     }
 
     fn ack(&mut self, message_id: u64) {
-        todo!()
+        // set message acked
+        self.bits.insert(message_id);
+        // update delete_position
+        if message_id - self.delete_position > 1 {
+            return;
+        }
+        let Some(max) = self.bits.max() else {
+                return;
+        };
+        for i in message_id..max {
+            if self.bits.contains(i) {
+                self.delete_position = i;
+            } else {
+                break;
+            }
+        }
+        // remove all values less than delete position
+        self.bits.remove_range(..self.delete_position);
     }
 }
 
