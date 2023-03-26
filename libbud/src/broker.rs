@@ -325,7 +325,7 @@ impl Broker {
                 let message = Message::from_publish(p);
                 match topics.get_mut(&topic) {
                     Some(topic) => {
-                        topic.add_message(message)?;
+                        topic.add_message(message).await?;
                     }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }

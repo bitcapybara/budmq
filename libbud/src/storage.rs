@@ -1,11 +1,24 @@
-use std::{fmt::Display, ops::RangeBounds, path::Path};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    ops::{Bound, RangeBounds, RangeInclusive},
+    path::Path,
+    sync::{
+        atomic::{self, AtomicU64},
+        Arc,
+    },
+};
+
+use tokio::sync::RwLock;
 
 use crate::topic::Message;
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    InvalidRange,
+}
 
 impl std::error::Error for Error {}
 
@@ -15,30 +28,107 @@ impl Display for Error {
     }
 }
 
-/// Singleton mode, clone reference everywhere
-pub struct BaseStorage {}
+trait Codec {
+    fn to_vec(&self) -> Vec<u8>;
+    fn from_bytes(bytes: &[u8]) -> Result<Self>
+    where
+        Self: Sized;
+}
 
-impl BaseStorage {
-    pub fn new(path: &Path) -> Result<Self> {
-        Ok(Self {})
+impl Codec for Message {
+    fn to_vec(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        todo!()
     }
 }
 
-pub struct TopicStorage {}
+/// Singleton mode, clone reference everywhere
+#[derive(Clone)]
+pub struct BaseStorage {
+    inner: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+}
+
+impl BaseStorage {
+    pub fn new(path: &Path) -> Result<Self> {
+        todo!()
+    }
+
+    pub async fn put(&self, k: &[u8], v: &[u8]) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.insert(k.to_vec(), v.to_vec());
+        Ok(())
+    }
+
+    pub async fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>> {
+        let inner = self.inner.read().await;
+        Ok(inner.get(k).cloned())
+    }
+
+    pub async fn del(&self, k: &[u8]) -> Result<()> {
+        let mut inner = self.inner.write().await;
+        inner.remove(k);
+        Ok(())
+    }
+}
+
+pub struct TopicStorage {
+    storage: BaseStorage,
+    counter: AtomicU64,
+}
 
 impl TopicStorage {
     pub fn new() -> Self {
-        Self {}
+        todo!()
     }
-    pub fn add_message(&mut self, message: &Message) -> Result<u64> {
-        Ok(0)
+    pub async fn add_message(&self, message: &Message) -> Result<u64> {
+        let msg_id = self.counter.fetch_add(1, atomic::Ordering::SeqCst);
+        let key = msg_id.to_be_bytes();
+        let value = message.to_vec();
+        self.storage.put(&key, &value).await?;
+        Ok(msg_id)
     }
 
-    pub fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
-        Ok(None)
+    pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
+        self.storage
+            .get(&message_id.to_be_bytes())
+            .await?
+            .map(|b| Message::from_bytes(&b))
+            .transpose()
     }
 
-    pub async fn delete_range(&mut self, range: impl RangeBounds<u64>) -> Result<()> {
+    pub async fn delete_range<R>(&mut self, range: R) -> Result<()>
+    where
+        R: RangeBounds<u64>,
+    {
+        for i in get_range(range)? {
+            self.storage.del(&i.to_be_bytes()).await?;
+        }
         Ok(())
     }
+}
+
+fn get_range<R>(range: R) -> Result<RangeInclusive<u64>>
+where
+    R: RangeBounds<u64>,
+{
+    let start = match range.start_bound() {
+        Bound::Included(&i) => i,
+        Bound::Excluded(&u64::MAX) => return Err(Error::InvalidRange),
+        Bound::Excluded(&i) => i + 1,
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&i) => i,
+        Bound::Excluded(&0) => return Err(Error::InvalidRange),
+        Bound::Excluded(&i) => i - 1,
+        Bound::Unbounded => u64::MAX,
+    };
+    if end < start {
+        return Err(Error::InvalidRange);
+    }
+
+    Ok(start..=end)
 }

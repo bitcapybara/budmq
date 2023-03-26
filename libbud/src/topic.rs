@@ -91,11 +91,11 @@ impl Topic {
     }
 
     /// save message in topic
-    pub fn add_message(&mut self, message: Message) -> Result<()> {
+    pub async fn add_message(&mut self, message: Message) -> Result<()> {
         if message.seq_id <= self.seq_id {
             return Err(Error::ProducerMessageDuplicated);
         }
-        let message_id = self.storage.add_message(&message)?;
+        let message_id = self.storage.add_message(&message).await?;
         self.seq_id = message.seq_id;
         for sub in self.subscriptions.values() {
             sub.message_notify(message_id)?;
@@ -104,7 +104,7 @@ impl Topic {
     }
 
     pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
-        Ok(self.storage.get_message(message_id)?)
+        Ok(self.storage.get_message(message_id).await?)
     }
 
     pub async fn consume_ack(&mut self, sub_name: &str, message_id: u64) -> Result<()> {

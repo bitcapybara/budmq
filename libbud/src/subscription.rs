@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use roaring::{RoaringBitmap, RoaringTreemap};
+use roaring::RoaringTreemap;
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
