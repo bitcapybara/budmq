@@ -94,6 +94,8 @@ pub struct TopicStorage {
 }
 
 impl TopicStorage {
+    const KEY_PREFIX: &str = "TOPIC";
+
     pub fn new() -> Result<Self> {
         Ok(Self {
             storage: BaseStorage::global()?,
@@ -102,7 +104,7 @@ impl TopicStorage {
     }
     pub async fn add_message(&self, message: &Message) -> Result<u64> {
         let msg_id = self.counter.fetch_add(1, atomic::Ordering::SeqCst);
-        let key = msg_id.to_be_bytes();
+        let key = Self::key(msg_id);
         let value = message.to_vec();
         self.storage.put(&key, &value).await?;
         Ok(msg_id)
@@ -110,7 +112,7 @@ impl TopicStorage {
 
     pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
         self.storage
-            .get(&message_id.to_be_bytes())
+            .get(&Self::key(message_id))
             .await?
             .map(|b| Message::from_bytes(&b))
             .transpose()
@@ -121,9 +123,15 @@ impl TopicStorage {
         R: RangeBounds<u64>,
     {
         for i in get_range(range)? {
-            self.storage.del(&i.to_be_bytes()).await?;
+            self.storage.del(&Self::key(i)).await?;
         }
         Ok(())
+    }
+
+    fn key(message_id: u64) -> Vec<u8> {
+        let mut key = Self::KEY_PREFIX.as_bytes().to_vec();
+        key.extend_from_slice(message_id.to_be_bytes().as_slice());
+        key
     }
 }
 
@@ -133,6 +141,7 @@ pub struct CursorStorage {
 }
 
 impl CursorStorage {
+    const KEY_PREFIX: &str = "CURSOR";
     pub fn new() -> Result<Self> {
         Ok(Self {
             storage: BaseStorage::global()?,
