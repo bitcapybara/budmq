@@ -68,14 +68,15 @@ pub struct Topic {
 }
 
 impl Topic {
-    pub fn new(topic: &str) -> Self {
-        Self {
+    pub fn new(topic: &str) -> Result<Self> {
+        // TODO load from storage
+        Ok(Self {
             name: topic.to_string(),
             seq_id: 0,
             subscriptions: HashMap::new(),
-            storage: TopicStorage::new(),
+            storage: TopicStorage::new()?,
             delete_position: 0,
-        }
+        })
     }
 
     pub fn add_subscription(&mut self, sub: Subscription) {

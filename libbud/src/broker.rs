@@ -230,7 +230,7 @@ impl Broker {
                         let Some(mut topic) = topics.remove(&sub_info.topic_name) else {
                             continue;
                         };
-                        let Some(mut sp) = topic.del_subscription(&sub_info.sub_name) else {
+                        let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
                             continue;
                         };
                         sp.del_consumer(client_id, consumer_id).await?;
@@ -290,7 +290,7 @@ impl Broker {
                         }
                     },
                     None => {
-                        let mut topic = Topic::new(&sub.topic);
+                        let mut topic = Topic::new(&sub.topic)?;
                         let sp = Subscription::from_subscribe(
                             client_id,
                             sub.consumer_id,

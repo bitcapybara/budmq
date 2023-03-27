@@ -9,6 +9,7 @@ use std::{
     },
 };
 
+use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 
 use crate::topic::Message;
@@ -18,6 +19,8 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     InvalidRange,
+    StorageHasInited,
+    StorageNotInited,
 }
 
 impl std::error::Error for Error {}
@@ -45,15 +48,25 @@ impl Codec for Message {
     }
 }
 
+static BASE_STORAGE: OnceCell<BaseStorage> = OnceCell::new();
+
 /// Singleton mode, clone reference everywhere
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BaseStorage {
     inner: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
 }
 
 impl BaseStorage {
-    pub fn new(path: &Path) -> Result<Self> {
-        todo!()
+    pub fn init(path: &Path) -> Result<()> {
+        let inner = Arc::new(RwLock::new(HashMap::new()));
+        BASE_STORAGE
+            .set(BaseStorage { inner })
+            .map_err(|_| Error::StorageHasInited)?;
+        Ok(())
+    }
+
+    pub fn global() -> Result<Self> {
+        Ok(BASE_STORAGE.get().ok_or(Error::StorageNotInited)?.clone())
     }
 
     pub async fn put(&self, k: &[u8], v: &[u8]) -> Result<()> {
@@ -80,8 +93,11 @@ pub struct TopicStorage {
 }
 
 impl TopicStorage {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            storage: BaseStorage::global()?,
+            counter: AtomicU64::default(),
+        })
     }
     pub async fn add_message(&self, message: &Message) -> Result<u64> {
         let msg_id = self.counter.fetch_add(1, atomic::Ordering::SeqCst);
@@ -107,6 +123,19 @@ impl TopicStorage {
             self.storage.del(&i.to_be_bytes()).await?;
         }
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct CursorStorage {
+    storage: BaseStorage,
+}
+
+impl CursorStorage {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            storage: BaseStorage::global()?,
+        })
     }
 }
 

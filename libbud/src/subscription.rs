@@ -8,6 +8,7 @@ use tokio::{
 
 use crate::{
     protocol::{ReturnCode, Subscribe},
+    storage::{self, CursorStorage},
     WAIT_REPLY_TIMEOUT,
 };
 
@@ -45,10 +46,16 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
     }
 }
 
+impl From<storage::Error> for Error {
+    fn from(value: storage::Error) -> Self {
+        todo!()
+    }
+}
+
 /// Save consumption progress
 /// persistent
 /// memory
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 struct Cursor {
     /// current read cursor position
     /// init by init_position arg
@@ -59,11 +66,20 @@ struct Cursor {
     delete_position: u64,
     /// message ack info
     bits: RoaringTreemap,
+    /// storage
+    storage: CursorStorage,
 }
 
 impl Cursor {
-    fn new() -> Self {
-        Self::default()
+    fn new() -> Result<Self> {
+        // TODO load from storage
+        Ok(Self {
+            read_position: 0,
+            latest_message_id: 0,
+            delete_position: 0,
+            bits: RoaringTreemap::new(),
+            storage: CursorStorage::new()?,
+        })
     }
 
     fn peek_message(&self) -> Option<u64> {
@@ -435,7 +451,7 @@ impl Subscription {
             sub.sub_type,
             sub.initial_position,
         );
-        let cursor = Cursor::new();
+        let cursor = Cursor::new()?;
         let dispatcher = Dispatcher::with_consumer(consumer, cursor);
         tokio::spawn(dispatcher.clone().run(notify_rx, publish_tx));
         Ok(Self {

@@ -295,6 +295,7 @@ dependencies = [
  "bytes",
  "futures",
  "log",
+ "once_cell",
  "roaring",
  "rustls-pemfile",
  "s2n-quic",
