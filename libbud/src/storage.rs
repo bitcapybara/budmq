@@ -51,6 +51,7 @@ impl Codec for Message {
 static BASE_STORAGE: OnceCell<BaseStorage> = OnceCell::new();
 
 /// Singleton mode, clone reference everywhere
+/// TODO feature `memory`, `persist`
 #[derive(Debug, Clone)]
 pub struct BaseStorage {
     inner: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
