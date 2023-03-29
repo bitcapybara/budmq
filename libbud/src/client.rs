@@ -3,7 +3,7 @@ mod writer;
 
 use std::{fmt::Display, time::Duration};
 
-use futures::{future, FutureExt, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -13,6 +13,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     broker::{BrokerMessage, ClientMessage},
+    helper::wait,
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 
@@ -133,16 +134,17 @@ impl Client {
 
         // read
         let reader = Reader::new(self.id, &local, self.broker_tx, acceptor, self.keepalive);
-        let (read_task, read_handle) = reader.read().remote_handle();
-        tokio::spawn(read_task);
+        let read_task = reader.read();
+        let read_handle = tokio::spawn(read_task);
 
         // write
         let writer = Writer::new(&local, self.client_rx, handle);
-        let (write_task, write_handle) = writer.write().remote_handle();
-        tokio::spawn(write_task);
+        let write_task = writer.write();
+        let write_handle = tokio::spawn(write_task);
 
         // wait until the end
-        future::try_join(read_handle, write_handle).await?;
+        wait(read_handle, "client read").await;
+        wait(write_handle, "client write").await;
         Ok(())
     }
 }

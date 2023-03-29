@@ -4,6 +4,7 @@ use std::time::Duration;
 
 mod broker;
 mod client;
+mod helper;
 mod mtls;
 mod protocol;
 mod server;

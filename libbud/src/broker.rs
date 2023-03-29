@@ -1,14 +1,16 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use futures::{future, FutureExt};
-use log::error;
+use log::{error, info};
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
+    task::JoinHandle,
     time::timeout,
 };
 
 use crate::{
     client,
+    helper::wait,
     protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
     subscription::{self, SendEvent, Subscription},
     topic::{self, Message, Topic},
@@ -117,21 +119,18 @@ impl Broker {
         }
     }
 
-    async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) -> Result<()> {
+    async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) {
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
-        let (sub_task, sub_handle) = self.clone().receive_subscription(send_rx).remote_handle();
-        tokio::spawn(sub_task);
+        let sub_task = self.clone().receive_subscription(send_rx);
+        let sub_handle = tokio::spawn(sub_task);
 
         // client task
-        let (client_task, client_handle) = self
-            .clone()
-            .receive_client(send_tx, broker_rx)
-            .remote_handle();
-        tokio::spawn(client_task);
+        let client_task = self.clone().receive_client(send_tx, broker_rx);
+        let client_handle = tokio::spawn(client_task);
 
-        future::try_join(sub_handle, client_handle).await?;
-        Ok(())
+        wait(sub_handle, "broker subscription").await;
+        wait(client_handle, "broker client").await;
     }
 
     /// process send event from all subscriptions
