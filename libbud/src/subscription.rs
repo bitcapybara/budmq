@@ -212,8 +212,8 @@ impl Dispatcher {
             }
             ConsumersType::Shared(s) => {
                 let Some(c) = s.get(&client_id) else {
-                        return
-                    };
+                    return
+                };
                 if c.consumer_id == consumer_id {
                     s.remove(&client_id);
                 }

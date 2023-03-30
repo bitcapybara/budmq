@@ -39,6 +39,12 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(value: std::array::TryFromSliceError) -> Self {
+        todo!()
+    }
+}
+
 trait Codec {
     fn to_vec(&self) -> Vec<u8>;
     fn from_bytes(bytes: &[u8]) -> Result<Self>
@@ -142,40 +148,75 @@ impl TopicStorage {
 
 #[derive(Clone)]
 pub struct CursorStorage {
+    sub_name: String,
     storage: BaseStorage,
 }
 
 impl CursorStorage {
-    pub fn new() -> Result<Self> {
+    const READ_POSITION_KEY: &[u8] = "READ_POSITION".as_bytes();
+    const LATEST_MESSAGE_ID_KEY: &[u8] = "LATEST_MESSAGE_ID".as_bytes();
+    const ACK_BITS_KEY: &[u8] = "ACK_BITS".as_bytes();
+    pub fn new(sub_name: &str) -> Result<Self> {
         Ok(Self {
+            sub_name: sub_name.to_string(),
             storage: BaseStorage::global()?,
         })
     }
 
+    pub async fn get_read_position(&self) -> Result<Option<u64>> {
+        let key = self.key(Self::READ_POSITION_KEY);
+        self.get_u64(&key).await
+    }
+
     pub async fn set_read_position(&mut self, pos: u64) -> Result<()> {
-        let key = Self::key("READ_POSITION".as_bytes());
+        let key = self.key(Self::READ_POSITION_KEY);
         self.storage.put(&key, pos.to_be_bytes().as_slice()).await?;
         Ok(())
     }
 
+    pub async fn get_latest_message_id(&self) -> Result<Option<u64>> {
+        let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
+        self.get_u64(&key).await
+    }
+
     pub async fn set_latest_message_id(&mut self, message_id: u64) -> Result<()> {
-        let key = Self::key("LATEST_MESSAGE_ID".as_bytes());
+        let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
         self.storage
             .put(&key, message_id.to_be_bytes().as_slice())
             .await?;
         Ok(())
     }
 
+    async fn get_u64(&self, key: &[u8]) -> Result<Option<u64>> {
+        Ok(self
+            .storage
+            .get(&key)
+            .await?
+            .map(|b| b.as_slice().try_into())
+            .transpose()?
+            .map(|b| u64::from_be_bytes(b)))
+    }
+
+    pub async fn get_ack_bits(&self) -> Result<Option<RoaringTreemap>> {
+        let key = self.key(Self::ACK_BITS_KEY);
+        Ok(self
+            .storage
+            .get(&key)
+            .await?
+            .map(|b| RoaringTreemap::deserialize_from(b.as_slice()))
+            .transpose()?)
+    }
+
     pub async fn set_ack_bits(&mut self, bits: &RoaringTreemap) -> Result<()> {
-        let key = Self::key("ACK_BITS".as_bytes());
+        let key = self.key(Self::ACK_BITS_KEY);
         let mut bytes = Vec::with_capacity(bits.serialized_size());
         bits.serialize_into(&mut bytes)?;
         self.storage.put(&key, &bytes).await?;
         Ok(())
     }
 
-    fn key(bytes: &[u8]) -> Vec<u8> {
-        let mut key = "CURSOR".as_bytes().to_vec();
+    fn key(&self, bytes: &[u8]) -> Vec<u8> {
+        let mut key = format!("{}CUROSR", self.sub_name).as_bytes().to_vec();
         key.extend_from_slice(bytes);
         key
     }
