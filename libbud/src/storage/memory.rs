@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
+    io,
     ops::{Bound, RangeBounds, RangeInclusive},
     path::Path,
     sync::{
@@ -10,6 +11,7 @@ use std::{
 };
 
 use once_cell::sync::OnceCell;
+use roaring::RoaringTreemap;
 use tokio::sync::RwLock;
 
 use crate::topic::Message;
@@ -27,6 +29,12 @@ impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(value: io::Error) -> Self {
         todo!()
     }
 }
@@ -93,8 +101,6 @@ pub struct TopicStorage {
 }
 
 impl TopicStorage {
-    const KEY_PREFIX: &str = "TOPIC";
-
     pub fn new() -> Result<Self> {
         Ok(Self {
             storage: BaseStorage::global()?,
@@ -128,7 +134,7 @@ impl TopicStorage {
     }
 
     fn key(message_id: u64) -> Vec<u8> {
-        let mut key = Self::KEY_PREFIX.as_bytes().to_vec();
+        let mut key = "TOPIC".as_bytes().to_vec();
         key.extend_from_slice(message_id.to_be_bytes().as_slice());
         key
     }
@@ -140,11 +146,38 @@ pub struct CursorStorage {
 }
 
 impl CursorStorage {
-    const KEY_PREFIX: &str = "CURSOR";
     pub fn new() -> Result<Self> {
         Ok(Self {
             storage: BaseStorage::global()?,
         })
+    }
+
+    pub async fn set_read_position(&mut self, pos: u64) -> Result<()> {
+        let key = Self::key("READ_POSITION".as_bytes());
+        self.storage.put(&key, pos.to_be_bytes().as_slice()).await?;
+        Ok(())
+    }
+
+    pub async fn set_latest_message_id(&mut self, message_id: u64) -> Result<()> {
+        let key = Self::key("LATEST_MESSAGE_ID".as_bytes());
+        self.storage
+            .put(&key, message_id.to_be_bytes().as_slice())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_ack_bits(&mut self, bits: &RoaringTreemap) -> Result<()> {
+        let key = Self::key("ACK_BITS".as_bytes());
+        let mut bytes = Vec::with_capacity(bits.serialized_size());
+        bits.serialize_into(&mut bytes)?;
+        self.storage.put(&key, &bytes).await?;
+        Ok(())
+    }
+
+    fn key(bytes: &[u8]) -> Vec<u8> {
+        let mut key = "CURSOR".as_bytes().to_vec();
+        key.extend_from_slice(bytes);
+        key
     }
 }
 

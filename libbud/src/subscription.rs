@@ -89,26 +89,30 @@ impl Cursor {
         Some(self.read_position + 1)
     }
 
-    fn read_advance(&mut self) {
+    async fn read_advance(&mut self) -> Result<()> {
         if self.read_position >= self.latest_message_id {
-            return;
+            return Ok(());
         }
         self.read_position += 1;
+        self.storage.set_read_position(self.read_position).await?;
+        Ok(())
     }
 
-    fn new_message(&mut self, message_id: u64) {
+    async fn new_message(&mut self, message_id: u64) -> Result<()> {
         self.latest_message_id = message_id;
+        self.storage.set_latest_message_id(message_id).await?;
+        Ok(())
     }
 
-    fn ack(&mut self, message_id: u64) {
+    async fn ack(&mut self, message_id: u64) -> Result<()> {
         // set message acked
         self.bits.insert(message_id);
         // update delete_position
         if message_id - self.delete_position > 1 {
-            return;
+            return Ok(());
         }
         let Some(max) = self.bits.max() else {
-                return;
+                return Ok(());
         };
         for i in message_id..max {
             if self.bits.contains(i) {
@@ -119,6 +123,8 @@ impl Cursor {
         }
         // remove all values less than delete position
         self.bits.remove_range(..self.delete_position);
+        self.storage.set_ack_bits(&self.bits).await?;
+        Ok(())
     }
 }
 
@@ -288,7 +294,7 @@ impl Dispatcher {
 
     async fn consume_ack(&self, message_id: u64) -> Result<()> {
         let mut cursor = self.cursor.write().await;
-        cursor.ack(message_id);
+        cursor.ack(message_id).await?;
         Ok(())
     }
 
@@ -306,7 +312,7 @@ impl Dispatcher {
             match notify {
                 Notify::NewMessage(msg_id) => {
                     let mut cursor = self.cursor.write().await;
-                    cursor.new_message(msg_id);
+                    cursor.new_message(msg_id).await?;
                 }
                 Notify::AddPermits {
                     consumer_id,
@@ -332,7 +338,7 @@ impl Dispatcher {
                     res_tx,
                 })?;
                 if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-                    cursor.read_advance();
+                    cursor.read_advance().await?;
                     self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
                         .await;
                 }
