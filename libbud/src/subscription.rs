@@ -71,14 +71,18 @@ struct Cursor {
 }
 
 impl Cursor {
-    fn new() -> Result<Self> {
-        // TODO load from storage
+    async fn new(sub_name: &str) -> Result<Self> {
+        let storage = CursorStorage::new(sub_name)?;
+        let read_position = storage.get_read_position().await?.unwrap_or_default();
+        let latest_message_id = storage.get_latest_message_id().await?.unwrap_or_default();
+        let bits = storage.get_ack_bits().await?.unwrap_or_default();
+        let delete_position = bits.min().unwrap_or_default();
         Ok(Self {
-            read_position: 0,
-            latest_message_id: 0,
-            delete_position: 0,
-            bits: RoaringTreemap::new(),
-            storage: CursorStorage::new()?,
+            read_position,
+            latest_message_id,
+            delete_position,
+            bits,
+            storage,
         })
     }
 
@@ -174,14 +178,18 @@ struct Dispatcher {
 }
 
 impl Dispatcher {
-    /// used to create from persistent storage
+    /// used to create from storage
     fn new() -> Self {
         todo!()
     }
 
-    fn with_consumer(consumer: Consumer, cursor: Cursor) -> Self {
-        todo!()
+    async fn with_consumer(consumer: Consumer) -> Result<Self> {
+        let sub_name = consumer.sub_name.clone();
+        let consumers = Arc::new(RwLock::new(Consumers::from_consumer(consumer)));
+        let cursor = Arc::new(RwLock::new(Cursor::new(&sub_name).await?));
+        Ok(Self { consumers, cursor })
     }
+
     async fn add_consumer(&self, consumer: Consumer) -> Result<()> {
         let mut consumers = self.consumers.write().await;
         match consumers.as_mut() {
@@ -354,25 +362,21 @@ struct Consumer {
     consumer_id: u64,
     permits: u32,
     topic_name: String,
+    sub_name: String,
     sub_type: SubType,
     init_pos: InitialPostion,
 }
 
 impl Consumer {
-    fn new(
-        client_id: u64,
-        consumer_id: u64,
-        topic_name: &str,
-        sub_type: SubType,
-        init_pos: InitialPostion,
-    ) -> Self {
+    fn new(client_id: u64, consumer_id: u64, sub: &Subscribe) -> Self {
         Self {
             permits: 0,
-            topic_name: topic_name.to_string(),
-            sub_type,
-            init_pos,
+            topic_name: sub.topic.clone(),
+            sub_type: sub.sub_type,
+            init_pos: sub.initial_position,
             client_id,
             consumer_id,
+            sub_name: sub.sub_name.clone(),
         }
     }
 
@@ -386,6 +390,17 @@ struct Consumers(Option<ConsumersType>);
 impl Consumers {
     fn new(consumers: ConsumersType) -> Self {
         Self(Some(consumers))
+    }
+    fn from_consumer(consumer: Consumer) -> Self {
+        let consumers_type = match consumer.sub_type {
+            SubType::Exclusive => ConsumersType::Exclusive(consumer),
+            SubType::Shared => {
+                let mut map = HashMap::new();
+                map.insert(consumer.client_id, consumer);
+                ConsumersType::Shared(map)
+            }
+        };
+        Self(Some(consumers_type))
     }
     fn set(&mut self, consumers: ConsumersType) {
         self.0 = Some(consumers)
@@ -437,12 +452,12 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    /// used to create from persistent storage
-    pub fn new() -> Self {
+    /// load from storage
+    pub fn new(topic: &str, sub_name: &str) -> Self {
         todo!()
     }
 
-    pub fn from_subscribe(
+    pub async fn from_subscribe(
         client_id: u64,
         consumer_id: u64,
         sub: &Subscribe,
@@ -450,15 +465,8 @@ impl Subscription {
     ) -> Result<Self> {
         // start dispatch
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
-        let consumer = Consumer::new(
-            client_id,
-            consumer_id,
-            &sub.topic,
-            sub.sub_type,
-            sub.initial_position,
-        );
-        let cursor = Cursor::new()?;
-        let dispatcher = Dispatcher::with_consumer(consumer, cursor);
+        let consumer = Consumer::new(client_id, consumer_id, sub);
+        let dispatcher = Dispatcher::with_consumer(consumer).await?;
         tokio::spawn(dispatcher.clone().run(notify_rx, publish_tx));
         Ok(Self {
             topic: sub.topic.clone(),
@@ -470,13 +478,7 @@ impl Subscription {
 
     pub async fn add_consumer(&self, client_id: u64, sub: &Subscribe) -> Result<()> {
         self.dispatcher
-            .add_consumer(Consumer::new(
-                client_id,
-                sub.consumer_id,
-                &sub.topic,
-                sub.sub_type,
-                sub.initial_position,
-            ))
+            .add_consumer(Consumer::new(client_id, sub.consumer_id, sub))
             .await
     }
 

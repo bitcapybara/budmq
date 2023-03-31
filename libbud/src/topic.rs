@@ -51,6 +51,11 @@ impl Message {
     }
 }
 
+pub struct SubscriptionId {
+    topic: String,
+    name: String,
+}
+
 /// Save all messages associated with this topic in subscription
 /// Save subscription associated with this topic in memory
 pub struct Topic {
@@ -68,14 +73,27 @@ pub struct Topic {
 }
 
 impl Topic {
-    pub fn new(topic: &str) -> Result<Self> {
-        // TODO load from storage
+    pub async fn new(topic: &str) -> Result<Self> {
+        let storage = TopicStorage::new(topic)?;
+        let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
+
+        let loaded_subscriptions = storage.all_aubscriptions().await?;
+        let mut delete_position = u64::MAX;
+        let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
+        for sub in loaded_subscriptions {
+            let subscription = Subscription::new(&sub.topic, &sub.name);
+            let sub_delete_pos = subscription.delete_position().await;
+            if sub_delete_pos < delete_position {
+                delete_position = sub_delete_pos;
+            }
+            subscriptions.insert(sub.name, subscription);
+        }
         Ok(Self {
             name: topic.to_string(),
-            seq_id: 0,
-            subscriptions: HashMap::new(),
-            storage: TopicStorage::new()?,
-            delete_position: 0,
+            seq_id,
+            subscriptions,
+            storage,
+            delete_position,
         })
     }
 

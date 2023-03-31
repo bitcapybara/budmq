@@ -283,19 +283,21 @@ impl Broker {
                                 sub.consumer_id,
                                 &sub,
                                 publish_tx.clone(),
-                            )?;
+                            )
+                            .await?;
                             sp.add_consumer(client_id, &sub).await?;
                             topic.add_subscription(sp);
                         }
                     },
                     None => {
-                        let mut topic = Topic::new(&sub.topic)?;
+                        let mut topic = Topic::new(&sub.topic).await?;
                         let sp = Subscription::from_subscribe(
                             client_id,
                             sub.consumer_id,
                             &sub,
                             publish_tx.clone(),
-                        )?;
+                        )
+                        .await?;
                         topic.add_subscription(sp);
                         topics.insert(sub.topic.clone(), topic);
                     }
