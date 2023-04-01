@@ -1,10 +1,8 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use futures::{future, FutureExt};
-use log::{error, info};
+use log::error;
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
-    task::JoinHandle,
     time::timeout,
 };
 
@@ -257,7 +255,7 @@ impl Broker {
     /// DO NOT BLOCK!!!
     async fn process_packet(
         &self,
-        publish_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
         client_id: u64,
         packet: Packet,
     ) -> Result<()> {
@@ -282,7 +280,7 @@ impl Broker {
                                 client_id,
                                 sub.consumer_id,
                                 &sub,
-                                publish_tx.clone(),
+                                send_tx.clone(),
                             )
                             .await?;
                             sp.add_consumer(client_id, &sub).await?;
@@ -290,12 +288,12 @@ impl Broker {
                         }
                     },
                     None => {
-                        let mut topic = Topic::new(&sub.topic).await?;
+                        let mut topic = Topic::new(&sub.topic, send_tx.clone()).await?;
                         let sp = Subscription::from_subscribe(
                             client_id,
                             sub.consumer_id,
                             &sub,
-                            publish_tx.clone(),
+                            send_tx.clone(),
                         )
                         .await?;
                         topic.add_subscription(sp);

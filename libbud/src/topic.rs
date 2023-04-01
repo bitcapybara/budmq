@@ -1,11 +1,12 @@
 use std::{collections::HashMap, fmt::Display};
 
 use bytes::Bytes;
+use tokio::sync::mpsc;
 
 use crate::{
     protocol::Publish,
     storage::{self, TopicStorage},
-    subscription::{self, Subscription},
+    subscription::{self, SendEvent, Subscription},
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -73,7 +74,7 @@ pub struct Topic {
 }
 
 impl Topic {
-    pub async fn new(topic: &str) -> Result<Self> {
+    pub async fn new(topic: &str, send_tx: mpsc::UnboundedSender<SendEvent>) -> Result<Self> {
         let storage = TopicStorage::new(topic)?;
         let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
 
@@ -81,7 +82,7 @@ impl Topic {
         let mut delete_position = u64::MAX;
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
-            let subscription = Subscription::new(&sub.topic, &sub.name);
+            let subscription = Subscription::new(&sub.topic, &sub.name, send_tx.clone()).await?;
             let sub_delete_pos = subscription.delete_position().await;
             if sub_delete_pos < delete_position {
                 delete_position = sub_delete_pos;

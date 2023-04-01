@@ -178,9 +178,12 @@ struct Dispatcher {
 }
 
 impl Dispatcher {
-    /// used to create from storage
-    fn new() -> Self {
-        todo!()
+    /// load from storage
+    async fn new(sub_name: &str) -> Result<Self> {
+        Ok(Self {
+            consumers: Arc::new(RwLock::new(Consumers::empty())),
+            cursor: Arc::new(RwLock::new(Cursor::new(sub_name).await?)),
+        })
     }
 
     async fn with_consumer(consumer: Consumer) -> Result<Self> {
@@ -388,6 +391,9 @@ impl Consumer {
 struct Consumers(Option<ConsumersType>);
 
 impl Consumers {
+    fn empty() -> Self {
+        Self(None)
+    }
     fn new(consumers: ConsumersType) -> Self {
         Self(Some(consumers))
     }
@@ -453,21 +459,33 @@ pub struct Subscription {
 
 impl Subscription {
     /// load from storage
-    pub fn new(topic: &str, sub_name: &str) -> Self {
-        todo!()
+    pub async fn new(
+        topic: &str,
+        sub_name: &str,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
+    ) -> Result<Self> {
+        let (notify_tx, notify_rx) = mpsc::unbounded_channel();
+        let dispatcher = Dispatcher::new(sub_name).await?;
+        tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
+        Ok(Self {
+            topic: topic.to_string(),
+            name: sub_name.to_string(),
+            dispatcher,
+            notify_tx,
+        })
     }
 
     pub async fn from_subscribe(
         client_id: u64,
         consumer_id: u64,
         sub: &Subscribe,
-        publish_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
     ) -> Result<Self> {
         // start dispatch
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(client_id, consumer_id, sub);
         let dispatcher = Dispatcher::with_consumer(consumer).await?;
-        tokio::spawn(dispatcher.clone().run(notify_rx, publish_tx));
+        tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
