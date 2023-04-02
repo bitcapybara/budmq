@@ -223,3 +223,11 @@ impl Header {
         })
     }
 }
+
+fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
+    if buf.len() < len {
+        return Err(Error::InsufficientBytes);
+    }
+
+    Ok(())
+}

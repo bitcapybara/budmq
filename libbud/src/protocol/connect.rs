@@ -1,4 +1,6 @@
-use super::{Codec, Result};
+use bytes::{Buf, BufMut};
+
+use super::{assert_len, Codec, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Connect {
@@ -7,11 +9,14 @@ pub struct Connect {
 }
 
 impl Codec for Connect {
-    fn decode(buf: bytes::Bytes) -> Result<Self> {
-        todo!()
+    fn decode(mut buf: bytes::Bytes) -> Result<Self> {
+        assert_len(&buf, 2)?;
+        let keepalive = buf.get_u16();
+        Ok(Self { keepalive })
     }
 
     fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
-        todo!()
+        buf.put_u16(self.keepalive);
+        Ok(())
     }
 }
