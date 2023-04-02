@@ -34,11 +34,11 @@ impl Display for ReturnCode {
 }
 
 impl Codec for ReturnCode {
-    fn decode(buf: &mut bytes::BytesMut) -> Result<Self> {
+    fn decode(buf: bytes::Bytes) -> Result<Self> {
         todo!()
     }
 
-    fn encode(self, buf: &mut bytes::BytesMut) -> Result<()> {
+    fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
         todo!()
     }
 }
