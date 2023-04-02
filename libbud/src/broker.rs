@@ -2,7 +2,8 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use log::error;
 use tokio::{
-    sync::{mpsc, oneshot, RwLock},
+    select,
+    sync::{mpsc, oneshot, watch, RwLock},
     time::timeout,
 };
 
@@ -19,34 +20,44 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    ReplyChanClosed,
+    ReplyChannelClosed,
+    SendOnDroppedChannel,
     ConsumerDuplicateSubscribed,
     ReturnCode(ReturnCode),
+    Subscription(subscription::Error),
+    Topic(topic::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::ReplyChannelClosed => write!(f, "Reply channel closed"),
+            Error::SendOnDroppedChannel => write!(f, "Send on drrpped channel"),
+            Error::ConsumerDuplicateSubscribed => write!(f, "Consumer duplicate subscribe"),
+            Error::ReturnCode(c) => write!(f, "Receive ReturnCode {c}"),
+            Error::Subscription(e) => write!(f, "Subscription error: {e}"),
+            Error::Topic(e) => write!(f, "Topic error: {e}"),
+        }
     }
 }
 
 impl From<subscription::Error> for Error {
     fn from(e: subscription::Error) -> Self {
-        todo!()
+        Self::Subscription(e)
     }
 }
 
 impl From<topic::Error> for Error {
-    fn from(value: topic::Error) -> Self {
-        todo!()
+    fn from(e: topic::Error) -> Self {
+        Self::Topic(e)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        Self::SendOnDroppedChannel
     }
 }
 
@@ -117,14 +128,20 @@ impl Broker {
         }
     }
 
-    async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) {
+    pub async fn run(
+        self,
+        broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
+        close_rx: watch::Receiver<()>,
+    ) {
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
-        let sub_task = self.clone().receive_subscription(send_rx);
+        let sub_task = self.clone().receive_subscription(send_rx, close_rx.clone());
         let sub_handle = tokio::spawn(sub_task);
 
         // client task
-        let client_task = self.clone().receive_client(send_tx, broker_rx);
+        let client_task = self
+            .clone()
+            .receive_client(send_tx, broker_rx, close_rx.clone());
         let client_handle = tokio::spawn(client_task);
 
         wait(sub_handle, "broker subscription").await;
@@ -135,116 +152,150 @@ impl Broker {
     async fn receive_subscription(
         self,
         mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
+        mut close_rx: watch::Receiver<()>,
     ) -> Result<()> {
-        while let Some(event) = send_rx.recv().await {
-            let topics = self.topics.read().await;
-            let Some(topic) = topics.get(&event.topic_name) else {
+        loop {
+            select! {
+                event = send_rx.recv() => {
+                    let Some(event) = event else {
+                        return Ok(())
+                    };
+                    self.process_send_event(event).await?;
+                }
+                _ = close_rx.changed() => {
+                    return Ok(())
+                }
+            }
+        }
+    }
+
+    async fn process_send_event(&self, event: SendEvent) -> Result<()> {
+        let topics = self.topics.read().await;
+        let Some(topic) = topics.get(&event.topic_name) else {
                 unreachable!()
             };
-            let Some(message) = topic.get_message(event.message_id).await? else {
+        let Some(message) = topic.get_message(event.message_id).await? else {
                 unreachable!()
             };
-            let clients = self.clients.read().await;
-            if let Some(session) = clients.get(&event.client_id) {
-                let (res_tx, res_rx) = oneshot::channel();
-                session.client_tx.send(BrokerMessage {
-                    packet: Packet::Send(Send {
-                        consumer_id: event.consumer_id,
-                        payload: message.payload,
-                    }),
-                    res_tx: Some(res_tx),
-                })?;
-                tokio::spawn(async move {
-                    match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-                        Ok(Ok(Ok(_))) => {
+        let clients = self.clients.read().await;
+        if let Some(session) = clients.get(&event.client_id) {
+            let (res_tx, res_rx) = oneshot::channel();
+            session.client_tx.send(BrokerMessage {
+                packet: Packet::Send(Send {
+                    consumer_id: event.consumer_id,
+                    payload: message.payload,
+                }),
+                res_tx: Some(res_tx),
+            })?;
+            tokio::spawn(async move {
+                match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                    Ok(Ok(Ok(_))) => {
+                        if event.res_tx.send(true).is_err() {
+                            error!("broker reply ok to send event error")
+                        }
+                        return;
+                    }
+                    Ok(Ok(Err(e))) => {
+                        if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
                             if event.res_tx.send(true).is_err() {
                                 error!("broker reply ok to send event error")
                             }
                             return;
                         }
-                        Ok(Ok(Err(e))) => {
-                            if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
-                                if event.res_tx.send(true).is_err() {
-                                    error!("broker reply ok to send event error")
-                                }
-                                return;
-                            }
-                        }
-                        Ok(Err(e)) => {
-                            error!("recving SEND reply from client error: {e}")
-                        }
-                        Err(_) => {
-                            error!("wait client SEND reply timout")
-                        }
                     }
-                    if event.res_tx.send(false).is_err() {
-                        error!("broker reply non-ok to send event error")
+                    Ok(Err(e)) => {
+                        error!("recving SEND reply from client error: {e}")
                     }
-                });
-            }
+                    Err(_) => {
+                        error!("wait client SEND reply timout")
+                    }
+                }
+                if event.res_tx.send(false).is_err() {
+                    error!("broker reply non-ok to send event error")
+                }
+            });
         }
         Ok(())
     }
 
     async fn receive_client(
         self,
-        publish_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
         mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
+        mut close_rx: watch::Receiver<()>,
     ) -> Result<()> {
-        while let Some(msg) = broker_rx.recv().await {
-            let client_id = msg.client_id;
-            // handshake process
-            match msg.packet {
-                Packet::Connect(_) => {
-                    let Some(res_tx) = msg.res_tx else {
-                        unreachable!()
+        loop {
+            select! {
+                msg = broker_rx.recv() => {
+                    let Some(msg) = msg else {
+                        return Ok(())
                     };
-                    let Some(client_tx) = msg.client_tx else {
-                        unreachable!()
-                    };
-                    let mut clients = self.clients.write().await;
-                    if clients.contains_key(&client_id) {
-                        res_tx
-                            .send(ReturnCode::AlreadyConnected)
-                            .map_err(|_| Error::ReplyChanClosed)?;
-                    }
-                    clients.insert(
-                        client_id,
-                        Session {
-                            client_tx,
-                            consumers: HashMap::new(),
-                        },
-                    );
+                    self.process_packets(msg, send_tx.clone()).await?;
                 }
-                Packet::Disconnect => {
-                    let mut clients = self.clients.write().await;
-                    let Some(session) = clients.remove(&client_id) else {
+                _ = close_rx.changed() => {
+                    return Ok(())
+                }
+            }
+        }
+    }
+
+    async fn process_packets(
+        &self,
+        msg: ClientMessage,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
+    ) -> Result<()> {
+        let client_id = msg.client_id;
+        // handshake process
+        match msg.packet {
+            Packet::Connect(_) => {
+                let Some(res_tx) = msg.res_tx else {
+                    unreachable!()
+                };
+                let Some(client_tx) = msg.client_tx else {
+                    unreachable!()
+                };
+                let mut clients = self.clients.write().await;
+                if clients.contains_key(&client_id) {
+                    res_tx
+                        .send(ReturnCode::AlreadyConnected)
+                        .map_err(|_| Error::ReplyChannelClosed)?;
+                }
+                clients.insert(
+                    client_id,
+                    Session {
+                        client_tx,
+                        consumers: HashMap::new(),
+                    },
+                );
+            }
+            Packet::Disconnect => {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.remove(&client_id) else {
+                    return Ok(())
+                    };
+                let consumers = session.consumers();
+                let mut topics = self.topics.write().await;
+                for (consumer_id, sub_info) in consumers {
+                    let Some(mut topic) = topics.remove(&sub_info.topic_name) else {
                         continue;
                     };
-                    let consumers = session.consumers();
-                    let mut topics = self.topics.write().await;
-                    for (consumer_id, sub_info) in consumers {
-                        let Some(mut topic) = topics.remove(&sub_info.topic_name) else {
-                            continue;
-                        };
-                        let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
-                            continue;
-                        };
-                        sp.del_consumer(client_id, consumer_id).await?;
-                    }
-                }
-                _ => {
-                    let code = match self
-                        .process_packet(publish_tx.clone(), client_id, msg.packet)
-                        .await
-                    {
-                        Ok(_) => ReturnCode::Success,
-                        Err(Error::ReturnCode(code)) => code,
-                        Err(e) => Err(e)?,
+                    let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
+                        continue;
                     };
-                    if let Some(res_tx) = msg.res_tx {
-                        res_tx.send(code).map_err(|_| Error::ReplyChanClosed)?;
-                    }
+                    sp.del_consumer(client_id, consumer_id).await?;
+                }
+            }
+            _ => {
+                let code = match self
+                    .process_packet(send_tx.clone(), client_id, msg.packet)
+                    .await
+                {
+                    Ok(_) => ReturnCode::Success,
+                    Err(Error::ReturnCode(code)) => code,
+                    Err(e) => Err(e)?,
+                };
+                if let Some(res_tx) = msg.res_tx {
+                    res_tx.send(code).map_err(|_| Error::ReplyChannelClosed)?;
                 }
             }
         }

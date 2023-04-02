@@ -30,46 +30,65 @@ pub enum Error {
     UnexpectedPacket,
     ClientDisconnect,
     ClientIdleTimeout,
+    SendOnDroppedChannel,
+    WaitOnDroppedChannel,
     Server(ReturnCode),
     Client(ReturnCode),
     StreamClosed,
+    Connection(connection::Error),
+    Protocol(protocol::Error),
+    Timeout,
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::HandshakeTimeout => write!(f, "Handshake time out"),
+            Error::MissConnectPacket => write!(f, "Miss Connect packet"),
+            Error::UnexpectedPacket => write!(f, "Unexpected packet"),
+            Error::ClientDisconnect => write!(f, "Client has disconnected"),
+            Error::ClientIdleTimeout => write!(f, "Client idle time out"),
+            Error::SendOnDroppedChannel => write!(f, "Send on dropped channel"),
+            Error::WaitOnDroppedChannel => write!(f, "Wait reply on dropped channel"),
+            Error::Server(c) => write!(f, "Server ReturnCode: {c}"),
+            Error::Client(c) => write!(f, "Client ReturnCode: {c}"),
+            Error::StreamClosed => write!(f, "Stream closed"),
+            Error::Connection(e) => write!(f, "Connection error: {e}"),
+            Error::Protocol(e) => write!(f, "Protocol error: {e}"),
+            Error::Timeout => write!(f, "Time out error"),
+        }
     }
 }
 
 impl From<connection::Error> for Error {
-    fn from(value: connection::Error) -> Self {
-        todo!()
+    fn from(e: connection::Error) -> Self {
+        Self::Connection(e)
     }
 }
 
 impl From<protocol::Error> for Error {
-    fn from(value: protocol::Error) -> Self {
-        todo!()
+    fn from(e: protocol::Error) -> Self {
+        Self::Protocol(e)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        Self::SendOnDroppedChannel
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self::WaitOnDroppedChannel
     }
 }
 
 impl From<tokio::time::error::Elapsed> for Error {
-    fn from(value: tokio::time::error::Elapsed) -> Self {
-        todo!()
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self::Timeout
     }
 }
 

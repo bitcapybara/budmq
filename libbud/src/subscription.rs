@@ -7,7 +7,7 @@ use tokio::{
 };
 
 use crate::{
-    protocol::{ReturnCode, Subscribe},
+    protocol::Subscribe,
     storage::{self, CursorStorage},
     WAIT_REPLY_TIMEOUT,
 };
@@ -17,38 +17,41 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     SubscribeOnExclusive,
-    SubTypeMissMatch,
+    SubTypeUnexpected,
+    ReplyChannelClosed,
+    SendOnDroppedChannel,
+    Storage(storage::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl From<Error> for ReturnCode {
-    fn from(value: Error) -> Self {
-        todo!()
+        match self {
+            Error::SubscribeOnExclusive => write!(f, "Subscribe on exclusive subscription"),
+            Error::SubTypeUnexpected => write!(f, "Unexpected subscription type"),
+            Error::ReplyChannelClosed => write!(f, "Wait reply on dropped channel"),
+            Error::SendOnDroppedChannel => write!(f, "Send on dropped channel"),
+            Error::Storage(e) => write!(f, "Storage error: {e}"),
+        }
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self::ReplyChannelClosed
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        Self::SendOnDroppedChannel
     }
 }
 
 impl From<storage::Error> for Error {
-    fn from(value: storage::Error) -> Self {
-        todo!()
+    fn from(e: storage::Error) -> Self {
+        Self::Storage(e)
     }
 }
 
@@ -199,7 +202,7 @@ impl Dispatcher {
             Some(cms) => match cms {
                 ConsumersType::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
                 ConsumersType::Shared(shared) => match consumer.sub_type {
-                    SubType::Exclusive => return Err(Error::SubTypeMissMatch),
+                    SubType::Exclusive => return Err(Error::SubTypeUnexpected),
                     SubType::Shared => {
                         shared.insert(consumer.client_id, consumer);
                     }

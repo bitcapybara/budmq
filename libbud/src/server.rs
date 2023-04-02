@@ -1,10 +1,14 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
-use log::error;
+use log::{error, info};
 use s2n_quic::{connection, provider, Connection};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
-use crate::{broker, client::Client, mtls::MtlsProvider};
+use crate::{
+    broker::{self, Broker},
+    client::Client,
+    mtls::MtlsProvider,
+};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -12,37 +16,36 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Io(io::Error),
     StartUp(String),
+    Connection(connection::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::Io(e) => write!(f, "I/O error: {e}"),
+            Error::StartUp(e) => write!(f, "Start up error: {e}"),
+            Error::Connection(e) => write!(f, "Connection error: {e}"),
+        }
     }
 }
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        Error::Io(e)
-    }
-}
-
-impl From<std::convert::Infallible> for Error {
-    fn from(_: std::convert::Infallible) -> Self {
-        unreachable!()
+        Self::Io(e)
     }
 }
 
 impl From<provider::StartError> for Error {
     fn from(e: provider::StartError) -> Self {
-        Error::StartUp(e.to_string())
+        Self::StartUp(e.to_string())
     }
 }
 
 impl From<connection::Error> for Error {
-    fn from(value: connection::Error) -> Self {
-        todo!()
+    fn from(e: connection::Error) -> Self {
+        Self::Connection(e)
     }
 }
 
@@ -61,13 +64,16 @@ impl Server {
         }
     }
 
-    pub async fn start(mut self) -> Result<()> {
+    pub async fn start(mut self, close_rx: watch::Receiver<()>) -> Result<()> {
         let mut server = s2n_quic::Server::builder()
-            .with_tls(self.provider)?
+            .with_tls(self.provider)
+            .unwrap()
             .with_io(self.addr)?
             .start()?;
 
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
+        let broker = Broker::new();
+        let broker_handle = tokio::spawn(broker.run(broker_rx, close_rx));
 
         // one connection per client
         while let Some(conn) = server.accept().await {
@@ -77,6 +83,11 @@ impl Server {
             // start client
             let task = Self::handle_conn(local, client_id, conn, broker_tx.clone());
             tokio::spawn(task);
+        }
+
+        match broker_handle.await {
+            Ok(_) => info!("broker exit successfully"),
+            Err(e) => error!("broker panic: {e}"),
         }
         Ok(())
     }

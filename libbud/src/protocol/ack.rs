@@ -18,7 +18,18 @@ pub enum ReturnCode {
 
 impl Display for ReturnCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            ReturnCode::Success => write!(f, "Success"),
+            ReturnCode::AlreadyConnected => write!(f, "AlreadyConnected"),
+            ReturnCode::SubOnExlusive => write!(f, "SubOnExclusive"),
+            ReturnCode::UnexpectedSubType => write!(f, "UnexpectedSubType"),
+            ReturnCode::ConsumerDuplicated => write!(f, "ConsumerDuplicated"),
+            ReturnCode::NotConnected => write!(f, "NotConnected"),
+            ReturnCode::TopicNotExists => write!(f, "TopicNotExists"),
+            ReturnCode::ConsumerNotFound => write!(f, "ConsumerNotFound"),
+            ReturnCode::ProduceMessageDuplicated => write!(f, "ProduceMessageDuplicated"),
+            ReturnCode::ConsumeMessageDuplicated => write!(f, "ConsumeMessageDuplicated"),
+        }
     }
 }
 

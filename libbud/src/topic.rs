@@ -14,25 +14,31 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     ProducerMessageDuplicated,
+    Storage(storage::Error),
+    Subscription(subscription::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::ProducerMessageDuplicated => write!(f, "Produce message duplicated"),
+            Error::Storage(e) => write!(f, "Storage error: {e}"),
+            Error::Subscription(e) => write!(f, "Subscription error: {e}"),
+        }
     }
 }
 
 impl From<storage::Error> for Error {
-    fn from(value: storage::Error) -> Self {
-        todo!()
+    fn from(e: storage::Error) -> Self {
+        Self::Storage(e)
     }
 }
 
 impl From<subscription::Error> for Error {
-    fn from(value: subscription::Error) -> Self {
-        todo!()
+    fn from(e: subscription::Error) -> Self {
+        Self::Subscription(e)
     }
 }
 

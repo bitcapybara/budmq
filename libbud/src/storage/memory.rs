@@ -1,4 +1,5 @@
 use std::{
+    array,
     collections::HashMap,
     fmt::Display,
     io,
@@ -22,27 +23,35 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     InvalidRange,
-    StorageHasInited,
+    StorageAlreadyInited,
     StorageNotInited,
+    Io(io::Error),
+    DecodeSlice(array::TryFromSliceError),
 }
 
 impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::InvalidRange => write!(f, "Invalid range"),
+            Error::StorageAlreadyInited => write!(f, "Storage already initialized"),
+            Error::StorageNotInited => write!(f, "Storage not initialized yet"),
+            Error::Io(e) => write!(f, "I/O error: {e}"),
+            Error::DecodeSlice(e) => write!(f, "Decode slice error: {e}"),
+        }
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        todo!()
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
     }
 }
 
-impl From<std::array::TryFromSliceError> for Error {
-    fn from(value: std::array::TryFromSliceError) -> Self {
-        todo!()
+impl From<array::TryFromSliceError> for Error {
+    fn from(e: array::TryFromSliceError) -> Self {
+        Self::DecodeSlice(e)
     }
 }
 
@@ -86,7 +95,7 @@ impl BaseStorage {
         let inner = Arc::new(RwLock::new(HashMap::new()));
         BASE_STORAGE
             .set(BaseStorage { inner })
-            .map_err(|_| Error::StorageHasInited)?;
+            .map_err(|_| Error::StorageAlreadyInited)?;
         Ok(())
     }
 
