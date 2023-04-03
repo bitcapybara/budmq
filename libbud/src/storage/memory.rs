@@ -194,7 +194,7 @@ impl TopicStorage {
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionId>> {
         let id_key = self.key(Self::SUBSCRIPTION_KEY);
         let Some(max_id )= self.storage.get_u64(&id_key).await? else {
-          return Ok(vec![]);  
+            return Ok(vec![]);
         };
 
         let mut subs = Vec::with_capacity(max_id as usize + 1);
