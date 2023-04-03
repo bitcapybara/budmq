@@ -4,12 +4,14 @@ use std::{
     fmt::Display,
     io,
     ops::RangeBounds,
+    string,
     sync::{
         atomic::{self, AtomicU64},
         Arc,
     },
 };
 
+use bytes::{Buf, Bytes};
 use once_cell::sync::OnceCell;
 use roaring::RoaringTreemap;
 use tokio::sync::RwLock;
@@ -27,6 +29,7 @@ pub enum Error {
     StorageNotInited,
     Io(io::Error),
     DecodeSlice(array::TryFromSliceError),
+    DecodeString(string::FromUtf8Error),
 }
 
 impl std::error::Error for Error {}
@@ -39,6 +42,7 @@ impl Display for Error {
             Error::StorageNotInited => write!(f, "Storage not initialized yet"),
             Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::DecodeSlice(e) => write!(f, "Decode slice error: {e}"),
+            Error::DecodeString(e) => write!(f, "Decode string error: {e}"),
         }
     }
 }
@@ -55,6 +59,12 @@ impl From<array::TryFromSliceError> for Error {
     }
 }
 
+impl From<string::FromUtf8Error> for Error {
+    fn from(e: string::FromUtf8Error) -> Self {
+        Self::DecodeString(e)
+    }
+}
+
 trait Codec {
     fn to_vec(&self) -> Vec<u8>;
     fn from_bytes(bytes: &[u8]) -> Result<Self>
@@ -64,22 +74,42 @@ trait Codec {
 
 impl Codec for Message {
     fn to_vec(&self) -> Vec<u8> {
-        todo!()
+        let mut bytes = Vec::with_capacity(8 + self.payload.len());
+        bytes.extend_from_slice(&self.seq_id.to_be_bytes());
+        bytes.extend_from_slice(&self.payload);
+        bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        todo!()
+        let (seq_id_bytes, payload_bytes) = bytes.split_at(8);
+        let seq_id = u64::from_be_bytes(seq_id_bytes.try_into()?);
+        let payload = Bytes::copy_from_slice(payload_bytes);
+        Ok(Self { seq_id, payload })
     }
 }
 
 impl Codec for SubscriptionId {
     fn to_vec(&self) -> Vec<u8> {
-        todo!()
+        let mut bytes = Vec::with_capacity(2 + self.topic.len() + 2 + self.name.len());
+        bytes.extend_from_slice(&self.topic.len().to_be_bytes());
+        bytes.extend_from_slice(self.topic.as_bytes());
+        bytes.extend_from_slice(&self.name.len().to_be_bytes());
+        bytes.extend_from_slice(self.name.as_bytes());
+        bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        todo!()
+        let mut bytes = Bytes::copy_from_slice(bytes);
+        let topic = read_string(&mut bytes)?;
+        let name = read_string(&mut bytes)?;
+        Ok(Self { topic, name })
     }
+}
+
+fn read_string(buf: &mut Bytes) -> Result<String> {
+    let len = buf.get_u16() as usize;
+    let bytes = buf.split_to(len);
+    Ok(String::from_utf8(bytes.to_vec())?)
 }
 
 static BASE_STORAGE: OnceCell<BaseStorage> = OnceCell::new();
@@ -114,6 +144,14 @@ impl BaseStorage {
         Ok(inner.get(k).cloned())
     }
 
+    async fn get_u64(&self, key: &[u8]) -> Result<Option<u64>> {
+        Ok(self
+            .get(key)
+            .await?
+            .map(|b| b.as_slice().try_into())
+            .transpose()?
+            .map(u64::from_be_bytes))
+    }
     pub async fn del(&self, k: &[u8]) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner.remove(k);
@@ -141,11 +179,34 @@ impl TopicStorage {
     }
 
     pub async fn add_subscription(&self, sub: &SubscriptionId) -> Result<()> {
-        todo!()
+        let mut id_key = self.key(Self::SUBSCRIPTION_KEY);
+        let id = self
+            .storage
+            .get_u64(&id_key)
+            .await?
+            .map(|id| id + 1)
+            .unwrap_or_default();
+        id_key.extend_from_slice(&id.to_be_bytes());
+        self.storage.put(&id_key, &sub.to_vec()).await?;
+        Ok(())
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionId>> {
-        todo!()
+        let id_key = self.key(Self::SUBSCRIPTION_KEY);
+        let Some(max_id )= self.storage.get_u64(&id_key).await? else {
+          return Ok(vec![]);  
+        };
+
+        let mut subs = Vec::with_capacity(max_id as usize + 1);
+        for i in 0..=max_id {
+            let mut key = id_key.clone();
+            key.extend_from_slice(&i.to_be_bytes());
+            let Some(sub) = self.storage.get(&key).await? else {
+                continue;
+            };
+            subs.push(SubscriptionId::from_bytes(&sub)?);
+        }
+        Ok(subs)
     }
 
     pub async fn add_message(&self, message: &Message) -> Result<u64> {
@@ -180,13 +241,7 @@ impl TopicStorage {
 
     pub async fn get_sequence_id(&self) -> Result<Option<u64>> {
         let key = self.key(Self::SEQUENCE_ID_KEY);
-        Ok(self
-            .storage
-            .get(&key)
-            .await?
-            .map(|b| b.as_slice().try_into())
-            .transpose()?
-            .map(u64::from_be_bytes))
+        self.storage.get_u64(&key).await
     }
 
     pub async fn set_sequence_id(&self, seq_id: u64) -> Result<()> {
@@ -224,7 +279,7 @@ impl CursorStorage {
 
     pub async fn get_read_position(&self) -> Result<Option<u64>> {
         let key = self.key(Self::READ_POSITION_KEY);
-        self.get_u64(&key).await
+        self.storage.get_u64(&key).await
     }
 
     pub async fn set_read_position(&self, pos: u64) -> Result<()> {
@@ -235,7 +290,7 @@ impl CursorStorage {
 
     pub async fn get_latest_message_id(&self) -> Result<Option<u64>> {
         let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
-        self.get_u64(&key).await
+        self.storage.get_u64(&key).await
     }
 
     pub async fn set_latest_message_id(&self, message_id: u64) -> Result<()> {
@@ -244,16 +299,6 @@ impl CursorStorage {
             .put(&key, message_id.to_be_bytes().as_slice())
             .await?;
         Ok(())
-    }
-
-    async fn get_u64(&self, key: &[u8]) -> Result<Option<u64>> {
-        Ok(self
-            .storage
-            .get(key)
-            .await?
-            .map(|b| b.as_slice().try_into())
-            .transpose()?
-            .map(u64::from_be_bytes))
     }
 
     pub async fn get_ack_bits(&self) -> Result<Option<RoaringTreemap>> {

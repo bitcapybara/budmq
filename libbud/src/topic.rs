@@ -59,8 +59,8 @@ impl Message {
 }
 
 pub struct SubscriptionId {
-    topic: String,
-    name: String,
+    pub topic: String,
+    pub name: String,
 }
 
 /// Save all messages associated with this topic in subscription

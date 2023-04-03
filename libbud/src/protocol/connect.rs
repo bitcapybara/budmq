@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut};
 
-use super::{assert_len, Codec, PacketType, Result, Header};
+use super::{assert_len, Codec, Header, PacketType, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Connect {

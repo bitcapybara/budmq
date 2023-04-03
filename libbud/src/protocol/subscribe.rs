@@ -19,7 +19,7 @@ pub struct Subscribe {
 }
 
 impl Codec for Subscribe {
-    fn decode(buf: bytes::Bytes) -> Result<Self> {
+    fn decode(mut buf: bytes::Bytes) -> Result<Self> {
         assert_len(&buf, 8)?;
         let consumer_id = buf.get_u64();
 

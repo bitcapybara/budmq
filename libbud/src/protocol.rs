@@ -29,6 +29,7 @@ pub enum Error {
     MalformedString(string::FromUtf8Error),
     UnsupportedInitPosition,
     UnsupportedSubType,
+    UnsupportedReturnCode,
 }
 
 impl std::error::Error for Error {}
@@ -39,9 +40,10 @@ impl Display for Error {
             Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::InsufficientBytes => write!(f, "Insufficient bytes"),
             Error::MalformedPacket => write!(f, "Malformed packet"),
-            Error::MalformedString(e) => write!(f, "Malformed string"),
+            Error::MalformedString(e) => write!(f, "Malformed string: {e}"),
             Error::UnsupportedInitPosition => write!(f, "Unsupported initial postion"),
             Error::UnsupportedSubType => write!(f, "Unsupported subscribe type"),
+            Error::UnsupportedReturnCode => write!(f, "Unsupported return code"),
         }
     }
 }
@@ -80,7 +82,7 @@ impl Decoder for PacketCodec {
             PacketType::Send => Packet::Send(Send::decode(bytes)?),
             PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
-            PacketType::Ack => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
+            PacketType::ReturnCode => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::Ping => Packet::Ping,
             PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
@@ -140,7 +142,7 @@ pub enum PacketType {
     Send,
     ConsumeAck,
     ControlFlow,
-    Ack,
+    ReturnCode,
     Ping,
     Pong,
     Disconnect,
@@ -194,7 +196,7 @@ impl Packet {
     }
 }
 
-struct Header {
+pub struct Header {
     /// 8 bits
     type_byte: u8,
     /// mqtt remain len algorithm
@@ -273,7 +275,7 @@ impl Header {
             5 => PacketType::Send,
             6 => PacketType::ConsumeAck,
             7 => PacketType::ControlFlow,
-            8 => PacketType::Ack,
+            8 => PacketType::ReturnCode,
             9 => PacketType::Ping,
             10 => PacketType::Pong,
             11 => PacketType::Disconnect,
@@ -293,7 +295,7 @@ fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
 fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
     assert_len(buf, 2)?;
     let len = buf.get_u16() as usize;
-    assert_len(buf, len);
+    assert_len(buf, len)?;
     Ok(buf.split_to(len))
 }
 
