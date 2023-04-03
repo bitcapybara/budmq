@@ -14,4 +14,8 @@ impl Codec for ConsumeAck {
     fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
         todo!()
     }
+
+    fn header(&self) -> super::Header {
+        todo!()
+    }
 }

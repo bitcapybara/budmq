@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut};
 
-use super::{assert_len, Codec, Result};
+use super::{assert_len, Codec, PacketType, Result, Header};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Connect {
@@ -18,5 +18,12 @@ impl Codec for Connect {
     fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
         buf.put_u16(self.keepalive);
         Ok(())
+    }
+
+    fn header(&self) -> Header {
+        Header {
+            type_byte: PacketType::Connect as u8,
+            remain_len: 2,
+        }
     }
 }

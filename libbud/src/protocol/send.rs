@@ -15,4 +15,8 @@ impl Codec for Send {
     fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
         todo!()
     }
+
+    fn header(&self) -> super::Header {
+        todo!()
+    }
 }

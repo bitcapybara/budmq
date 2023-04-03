@@ -7,10 +7,12 @@ mod send;
 mod subscribe;
 mod unsubscribe;
 
-use std::{fmt::Display, io, slice::Iter};
+use std::{fmt::Display, io, slice::Iter, string};
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
+
+use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
     ack::ReturnCode, connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow,
@@ -24,6 +26,9 @@ pub enum Error {
     Io(io::Error),
     InsufficientBytes,
     MalformedPacket,
+    MalformedString(string::FromUtf8Error),
+    UnsupportedInitPosition,
+    UnsupportedSubType,
 }
 
 impl std::error::Error for Error {}
@@ -34,6 +39,9 @@ impl Display for Error {
             Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::InsufficientBytes => write!(f, "Insufficient bytes"),
             Error::MalformedPacket => write!(f, "Malformed packet"),
+            Error::MalformedString(e) => write!(f, "Malformed string"),
+            Error::UnsupportedInitPosition => write!(f, "Unsupported initial postion"),
+            Error::UnsupportedSubType => write!(f, "Unsupported subscribe type"),
         }
     }
 }
@@ -41,6 +49,12 @@ impl Display for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<string::FromUtf8Error> for Error {
+    fn from(e: string::FromUtf8Error) -> Self {
+        Self::MalformedString(e)
     }
 }
 
@@ -89,6 +103,32 @@ pub trait Codec {
     where
         Self: Sized;
     fn encode(&self, buf: &mut BytesMut) -> Result<()>;
+
+    fn header(&self) -> Header;
+}
+
+impl TryFrom<u8> for InitialPostion {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self> {
+        Ok(match value {
+            1 => Self::Latest,
+            2 => Self::Earliest,
+            _ => return Err(Error::UnsupportedInitPosition),
+        })
+    }
+}
+
+impl TryFrom<u8> for SubType {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self> {
+        Ok(match value {
+            1 => Self::Exclusive,
+            2 => Self::Shared,
+            _ => return Err(Error::UnsupportedSubType),
+        })
+    }
 }
 
 #[repr(u8)]
@@ -122,7 +162,19 @@ pub enum Packet {
 
 impl Packet {
     fn header(&self) -> Header {
-        todo!()
+        match self {
+            Packet::Connect(c) => c.header(),
+            Packet::Subscribe(s) => s.header(),
+            Packet::Unsubscribe(u) => u.header(),
+            Packet::Publish(p) => p.header(),
+            Packet::Send(s) => s.header(),
+            Packet::ConsumeAck(c) => c.header(),
+            Packet::ControlFlow(c) => c.header(),
+            Packet::ReturnCode(r) => r.header(),
+            Packet::Ping => Header::new(PacketType::Ping, 0),
+            Packet::Pong => Header::new(PacketType::Pong, 0),
+            Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
+        }
     }
 
     fn write(&self, buf: &mut BytesMut) -> Result<()> {
@@ -150,6 +202,12 @@ struct Header {
 }
 
 impl Header {
+    fn new(packet_type: PacketType, remain_len: usize) -> Self {
+        Self {
+            type_byte: packet_type as u8,
+            remain_len,
+        }
+    }
     fn read(mut buf: Iter<u8>) -> Result<(Self, usize)> {
         let type_byte = buf.next().ok_or(Error::InsufficientBytes)?.to_owned();
 
@@ -230,4 +288,25 @@ fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
+    assert_len(buf, 2)?;
+    let len = buf.get_u16() as usize;
+    assert_len(buf, len);
+    Ok(buf.split_to(len))
+}
+
+fn read_string(buf: &mut Bytes) -> Result<String> {
+    let bytes = read_bytes(buf)?;
+    Ok(String::from_utf8(bytes.to_vec())?)
+}
+
+fn write_bytes(buf: &mut BytesMut, bytes: &[u8]) {
+    buf.put_u16(bytes.len() as u16);
+    buf.extend_from_slice(bytes);
+}
+
+fn write_string(buf: &mut BytesMut, string: &str) {
+    write_bytes(buf, string.as_bytes());
 }
