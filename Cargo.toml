@@ -1,2 +1,6 @@
 [workspace]
-members = ["libbud"]
+members = [
+  "libbud/server",
+  "libbud/common",
+  "libbud/client"
+]
