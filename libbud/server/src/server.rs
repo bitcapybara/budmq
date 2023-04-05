@@ -65,6 +65,7 @@ impl Server {
     }
 
     pub async fn start(mut self, close_rx: watch::Receiver<()>) -> Result<()> {
+        // unwrap: with_tls error is infallible
         let mut server = s2n_quic::Server::builder()
             .with_tls(self.provider)
             .unwrap()

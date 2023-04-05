@@ -401,6 +401,8 @@ name = "libbud-client"
 version = "0.1.0"
 dependencies = [
  "libbud-common",
+ "s2n-quic",
+ "tokio",
 ]
 
 [[package]]

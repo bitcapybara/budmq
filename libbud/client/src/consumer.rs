@@ -1,3 +1,5 @@
+use tokio::sync::mpsc;
+
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -22,10 +24,13 @@ pub struct Subscribe {
     sub_type: SubType,
 }
 
-pub struct Consumer {}
+pub struct Consumer {
+    permits: u64,
+}
 
 impl Consumer {
-    fn new(sub: Subscribe) -> Self {
+    pub async fn new(sub: &Subscribe, consumer_rx: mpsc::UnboundedReceiver<()>) -> Result<Self> {
+        // send permits packet
         todo!()
     }
 }

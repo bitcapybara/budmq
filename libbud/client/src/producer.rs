@@ -1,3 +1,5 @@
+use tokio::sync::mpsc;
+
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -11,10 +13,12 @@ impl std::fmt::Display for Error {
     }
 }
 
-pub struct Producer {}
+pub struct Producer {
+    tx: mpsc::UnboundedSender<()>,
+}
 
 impl Producer {
-    pub fn new(topic: &str) -> Self {
+    pub fn new(topic: &str, tx: mpsc::UnboundedSender<()>) -> Self {
         todo!()
     }
 
