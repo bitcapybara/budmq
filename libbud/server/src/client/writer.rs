@@ -1,4 +1,5 @@
 use futures::{SinkExt, StreamExt};
+use libbud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use log::error;
 use s2n_quic::{connection, stream::BidirectionalStream};
 use tokio::{
@@ -8,11 +9,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use super::{Error, Result};
-use crate::{
-    broker::BrokerMessage,
-    protocol::{Packet, PacketCodec, ReturnCode},
-    WAIT_REPLY_TIMEOUT,
-};
+use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct Writer {
     local_addr: String,

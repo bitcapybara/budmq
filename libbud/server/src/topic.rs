@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Display};
 
 use bytes::Bytes;
+use libbud_common::protocol::Publish;
 use tokio::sync::mpsc;
 
 use crate::{
-    protocol::Publish,
     storage::{self, TopicStorage},
     subscription::{self, SendEvent, Subscription},
 };

@@ -3,9 +3,13 @@ mod dispatcher;
 
 use std::{collections::HashMap, fmt::Display};
 
+use libbud_common::{
+    protocol::Subscribe,
+    subscription::{InitialPostion, SubType},
+};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{protocol::Subscribe, storage};
+use crate::storage;
 
 use self::dispatcher::{Dispatcher, Notify};
 
@@ -50,22 +54,6 @@ impl From<storage::Error> for Error {
     fn from(e: storage::Error) -> Self {
         Self::Storage(e)
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum SubType {
-    /// Each subscription is only allowed to contain one client
-    Exclusive = 1,
-    /// Each subscription allows multiple clients
-    Shared,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum InitialPostion {
-    Latest = 1,
-    Earliest,
 }
 
 pub struct SendEvent {

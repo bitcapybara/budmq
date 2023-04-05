@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
+use libbud_common::protocol::{self, Packet, ReturnCode, Send, Unsubscribe};
 use log::error;
 use tokio::{
     select,
@@ -10,7 +11,6 @@ use tokio::{
 use crate::{
     client,
     helper::wait,
-    protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
     subscription::{self, SendEvent, Subscription},
     topic::{self, Message, Topic},
     WAIT_REPLY_TIMEOUT,

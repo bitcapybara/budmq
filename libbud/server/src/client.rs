@@ -4,6 +4,7 @@ mod writer;
 use std::{fmt::Display, time::Duration};
 
 use futures::{SinkExt, StreamExt};
+use libbud_common::protocol::{self, Packet, PacketCodec, ReturnCode};
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -14,7 +15,6 @@ use tokio_util::codec::Framed;
 use crate::{
     broker::{BrokerMessage, ClientMessage},
     helper::wait,
-    protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 
 use self::{reader::Reader, writer::Writer};

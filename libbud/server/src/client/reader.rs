@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
+use libbud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use log::error;
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
@@ -10,11 +11,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use super::{Error, Result};
-use crate::{
-    broker,
-    protocol::{Packet, PacketCodec, ReturnCode},
-    WAIT_REPLY_TIMEOUT,
-};
+use crate::{broker, WAIT_REPLY_TIMEOUT};
 
 pub struct Reader {
     client_id: u64,

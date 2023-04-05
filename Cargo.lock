@@ -399,12 +399,19 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 [[package]]
 name = "libbud-client"
 version = "0.1.0"
+dependencies = [
+ "libbud-common",
+]
 
 [[package]]
 name = "libbud-common"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
+ "rustls-pemfile",
+ "s2n-quic",
+ "tokio-util",
 ]
 
 [[package]]
@@ -413,10 +420,10 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
+ "libbud-common",
  "log",
  "once_cell",
  "roaring",
- "rustls-pemfile",
  "s2n-quic",
  "tokio",
  "tokio-util",

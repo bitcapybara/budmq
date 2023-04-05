@@ -1,5 +1,6 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
+use libbud_common::mtls::MtlsProvider;
 use log::{error, info};
 use s2n_quic::{connection, provider, Connection};
 use tokio::sync::{mpsc, watch};
@@ -7,7 +8,6 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     broker::{self, Broker},
     client::Client,
-    mtls::MtlsProvider,
 };
 
 type Result<T> = std::result::Result<T, Error>;

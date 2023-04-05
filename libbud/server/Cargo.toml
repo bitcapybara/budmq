@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 bytes = "1.4"
 futures = "0.3"
+libbud-common = { version = "0.1.0", path = "../common" }
 log = "0.4"
 once_cell = "1.17"
 roaring = "0.10"
-rustls-pemfile = "1.0"
 s2n-quic = { version = "1.18.0", features = ["provider-address-token-default", "provider-tls-rustls"] }
 tokio = { version = "1.26", features = ["rt", "io-util", "time", "sync"] }
 tokio-util = { version = "0.7", features = ["codec"] }
