@@ -160,7 +160,7 @@ impl Connector {
             match framed.try_next().await?.ok_or(Error::StreamClosed)? {
                 Packet::Send(s) => {
                     let Some(consumer_tx) = consumers.get_consumer(s.consumer_id).await else {
-                        continue;  
+                        continue;
                     };
                     consumer_tx.send(())?;
                 }
