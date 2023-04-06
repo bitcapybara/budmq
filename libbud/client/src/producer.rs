@@ -22,7 +22,7 @@ impl Producer {
         todo!()
     }
 
-    pub fn send(data: &[u8]) -> Result<()> {
+    pub fn send(&self, data: &[u8]) -> Result<()> {
         todo!()
     }
 }

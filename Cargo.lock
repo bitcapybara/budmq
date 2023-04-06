@@ -400,9 +400,11 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 name = "libbud-client"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "libbud-common",
  "s2n-quic",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
