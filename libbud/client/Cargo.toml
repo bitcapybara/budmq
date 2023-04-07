@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytes = "1.4.0"
 futures = "0.3.28"
 libbud-common = { version = "0.1.0", path = "../common" }
 s2n-quic = { version = "1.18.0", features = ["provider-address-token-default", "provider-tls-rustls"] }

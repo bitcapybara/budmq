@@ -3,7 +3,7 @@ use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
 use futures::{SinkExt, TryStreamExt};
 use libbud_common::{
     mtls::MtlsProvider,
-    protocol::{self, Packet, PacketCodec, ReturnCode},
+    protocol::{self, Packet, PacketCodec, Publish, ReturnCode},
 };
 use s2n_quic::{
     client::{self, Connect},
@@ -14,8 +14,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_util::codec::Framed;
 
 use crate::{
+    connector::{self, Connector},
     consumer::{self, Consumer, Subscribe},
-    producer::{self, Producer},
+    producer::{self, Producer, ProducerMessage},
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -76,6 +77,12 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
     }
 }
 
+impl From<connector::Error> for Error {
+    fn from(value: connector::Error) -> Self {
+        todo!()
+    }
+}
+
 pub struct Client {
     dispacher: Dispatcher,
 }
@@ -106,84 +113,19 @@ impl Client {
     }
 }
 
-struct Connector {
-    connection: Connection,
-}
-
-impl Connector {
-    async fn new(addr: SocketAddr, provider: MtlsProvider) -> Result<Self> {
-        // unwrap: with_tls error is infallible
-        let client: client::Client = client::Client::builder()
-            .with_tls(provider)
-            .unwrap()
-            .with_io("0.0.0.0:0")?
-            .start()?;
-        let connector = Connect::new(addr);
-        let mut connection = client.connect(connector).await?;
-        connection.keep_alive(true)?;
-
-        todo!()
-    }
-
-    async fn run(
-        self,
-        producer_rx: mpsc::UnboundedReceiver<()>,
-        consumers: Consumers,
-    ) -> Result<()> {
-        let (handle, acceptor) = self.connection.split();
-
-        let producer_handle = tokio::spawn(Self::run_producer(producer_rx, handle));
-
-        let consumer_handle = tokio::spawn(Self::run_consumer(acceptor, consumers));
-
-        Ok(())
-    }
-
-    async fn run_producer(
-        mut produce_rx: mpsc::UnboundedReceiver<()>,
-        mut handle: Handle,
-    ) -> Result<()> {
-        while let Some(msg) = produce_rx.recv().await {
-            // send message to connection
-            let stream = handle.open_bidirectional_stream().await?;
-            let mut framed = Framed::new(stream, PacketCodec);
-            framed.send(Packet::ReturnCode(ReturnCode::Success)).await?;
-            todo!()
-        }
-        Ok(())
-    }
-
-    async fn run_consumer(mut acceptor: StreamAcceptor, consumers: Consumers) -> Result<()> {
-        // receive message from broker
-        while let Some(stream) = acceptor.accept_bidirectional_stream().await? {
-            let mut framed = Framed::new(stream, PacketCodec);
-            match framed.try_next().await?.ok_or(Error::StreamClosed)? {
-                Packet::Send(s) => {
-                    let Some(consumer_tx) = consumers.get_consumer(s.consumer_id).await else {
-                        continue;
-                    };
-                    consumer_tx.send(())?;
-                }
-                _ => return Err(Error::UnexpectedPacket),
-            }
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone)]
-struct Consumers(Arc<RwLock<HashMap<u64, mpsc::UnboundedSender<()>>>>);
+pub struct Consumers(Arc<RwLock<HashMap<u64, mpsc::UnboundedSender<()>>>>);
 
 impl Consumers {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(Arc::new(RwLock::new(HashMap::new())))
     }
-    async fn add_consumer(&self, consumer_id: u64, consumer_tx: mpsc::UnboundedSender<()>) {
+    pub async fn add_consumer(&self, consumer_id: u64, consumer_tx: mpsc::UnboundedSender<()>) {
         let mut consumers = self.0.write().await;
         consumers.insert(consumer_id, consumer_tx);
     }
 
-    async fn get_consumer(&self, consumer_id: u64) -> Option<mpsc::UnboundedSender<()>> {
+    pub async fn get_consumer(&self, consumer_id: u64) -> Option<mpsc::UnboundedSender<()>> {
         let consumers = self.0.read().await;
         consumers.get(&consumer_id).cloned()
     }
@@ -191,20 +133,20 @@ impl Consumers {
 
 struct Dispatcher {
     /// used to clone on new producer
-    producer_tx: mpsc::UnboundedSender<()>,
+    producer_tx: mpsc::UnboundedSender<ProducerMessage>,
     /// key=consumer_id, value=consumer_tx
     consumers: Consumers,
 }
 
 impl Dispatcher {
-    fn new(producer_tx: mpsc::UnboundedSender<()>, consumers: Consumers) -> Self {
+    pub fn new(producer_tx: mpsc::UnboundedSender<ProducerMessage>, consumers: Consumers) -> Self {
         Self {
             producer_tx,
             consumers,
         }
     }
 
-    async fn get_producer(&self) -> mpsc::UnboundedSender<()> {
+    async fn get_producer(&self) -> mpsc::UnboundedSender<ProducerMessage> {
         self.producer_tx.clone()
     }
 

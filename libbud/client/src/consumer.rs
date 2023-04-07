@@ -26,11 +26,16 @@ pub struct Subscribe {
 
 pub struct Consumer {
     permits: u64,
+    rx: mpsc::UnboundedReceiver<()>,
 }
 
 impl Consumer {
     pub async fn new(sub: &Subscribe, consumer_rx: mpsc::UnboundedReceiver<()>) -> Result<Self> {
         // send permits packet
         todo!()
+    }
+
+    pub async fn next(&mut self) -> Option<()> {
+        self.rx.recv().await
     }
 }
