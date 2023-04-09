@@ -7,8 +7,8 @@ use tokio_util::codec::Framed;
 use super::{Error, Result};
 
 pub struct OutgoingMessage {
-    packet: Packet,
-    res_tx: oneshot::Sender<Result<ReturnCode>>,
+    pub packet: Packet,
+    pub res_tx: oneshot::Sender<Result<ReturnCode>>,
 }
 
 pub struct Writer {

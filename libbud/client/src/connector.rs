@@ -11,7 +11,7 @@ use s2n_quic::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::client::Consumers;
+use crate::consumer::{self, Consumers};
 
 use self::{reader::Reader, writer::Writer};
 
@@ -60,6 +60,12 @@ impl From<protocol::Error> for Error {
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(value: mpsc::error::SendError<T>) -> Self {
+        todo!()
+    }
+}
+
+impl From<consumer::Error> for Error {
+    fn from(value: consumer::Error) -> Self {
         todo!()
     }
 }

@@ -4,7 +4,7 @@ use log::warn;
 use s2n_quic::connection::StreamAcceptor;
 use tokio_util::codec::Framed;
 
-use crate::{client::Consumers, consumer::ConsumeMessage};
+use crate::consumer::{ConsumeMessage, Consumers};
 
 use super::{Error, Result};
 
@@ -27,11 +27,11 @@ impl Reader {
             let mut framed = Framed::new(stream, PacketCodec);
             match framed.try_next().await?.ok_or(Error::StreamClosed)? {
                 Packet::Send(s) => {
-                    let Some(consumer_tx) = self.consumers.get_consumer(s.consumer_id).await else {
+                    let Some(sender) = self.consumers.get_consumer(s.consumer_id).await else {
                         warn!("recv a message but consumer not found");
                         continue;
                     };
-                    consumer_tx.send(ConsumeMessage { payload: s.payload })?;
+                    sender.send(ConsumeMessage { payload: s.payload })?;
                 }
                 _ => return Err(Error::UnexpectedPacket),
             }

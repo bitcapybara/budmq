@@ -1,12 +1,16 @@
-use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::{atomic::AtomicU32, Arc},
+};
 
 use libbud_common::{mtls::MtlsProvider, protocol};
 use s2n_quic::{connection, provider};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 
 use crate::{
     connector::{self, Connector, OutgoingMessage},
-    consumer::{self, ConsumeMessage, Consumer, Subscribe},
+    consumer::{self, Consumer, ConsumerSender, Consumers, Subscribe, CONSUME_CHANNEL_CAPACITY},
     producer::{self, Producer},
 };
 
@@ -104,33 +108,20 @@ impl Client {
 
     pub async fn new_consumer(&mut self, subscribe: &Subscribe) -> Result<Consumer> {
         let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
-        let consumer = Consumer::new(subscribe, self.server_tx.clone(), consumer_rx).await?;
-        self.consumers.add_consumer(consumer.id, consumer_tx).await;
+        let permits = Arc::new(AtomicU32::new(CONSUME_CHANNEL_CAPACITY));
+        let consumer = Consumer::new(
+            permits.clone(),
+            subscribe,
+            self.server_tx.clone(),
+            consumer_rx,
+        )
+        .await?;
+        self.consumers
+            .add_consumer(
+                consumer.id,
+                ConsumerSender::new(consumer.id, permits, self.server_tx.clone(), consumer_tx),
+            )
+            .await;
         Ok(consumer)
-    }
-}
-
-#[derive(Clone)]
-pub struct Consumers(Arc<RwLock<HashMap<u64, mpsc::UnboundedSender<ConsumeMessage>>>>);
-
-impl Consumers {
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(HashMap::new())))
-    }
-    pub async fn add_consumer(
-        &self,
-        consumer_id: u64,
-        consumer_tx: mpsc::UnboundedSender<ConsumeMessage>,
-    ) {
-        let mut consumers = self.0.write().await;
-        consumers.insert(consumer_id, consumer_tx);
-    }
-
-    pub async fn get_consumer(
-        &self,
-        consumer_id: u64,
-    ) -> Option<mpsc::UnboundedSender<ConsumeMessage>> {
-        let consumers = self.0.read().await;
-        consumers.get(&consumer_id).cloned()
     }
 }
