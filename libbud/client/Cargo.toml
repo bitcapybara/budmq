@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytes = "1.4.0"
-futures = "0.3.28"
-libbud-common = { version = "0.1.0", path = "../common" }
-s2n-quic = { version = "1.18.0", features = ["provider-address-token-default", "provider-tls-rustls"] }
-tokio = { version = "1.27.0", features = ["sync"] }
-tokio-util = { version = "0.7.7", features = ["codec"] }
+bytes = "~1.4"
+futures = "~0.3"
+libbud-common = { version = "~0.1", path = "../common" }
+log = "~0.4"
+s2n-quic = { version = "~1.18", features = ["provider-address-token-default", "provider-tls-rustls"] }
+tokio = { version = "~1.27", features = ["sync"] }
+tokio-util = { version = "~0.7", features = ["codec"] }

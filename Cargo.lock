@@ -403,6 +403,7 @@ dependencies = [
  "bytes",
  "futures",
  "libbud-common",
+ "log",
  "s2n-quic",
  "tokio",
  "tokio-util",

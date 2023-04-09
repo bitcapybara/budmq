@@ -1,20 +1,19 @@
+mod consumer;
+mod producer;
+
 use std::{io, net::SocketAddr};
 
-use bytes::Bytes;
-use futures::{SinkExt, TryStreamExt};
-use libbud_common::{
-    mtls::MtlsProvider,
-    protocol::{self, Packet, PacketCodec, Publish},
-};
+use libbud_common::{mtls::MtlsProvider, protocol};
+use log::{error, info};
 use s2n_quic::{
     client::{self, Connect},
-    connection::{self, Handle, StreamAcceptor},
-    provider, Connection,
+    connection, provider, Connection,
 };
-use tokio::sync::mpsc;
-use tokio_util::codec::Framed;
+use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{client::Consumers, producer::ProducerMessage};
+
+use self::{consumer::ConsumerTask, producer::ProducerTask};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -22,6 +21,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     StreamClosed,
     UnexpectedPacket,
+    WaitChannelDropped,
 }
 
 impl std::error::Error for Error {}
@@ -88,57 +88,31 @@ impl Connector {
     ) -> Result<()> {
         let (handle, acceptor) = self.connection.split();
 
-        let producer_handle = tokio::spawn(Self::run_producer(producer_rx, handle));
+        // producer task loop
+        let producer_task = ProducerTask::new(producer_rx, handle).run();
+        let producer_handle = tokio::spawn(producer_task);
 
-        let consumer_handle = tokio::spawn(Self::run_consumer(acceptor, consumers));
+        // consumer task loop
+        let consumer_task = ConsumerTask::new(acceptor, consumers).run();
+        let consumer_handle = tokio::spawn(consumer_task);
+
+        Self::wait(producer_handle, "producer").await;
+        Self::wait(consumer_handle, "consumer").await;
 
         Ok(())
     }
 
-    async fn run_producer(
-        mut produce_rx: mpsc::UnboundedReceiver<ProducerMessage>,
-        mut handle: Handle,
-    ) -> Result<()> {
-        while let Some(msg) = produce_rx.recv().await {
-            // send message to connection
-            let stream = handle.open_bidirectional_stream().await?;
-            let mut framed = Framed::new(stream, PacketCodec);
-            // send publish message
-            if let Err(e) = framed
-                .send(Packet::Publish(Publish {
-                    topic: msg.topic,
-                    sequence_id: msg.sequence_id,
-                    payload: Bytes::copy_from_slice(&msg.data),
-                }))
-                .await
-            {
-                msg.res_tx.send(Err(e.into()));
-                continue;
+    async fn wait(handle: JoinHandle<Result<()>>, label: &str) {
+        match handle.await {
+            Ok(Ok(_)) => {
+                info!("{label} handle task exit successfully")
             }
-            // wait for ack
-            // TODO timout
-            let Packet::ReturnCode(code) = framed.try_next().await?.ok_or(Error::StreamClosed)? else {
-                return Err(Error::UnexpectedPacket);
-            };
-            msg.res_tx.send(Ok(code));
-        }
-        Ok(())
-    }
-
-    async fn run_consumer(mut acceptor: StreamAcceptor, consumers: Consumers) -> Result<()> {
-        // receive message from broker
-        while let Some(stream) = acceptor.accept_bidirectional_stream().await? {
-            let mut framed = Framed::new(stream, PacketCodec);
-            match framed.try_next().await?.ok_or(Error::StreamClosed)? {
-                Packet::Send(s) => {
-                    let Some(consumer_tx) = consumers.get_consumer(s.consumer_id).await else {
-                        continue;
-                    };
-                    consumer_tx.send(())?;
-                }
-                _ => return Err(Error::UnexpectedPacket),
+            Ok(Err(e)) => {
+                error!("{label} handle task exit error: {e}")
+            }
+            Err(e) => {
+                error!("{label} handle task panic: {e}")
             }
         }
-        Ok(())
     }
 }
