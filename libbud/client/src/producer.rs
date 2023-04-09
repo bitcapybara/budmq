@@ -1,7 +1,8 @@
+use bytes::Bytes;
 use libbud_common::protocol::ReturnCode;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::connector;
+use crate::connector::{self, OutgoingMessage};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -22,10 +23,11 @@ impl From<connector::Error> for Error {
     }
 }
 
+/// send by user
 pub struct ProducerMessage {
     pub topic: String,
     pub sequence_id: u64,
-    pub data: Vec<u8>,
+    pub data: Bytes,
     pub res_tx: oneshot::Sender<connector::Result<ReturnCode>>,
 }
 
@@ -34,7 +36,7 @@ pub struct Producer {
 }
 
 impl Producer {
-    pub fn new(topic: &str, tx: mpsc::UnboundedSender<ProducerMessage>) -> Self {
+    pub fn new(topic: &str, tx: mpsc::UnboundedSender<OutgoingMessage>) -> Self {
         todo!()
     }
 

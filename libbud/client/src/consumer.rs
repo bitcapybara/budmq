@@ -1,4 +1,7 @@
+use bytes::Bytes;
 use tokio::sync::mpsc;
+
+use crate::connector::OutgoingMessage;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -24,18 +27,28 @@ pub struct Subscribe {
     sub_type: SubType,
 }
 
+pub struct ConsumeMessage {
+    pub payload: Bytes,
+}
+
 pub struct Consumer {
-    permits: u64,
-    rx: mpsc::UnboundedReceiver<()>,
+    pub id: u64,
+    /// default total permits: 1000
+    current_permits: u64,
+    rx: mpsc::UnboundedReceiver<ConsumeMessage>,
 }
 
 impl Consumer {
-    pub async fn new(sub: &Subscribe, consumer_rx: mpsc::UnboundedReceiver<()>) -> Result<Self> {
+    pub async fn new(
+        sub: &Subscribe,
+        server_tx: mpsc::UnboundedSender<OutgoingMessage>,
+        consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+    ) -> Result<Self> {
         // send permits packet
         todo!()
     }
 
-    pub async fn next(&mut self) -> Option<()> {
+    pub async fn next(&mut self) -> Option<ConsumeMessage> {
         self.rx.recv().await
     }
 }

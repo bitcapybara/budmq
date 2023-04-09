@@ -1,5 +1,5 @@
-mod consumer;
-mod producer;
+mod reader;
+mod writer;
 
 use std::{io, net::SocketAddr};
 
@@ -11,9 +11,11 @@ use s2n_quic::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{client::Consumers, producer::ProducerMessage};
+use crate::client::Consumers;
 
-use self::{consumer::ConsumerTask, producer::ProducerTask};
+use self::{reader::Reader, writer::Writer};
+
+pub use writer::OutgoingMessage;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -83,21 +85,21 @@ impl Connector {
 
     pub async fn run(
         self,
-        producer_rx: mpsc::UnboundedReceiver<ProducerMessage>,
+        server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         consumers: Consumers,
     ) -> Result<()> {
         let (handle, acceptor) = self.connection.split();
 
         // producer task loop
-        let producer_task = ProducerTask::new(producer_rx, handle).run();
+        let producer_task = Writer::new(server_rx, handle).run();
         let producer_handle = tokio::spawn(producer_task);
 
         // consumer task loop
-        let consumer_task = ConsumerTask::new(acceptor, consumers).run();
+        let consumer_task = Reader::new(acceptor, consumers).run();
         let consumer_handle = tokio::spawn(consumer_task);
 
-        Self::wait(producer_handle, "producer").await;
-        Self::wait(consumer_handle, "consumer").await;
+        Self::wait(producer_handle, "connection reader").await;
+        Self::wait(consumer_handle, "connection writer").await;
 
         Ok(())
     }
