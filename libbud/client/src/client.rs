@@ -2,11 +2,15 @@ use std::{
     io,
     net::SocketAddr,
     sync::{atomic::AtomicU32, Arc},
+    time::Duration,
 };
 
-use libbud_common::{mtls::MtlsProvider, protocol};
+use libbud_common::{
+    mtls::MtlsProvider,
+    protocol::{self, Connect, Packet},
+};
 use s2n_quic::{connection, provider};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     connector::{self, Connector, OutgoingMessage},
@@ -78,6 +82,12 @@ impl From<connector::Error> for Error {
     }
 }
 
+impl From<oneshot::error::RecvError> for Error {
+    fn from(value: oneshot::error::RecvError) -> Self {
+        todo!()
+    }
+}
+
 pub struct Client {
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumers: Consumers,
@@ -95,10 +105,32 @@ impl Client {
             .run(server_rx, consumers.clone());
         let connector_handle = tokio::spawn(connector_task);
 
+        // send connect packet
+        const KEEP_ALIVE: u16 = 10000;
+        let (conn_res_tx, conn_res_rx) = oneshot::channel();
+        server_tx.send(OutgoingMessage {
+            packet: Packet::Connect(Connect {
+                keepalive: KEEP_ALIVE,
+            }),
+            res_tx: conn_res_tx,
+        })?;
+        let res = conn_res_rx.await?;
+
         Ok(Self {
             server_tx,
             consumers,
         })
+    }
+
+    // TODO Drop?
+    async fn close(self) -> Result<()> {
+        let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
+        self.server_tx.send(OutgoingMessage {
+            packet: Packet::Disconnect,
+            res_tx: disconn_res_tx,
+        })?;
+        let res = disconn_res_rx.await?;
+        Ok(())
     }
 
     pub async fn new_producer(&self, topic: &str) -> Result<Producer> {
