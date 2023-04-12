@@ -7,31 +7,39 @@ use crate::connector::{self, OutgoingMessage};
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    FromServer(ReturnCode),
+    Internal(String),
+    Connector(connector::Error),
+}
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::FromServer(code) => write!(f, "receive from server: {code}"),
+            Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Connector(e) => write!(f, "connector error: {e}"),
+        }
     }
 }
 
 impl From<connector::Error> for Error {
-    fn from(value: connector::Error) -> Self {
-        todo!()
+    fn from(e: connector::Error) -> Self {
+        Self::Connector(e)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(e: oneshot::error::RecvError) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
@@ -68,7 +76,9 @@ impl Producer {
             }),
             res_tx,
         })?;
-        let res = res_rx.await?;
-        Ok(())
+        match res_rx.await?? {
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
+        }
     }
 }

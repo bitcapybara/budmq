@@ -7,91 +7,64 @@ use std::{
 };
 
 use bytes::Bytes;
-use libbud_common::protocol::{ControlFlow, Packet};
+use libbud_common::{
+    protocol::{ControlFlow, Packet, ReturnCode, Subscribe},
+    subscription::{InitialPostion, SubType},
+};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-use crate::connector::OutgoingMessage;
+use crate::connector::{self, ConsumerSender, OutgoingMessage};
 
 pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    FromServer(ReturnCode),
+    Internal(String),
+    Connector(connector::Error),
+}
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::FromServer(code) => write!(f, "receive from server: {code}"),
+            Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Connector(e) => write!(f, "connector error: {e}"),
+        }
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(e: oneshot::error::RecvError) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
-pub enum SubType {
-    Exclusive,
-    Shared,
+impl From<connector::Error> for Error {
+    fn from(e: connector::Error) -> Self {
+        Self::Connector(e)
+    }
 }
 
-pub struct Subscribe {
+pub struct SubscribeMessage {
     topic: String,
     sub_name: String,
     sub_type: SubType,
+    initial_postion: InitialPostion,
 }
 
 pub struct ConsumeMessage {
     pub payload: Bytes,
-}
-
-#[derive(Clone)]
-pub struct ConsumerSender {
-    consumer_id: u64,
-    permits: Arc<AtomicU32>,
-    server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-    consumer_tx: mpsc::UnboundedSender<ConsumeMessage>,
-}
-
-impl ConsumerSender {
-    pub fn new(
-        consumer_id: u64,
-        permits: Arc<AtomicU32>,
-        server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-        consumer_tx: mpsc::UnboundedSender<ConsumeMessage>,
-    ) -> Self {
-        Self {
-            permits,
-            consumer_tx,
-            server_tx,
-            consumer_id,
-        }
-    }
-
-    pub fn send(&self, message: ConsumeMessage) -> Result<()> {
-        self.consumer_tx.send(message)?;
-        let prev = self.permits.fetch_sub(1, Ordering::SeqCst);
-        let (res_tx, res_rx) = oneshot::channel();
-        if prev <= CONSUME_CHANNEL_CAPACITY / 2 {
-            self.server_tx.send(OutgoingMessage {
-                packet: Packet::ControlFlow(ControlFlow {
-                    consumer_id: self.consumer_id,
-                    permits: self.permits.load(Ordering::SeqCst),
-                }),
-                res_tx,
-            })?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone)]
@@ -114,6 +87,7 @@ impl Consumers {
 
 pub struct Consumer {
     pub id: u64,
+    /// remaining space of the channel
     permits: Arc<AtomicU32>,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
@@ -123,21 +97,39 @@ impl Consumer {
     pub async fn new(
         id: u64,
         permits: Arc<AtomicU32>,
-        sub: &Subscribe,
+        sub: SubscribeMessage,
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
         consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     ) -> Result<Self> {
         // send permits packet on init
-        let (res_tx, res_rx) = oneshot::channel();
+        let (permits_res_tx, permits_res_rx) = oneshot::channel();
         server_tx.send(OutgoingMessage {
             packet: Packet::ControlFlow(ControlFlow {
                 consumer_id: id,
                 permits: permits.load(Ordering::SeqCst),
             }),
-            res_tx,
+            res_tx: permits_res_tx,
         })?;
-        let res = res_rx.await?;
-
+        match permits_res_rx.await?? {
+            ReturnCode::Success => {}
+            code => return Err(Error::FromServer(code)),
+        }
+        // send subscribe message
+        let (sub_res_tx, sub_res_rx) = oneshot::channel();
+        server_tx.send(OutgoingMessage {
+            packet: Packet::Subscribe(Subscribe {
+                topic: sub.topic,
+                sub_name: sub.sub_name,
+                sub_type: sub.sub_type,
+                consumer_id: id,
+                initial_position: sub.initial_postion,
+            }),
+            res_tx: sub_res_tx,
+        })?;
+        match sub_res_rx.await?? {
+            ReturnCode::Success => {}
+            code => return Err(Error::FromServer(code)),
+        }
         Ok(Self {
             id,
             permits,
@@ -147,7 +139,6 @@ impl Consumer {
     }
 
     pub async fn next(&mut self) -> Option<ConsumeMessage> {
-        // check permits and send
         let msg = self.consumer_rx.recv().await;
         if msg.is_some() {
             self.permits.fetch_add(1, Ordering::SeqCst);

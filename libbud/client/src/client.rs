@@ -1,89 +1,64 @@
 use std::{
-    io,
     net::SocketAddr,
     sync::{atomic::AtomicU32, Arc},
 };
 
 use libbud_common::{
     mtls::MtlsProvider,
-    protocol::{self, Connect, Packet},
+    protocol::{Connect, Packet, ReturnCode},
 };
-use s2n_quic::{connection, provider};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    connector::{self, Connector, OutgoingMessage},
-    consumer::{self, Consumer, ConsumerSender, Consumers, Subscribe, CONSUME_CHANNEL_CAPACITY},
-    producer::{self, Producer},
+    connector::{self, Connector, ConsumerSender, OutgoingMessage},
+    consumer::{self, Consumer, Consumers, SubscribeMessage, CONSUME_CHANNEL_CAPACITY},
+    producer::Producer,
 };
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    StreamClosed,
-    UnexpectedPacket,
+    FromServer(ReturnCode),
+    Internal(String),
+    Connector(connector::Error),
+    Consumer(consumer::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        todo!()
-    }
-}
-
-impl From<provider::StartError> for Error {
-    fn from(value: provider::StartError) -> Self {
-        todo!()
-    }
-}
-
-impl From<connection::Error> for Error {
-    fn from(value: connection::Error) -> Self {
-        todo!()
-    }
-}
-
-impl From<producer::Error> for Error {
-    fn from(value: producer::Error) -> Self {
-        todo!()
+        match self {
+            Error::FromServer(e) => write!(f, "receive server error: {e}"),
+            Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Connector(e) => write!(f, "connector error: {e}"),
+            Error::Consumer(e) => write!(f, "consumer error: {e}"),
+        }
     }
 }
 
 impl From<consumer::Error> for Error {
-    fn from(value: consumer::Error) -> Self {
-        todo!()
-    }
-}
-
-impl From<protocol::Error> for Error {
-    fn from(value: protocol::Error) -> Self {
-        todo!()
+    fn from(e: consumer::Error) -> Self {
+        Self::Consumer(e)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(value: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
 impl From<connector::Error> for Error {
-    fn from(value: connector::Error) -> Self {
-        todo!()
+    fn from(e: connector::Error) -> Self {
+        Self::Connector(e)
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(value: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(e: oneshot::error::RecvError) -> Self {
+        Self::Internal(e.to_string())
     }
 }
 
@@ -103,7 +78,8 @@ impl Client {
         let connector_task = Connector::new(addr, provider)
             .await?
             .run(server_rx, consumers.clone());
-        let connector_handle = tokio::spawn(connector_task);
+        // TODO End Notification and Waiting
+        tokio::spawn(connector_task);
 
         // send connect packet
         const KEEP_ALIVE: u16 = 10000;
@@ -114,7 +90,10 @@ impl Client {
             }),
             res_tx: conn_res_tx,
         })?;
-        let res = conn_res_rx.await?;
+        match conn_res_rx.await?? {
+            ReturnCode::Success => {}
+            code => return Err(Error::FromServer(code)),
+        }
 
         Ok(Self {
             server_tx,
@@ -130,8 +109,10 @@ impl Client {
             packet: Packet::Disconnect,
             res_tx: disconn_res_tx,
         })?;
-        let res = disconn_res_rx.await?;
-        Ok(())
+        match disconn_res_rx.await?? {
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
+        }
     }
 
     pub async fn new_producer(&self, topic: &str) -> Result<Producer> {
@@ -139,7 +120,7 @@ impl Client {
         Ok(producer)
     }
 
-    pub async fn new_consumer(&mut self, subscribe: &Subscribe) -> Result<Consumer> {
+    pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {
         let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
         let permits = Arc::new(AtomicU32::new(CONSUME_CHANNEL_CAPACITY));
         self.consumer_id_gen += 1;
