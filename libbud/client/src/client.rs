@@ -2,7 +2,6 @@ use std::{
     io,
     net::SocketAddr,
     sync::{atomic::AtomicU32, Arc},
-    time::Duration,
 };
 
 use libbud_common::{
@@ -89,6 +88,7 @@ impl From<oneshot::error::RecvError> for Error {
 }
 
 pub struct Client {
+    consumer_id_gen: u64,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumers: Consumers,
 }
@@ -119,6 +119,7 @@ impl Client {
         Ok(Self {
             server_tx,
             consumers,
+            consumer_id_gen: 0,
         })
     }
 
@@ -141,7 +142,9 @@ impl Client {
     pub async fn new_consumer(&mut self, subscribe: &Subscribe) -> Result<Consumer> {
         let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
         let permits = Arc::new(AtomicU32::new(CONSUME_CHANNEL_CAPACITY));
+        self.consumer_id_gen += 1;
         let consumer = Consumer::new(
+            self.consumer_id_gen,
             permits.clone(),
             subscribe,
             self.server_tx.clone(),

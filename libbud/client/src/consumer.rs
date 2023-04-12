@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
 };
@@ -29,6 +29,12 @@ impl std::fmt::Display for Error {
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(value: mpsc::error::SendError<T>) -> Self {
+        todo!()
+    }
+}
+
+impl From<oneshot::error::RecvError> for Error {
+    fn from(value: oneshot::error::RecvError) -> Self {
         todo!()
     }
 }
@@ -108,20 +114,36 @@ impl Consumers {
 
 pub struct Consumer {
     pub id: u64,
-    permits: Arc<AtomicU64>,
+    permits: Arc<AtomicU32>,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
 }
 
 impl Consumer {
     pub async fn new(
+        id: u64,
         permits: Arc<AtomicU32>,
         sub: &Subscribe,
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
         consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     ) -> Result<Self> {
         // send permits packet on init
-        todo!()
+        let (res_tx, res_rx) = oneshot::channel();
+        server_tx.send(OutgoingMessage {
+            packet: Packet::ControlFlow(ControlFlow {
+                consumer_id: id,
+                permits: permits.load(Ordering::SeqCst),
+            }),
+            res_tx,
+        })?;
+        let res = res_rx.await?;
+
+        Ok(Self {
+            id,
+            permits,
+            server_tx,
+            consumer_rx,
+        })
     }
 
     pub async fn next(&mut self) -> Option<ConsumeMessage> {
