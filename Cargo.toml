@@ -8,12 +8,18 @@ members = [
 ]
 
 [workspace.dependencies]
+anyhow = "1.0.70"
 bytes = "~1.4"
+clap = { version = "4.2.1", features = ["derive", "env"] }
+chrono = "~0.4"
+rustls-pemfile = "~1.0"
+flexi_logger = { version = "0.25.3", features = ["compress"] }
 futures = "~0.3"
 libbud-common = { version = "~0.1", path = "libbud/common" }
+libbud-server = { version = "~0.1", path = "libbud/server" }
 log = "~0.4"
 once_cell = "~1.17"
 roaring = "~0.10"
 s2n-quic = { version = "~1.18", features = ["provider-address-token-default", "provider-tls-rustls"] }
-tokio = { version = "~1.27", features = ["sync"] }
+tokio = "~1.27"
 tokio-util = { version = "~0.7", features = ["codec"] }

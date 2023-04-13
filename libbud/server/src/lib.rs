@@ -10,4 +10,5 @@ mod storage;
 mod subscription;
 mod topic;
 
-pub const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
+pub(crate) const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
+pub use server::{Error, Server};

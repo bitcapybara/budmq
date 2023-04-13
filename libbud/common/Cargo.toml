@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytes = "~1.4"
-chrono = "~0.4"
-rustls-pemfile = "~1.0"
-s2n-quic = { version = "~1.18", features = ["provider-address-token-default", "provider-tls-rustls"] }
-tokio-util = { version = "~0.7", features = ["codec"] }
+bytes.workspace = true
+chrono.workspace = true
+rustls-pemfile.workspace = true
+s2n-quic.workspace = true
+tokio-util.workspace = true
