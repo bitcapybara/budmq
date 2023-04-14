@@ -1,13 +1,17 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
 use libbud_common::mtls::MtlsProvider;
-use log::{error, info};
+use log::error;
 use s2n_quic::{connection, provider, Connection};
-use tokio::sync::{mpsc, watch};
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+};
 
 use crate::{
     broker::{self, Broker},
     client::Client,
+    helper::wait,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -64,33 +68,54 @@ impl Server {
         }
     }
 
-    pub async fn start(mut self, close_rx: watch::Receiver<()>) -> Result<()> {
+    pub async fn start(self, close_rx: watch::Receiver<()>) -> Result<()> {
+        // start broker loop
+        let (broker_tx, broker_rx) = mpsc::unbounded_channel();
+        let broker_task = Broker::new().run(broker_rx, close_rx.clone());
+        let broker_handle = tokio::spawn(broker_task);
+
+        // start server loop
+        let server_task = self.handle_accept(broker_tx, close_rx);
+        let server_handle = tokio::spawn(server_task);
+
+        // wait for broker
+        wait(broker_handle, "broker task loop").await;
+        // wait for server
+        wait(server_handle, "server task loop").await;
+
+        Ok(())
+    }
+
+    async fn handle_accept(
+        mut self,
+        broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
+        mut close_rx: watch::Receiver<()>,
+    ) -> Result<()> {
         // unwrap: with_tls error is infallible
         let mut server = s2n_quic::Server::builder()
             .with_tls(self.provider)
             .unwrap()
             .with_io(self.addr)?
             .start()?;
-
-        let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker = Broker::new();
-        let broker_handle = tokio::spawn(broker.run(broker_rx, close_rx));
-
         // one connection per client
-        while let Some(conn) = server.accept().await {
-            let local = conn.local_addr()?.to_string();
-            let client_id = self.client_id_gen;
-            self.client_id_gen += 1;
-            // start client
-            let task = Self::handle_conn(local, client_id, conn, broker_tx.clone());
-            tokio::spawn(task);
+        loop {
+            select! {
+                conn = server.accept() => {
+                    let Some(conn) = conn else {
+                        return Ok(())
+                    };
+                    let local = conn.local_addr()?.to_string();
+                    let client_id = self.client_id_gen;
+                    self.client_id_gen += 1;
+                    // start client
+                    let task = Self::handle_conn(local, client_id, conn, broker_tx.clone());
+                    tokio::spawn(task);
+                }
+                _ = close_rx.changed() => {
+                    return Ok(())
+                }
+            }
         }
-
-        match broker_handle.await {
-            Ok(_) => info!("broker exit successfully"),
-            Err(e) => error!("broker panic: {e}"),
-        }
-        Ok(())
     }
 
     async fn handle_conn(

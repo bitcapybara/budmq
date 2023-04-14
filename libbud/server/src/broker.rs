@@ -132,7 +132,7 @@ impl Broker {
         self,
         broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
         close_rx: watch::Receiver<()>,
-    ) {
+    ) -> Result<()> {
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
         let sub_task = self.clone().receive_subscription(send_rx, close_rx.clone());
@@ -146,6 +146,8 @@ impl Broker {
 
         wait(sub_handle, "broker subscription").await;
         wait(client_handle, "broker client").await;
+
+        Ok(())
     }
 
     /// process send event from all subscriptions

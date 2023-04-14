@@ -16,7 +16,7 @@ use tokio::sync::watch;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
-    #[arg(short, long, default_value = "../certs", env = "BUD_SERVER_CERTS_DIR")]
+    #[arg(short, long, default_value = "./certs", env = "BUD_SERVER_CERTS_DIR")]
     cert_dir: PathBuf,
     #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_ADDR")]
     addr: String,
@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
 
     // start server
     let ca = read_file(&args.cert_dir.join("ca.pem"))?;
-    let server_cert = read_file(&args.cert_dir.join("ca_server.pem"))?;
+    let server_cert = read_file(&args.cert_dir.join("server.pem"))?;
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
     let server = Server::new(provider, SocketAddr::new(args.addr.parse()?, args.port));
