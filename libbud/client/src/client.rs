@@ -115,9 +115,8 @@ impl Client {
         }
     }
 
-    pub async fn new_producer(&self, topic: &str) -> Result<Producer> {
-        let producer = Producer::new(topic, self.server_tx.clone());
-        Ok(producer)
+    pub fn new_producer(&self, topic: &str) -> Producer {
+        Producer::new(topic, self.server_tx.clone())
     }
 
     pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {
