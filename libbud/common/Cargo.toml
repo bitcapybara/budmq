@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bytes.workspace = true
 chrono.workspace = true
+openssl.workspace = true
 rustls-pemfile.workspace = true
 s2n-quic.workspace = true
 tokio-util.workspace = true
