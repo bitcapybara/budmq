@@ -11,3 +11,6 @@ log.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread" ] }
 libbud-server.workspace = true
 libbud-common.workspace = true
+signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
+signal-hook = "0.3.15"
+futures.workspace = true
