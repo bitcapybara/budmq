@@ -57,10 +57,10 @@ impl From<connector::Error> for Error {
 }
 
 pub struct SubscribeMessage {
-    topic: String,
-    sub_name: String,
-    sub_type: SubType,
-    initial_postion: InitialPostion,
+    pub topic: String,
+    pub sub_name: String,
+    pub sub_type: SubType,
+    pub initial_postion: InitialPostion,
 }
 
 pub struct ConsumeMessage {
