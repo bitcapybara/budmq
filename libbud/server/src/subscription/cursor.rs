@@ -1,3 +1,4 @@
+use libbud_common::storage::Storage;
 use roaring::RoaringTreemap;
 
 use crate::storage::CursorStorage;
@@ -8,7 +9,7 @@ use super::Result;
 /// persistent
 /// memory
 #[derive(Clone)]
-pub struct Cursor {
+pub struct Cursor<S> {
     /// current read cursor position
     /// init by init_position arg
     read_position: u64,
@@ -19,12 +20,12 @@ pub struct Cursor {
     /// message ack info
     bits: RoaringTreemap,
     /// storage
-    storage: CursorStorage,
+    storage: CursorStorage<S>,
 }
 
-impl Cursor {
-    pub async fn new(sub_name: &str) -> Result<Self> {
-        let storage = CursorStorage::new(sub_name)?;
+impl<S: Storage> Cursor<S> {
+    pub async fn new(sub_name: &str, storage: S) -> Result<Self> {
+        let storage = CursorStorage::new(sub_name, storage)?;
         let read_position = storage.get_read_position().await?.unwrap_or_default();
         let latest_message_id = storage.get_latest_message_id().await?.unwrap_or_default();
         let bits = storage.get_ack_bits().await?.unwrap_or_default();

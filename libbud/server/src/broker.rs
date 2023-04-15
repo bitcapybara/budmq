@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use libbud_common::protocol::{self, Packet, ReturnCode, Send, Unsubscribe};
+use libbud_common::{
+    protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
+    storage::Storage,
+};
 use log::error;
 use tokio::{
     select,
@@ -113,16 +116,19 @@ impl Session {
 }
 
 #[derive(Clone)]
-pub struct Broker {
+pub struct Broker<S> {
+    /// storage
+    storage: S,
     /// key = client_id
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
-    topics: Arc<RwLock<HashMap<String, Topic>>>,
+    topics: Arc<RwLock<HashMap<String, Topic<S>>>>,
 }
 
-impl Broker {
-    pub fn new() -> Self {
+impl<S: Storage> Broker<S> {
+    pub fn new(storage: S) -> Self {
         Self {
+            storage,
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -334,6 +340,7 @@ impl Broker {
                                 sub.consumer_id,
                                 &sub,
                                 send_tx.clone(),
+                                self.storage.clone(),
                             )
                             .await?;
                             sp.add_consumer(client_id, &sub).await?;
@@ -341,12 +348,14 @@ impl Broker {
                         }
                     },
                     None => {
-                        let mut topic = Topic::new(&sub.topic, send_tx.clone()).await?;
+                        let mut topic =
+                            Topic::new(&sub.topic, send_tx.clone(), self.storage.clone()).await?;
                         let sp = Subscription::from_subscribe(
                             client_id,
                             sub.consumer_id,
                             &sub,
                             send_tx.clone(),
+                            self.storage.clone(),
                         )
                         .await?;
                         topic.add_subscription(sp);

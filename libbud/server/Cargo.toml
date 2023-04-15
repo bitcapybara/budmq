@@ -14,7 +14,3 @@ s2n-quic.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 
-[features]
-default = [ "memory" ]
-memory = []
-persist = []

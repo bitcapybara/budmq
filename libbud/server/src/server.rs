@@ -1,6 +1,6 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
-use libbud_common::mtls::MtlsProvider;
+use libbud_common::{mtls::MtlsProvider, storage::Storage};
 use log::error;
 use s2n_quic::{connection, provider, Connection};
 use tokio::{
@@ -68,10 +68,10 @@ impl Server {
         }
     }
 
-    pub async fn start(self, close_rx: watch::Receiver<()>) -> Result<()> {
+    pub async fn start<S: Storage>(self, storage: S, close_rx: watch::Receiver<()>) -> Result<()> {
         // start broker loop
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new().run(broker_rx, close_rx.clone());
+        let broker_task = Broker::new(storage).run(broker_rx, close_rx.clone());
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop

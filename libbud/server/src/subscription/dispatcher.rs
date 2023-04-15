@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use libbud_common::storage::Storage;
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
@@ -26,26 +27,26 @@ pub enum Notify {
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
 #[derive(Clone)]
-pub struct Dispatcher {
+pub struct Dispatcher<S> {
     /// save all consumers in memory
     consumers: Arc<RwLock<Consumers>>,
     /// cursor
-    cursor: Arc<RwLock<Cursor>>,
+    cursor: Arc<RwLock<Cursor<S>>>,
 }
 
-impl Dispatcher {
+impl<S: Storage> Dispatcher<S> {
     /// load from storage
-    pub async fn new(sub_name: &str) -> Result<Self> {
+    pub async fn new(sub_name: &str, storage: S) -> Result<Self> {
         Ok(Self {
             consumers: Arc::new(RwLock::new(Consumers::empty())),
-            cursor: Arc::new(RwLock::new(Cursor::new(sub_name).await?)),
+            cursor: Arc::new(RwLock::new(Cursor::new(sub_name, storage).await?)),
         })
     }
 
-    pub async fn with_consumer(consumer: Consumer) -> Result<Self> {
+    pub async fn with_consumer(consumer: Consumer, storage: S) -> Result<Self> {
         let sub_name = consumer.sub_name.clone();
         let consumers = Arc::new(RwLock::new(Consumers::from_consumer(consumer)));
-        let cursor = Arc::new(RwLock::new(Cursor::new(&sub_name).await?));
+        let cursor = Arc::new(RwLock::new(Cursor::new(&sub_name, storage).await?));
         Ok(Self { consumers, cursor })
     }
 

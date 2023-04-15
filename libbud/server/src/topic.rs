@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use bytes::Bytes;
-use libbud_common::protocol::Publish;
+use libbud_common::{protocol::Publish, storage::Storage};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -65,30 +65,35 @@ pub struct SubscriptionId {
 
 /// Save all messages associated with this topic in subscription
 /// Save subscription associated with this topic in memory
-pub struct Topic {
+pub struct Topic<S> {
     /// topic name
     pub name: String,
     /// producer message sequence id
     seq_id: u64,
     /// all subscriptions in memory
     /// key = sub_name
-    subscriptions: HashMap<String, Subscription>,
+    subscriptions: HashMap<String, Subscription<S>>,
     /// message storage
-    storage: TopicStorage,
+    storage: TopicStorage<S>,
     /// delete position
     delete_position: u64,
 }
 
-impl Topic {
-    pub async fn new(topic: &str, send_tx: mpsc::UnboundedSender<SendEvent>) -> Result<Self> {
-        let storage = TopicStorage::new(topic)?;
+impl<S: Storage> Topic<S> {
+    pub async fn new(
+        topic: &str,
+        send_tx: mpsc::UnboundedSender<SendEvent>,
+        store: S,
+    ) -> Result<Self> {
+        let storage = TopicStorage::new(topic, store.clone())?;
         let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = u64::MAX;
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
-            let subscription = Subscription::new(&sub.topic, &sub.name, send_tx.clone()).await?;
+            let subscription =
+                Subscription::new(&sub.topic, &sub.name, send_tx.clone(), store.clone()).await?;
             let sub_delete_pos = subscription.delete_position().await;
             if sub_delete_pos < delete_position {
                 delete_position = sub_delete_pos;
@@ -104,15 +109,15 @@ impl Topic {
         })
     }
 
-    pub fn add_subscription(&mut self, sub: Subscription) {
+    pub fn add_subscription(&mut self, sub: Subscription<S>) {
         self.subscriptions.insert(sub.name.clone(), sub);
     }
 
-    pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription> {
+    pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription<S>> {
         self.subscriptions.remove(sub_name)
     }
 
-    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription> {
+    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<S>> {
         self.subscriptions.get(sub_name)
     }
 

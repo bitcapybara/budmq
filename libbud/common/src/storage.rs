@@ -2,7 +2,7 @@ use std::array;
 
 use async_trait::async_trait;
 
-mod memory;
+pub mod memory;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -24,7 +24,7 @@ impl From<array::TryFromSliceError> for Error {
 }
 
 #[async_trait]
-pub trait Storage: Clone {
+pub trait Storage: Clone + Send + Sync + 'static {
     async fn put(&self, k: &[u8], v: &[u8]) -> Result<()>;
 
     async fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>>;

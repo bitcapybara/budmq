@@ -8,7 +8,7 @@ use std::{
 use clap::Parser;
 use flexi_logger::{detailed_format, Age, Cleanup, Criterion, FileSpec, Logger, Naming};
 use futures::StreamExt;
-use libbud_common::mtls::MtlsProvider;
+use libbud_common::{mtls::MtlsProvider, storage::memory::MemoryStorage};
 use libbud_server::Server;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
@@ -71,6 +71,8 @@ async fn run(server: Server) -> anyhow::Result<()> {
         handle.close();
     });
 
-    server.start(close_rx).await?;
+    // use memory storage
+    let storage = MemoryStorage::new();
+    server.start(storage, close_rx).await?;
     Ok(())
 }

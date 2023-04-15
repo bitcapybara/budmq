@@ -5,6 +5,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use libbud_common::{
     protocol::Subscribe,
+    storage::Storage,
     subscription::{InitialPostion, SubType},
 };
 use tokio::sync::{mpsc, oneshot};
@@ -156,22 +157,23 @@ impl From<Consumer> for ConsumersType {
 
 /// save cursor in persistent
 /// save consumers in memory
-pub struct Subscription {
+pub struct Subscription<S> {
     pub topic: String,
     pub name: String,
-    dispatcher: Dispatcher,
+    dispatcher: Dispatcher<S>,
     notify_tx: mpsc::UnboundedSender<Notify>,
 }
 
-impl Subscription {
+impl<S: Storage> Subscription<S> {
     /// load from storage
     pub async fn new(
         topic: &str,
         sub_name: &str,
         send_tx: mpsc::UnboundedSender<SendEvent>,
+        storage: S,
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
-        let dispatcher = Dispatcher::new(sub_name).await?;
+        let dispatcher = Dispatcher::new(sub_name, storage).await?;
         tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
         Ok(Self {
             topic: topic.to_string(),
@@ -186,11 +188,12 @@ impl Subscription {
         consumer_id: u64,
         sub: &Subscribe,
         send_tx: mpsc::UnboundedSender<SendEvent>,
+        storage: S,
     ) -> Result<Self> {
         // start dispatch
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(client_id, consumer_id, sub);
-        let dispatcher = Dispatcher::with_consumer(consumer).await?;
+        let dispatcher = Dispatcher::with_consumer(consumer, storage).await?;
         tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
         Ok(Self {
             topic: sub.topic.clone(),

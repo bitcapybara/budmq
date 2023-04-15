@@ -18,6 +18,12 @@ impl MemoryStorage {
     }
 }
 
+impl Default for MemoryStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Storage for MemoryStorage {
     async fn put(&self, k: &[u8], v: &[u8]) -> Result<()> {
