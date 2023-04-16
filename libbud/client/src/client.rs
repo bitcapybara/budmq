@@ -75,10 +75,9 @@ impl Client {
         let consumers = Consumers::new();
 
         // connector task loop
-        let connector_task = Connector::new(addr, provider)
-            .await?
-            .run(server_rx, consumers.clone());
+        let connector_task = Connector::new(addr, provider).run(server_rx, consumers.clone());
         // TODO End Notification and Waiting
+        // TODO connect and reconnect
         tokio::spawn(connector_task);
 
         // send connect packet

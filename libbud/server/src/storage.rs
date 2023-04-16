@@ -23,25 +23,32 @@ pub enum Error {
     Io(io::Error),
     DecodeSlice(array::TryFromSliceError),
     DecodeString(string::FromUtf8Error),
+    Storage(storage::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::InvalidRange => write!(f, "invalid range"),
+            Error::Io(e) => write!(f, "io error: {e}"),
+            Error::DecodeSlice(e) => write!(f, "decode slice error: {e}"),
+            Error::DecodeString(e) => write!(f, "decode string error: {e}"),
+            Error::Storage(e) => write!(f, "storage error: {e}"),
+        }
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        todo!()
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
     }
 }
 
 impl From<storage::Error> for Error {
-    fn from(value: storage::Error) -> Self {
-        todo!()
+    fn from(e: storage::Error) -> Self {
+        Self::Storage(e)
     }
 }
 

@@ -7,19 +7,23 @@ pub mod memory;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    DecodeSlice(array::TryFromSliceError),
+}
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            Error::DecodeSlice(e) => write!(f, "decode from slice error: {e}"),
+        }
     }
 }
 
 impl From<array::TryFromSliceError> for Error {
-    fn from(value: array::TryFromSliceError) -> Self {
-        todo!()
+    fn from(e: array::TryFromSliceError) -> Self {
+        Self::DecodeSlice(e)
     }
 }
 

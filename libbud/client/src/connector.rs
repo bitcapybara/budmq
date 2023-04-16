@@ -10,7 +10,7 @@ use libbud_common::{
 use log::{error, info};
 use s2n_quic::{
     client::{self, Connect},
-    connection, provider, Connection,
+    connection, provider,
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -95,7 +95,7 @@ pub struct Connector {
 }
 
 impl Connector {
-    pub async fn new(addr: SocketAddr, provider: MtlsProvider) -> Self {
+    pub fn new(addr: SocketAddr, provider: MtlsProvider) -> Self {
         Self { addr, provider }
     }
 

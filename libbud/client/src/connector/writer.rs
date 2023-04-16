@@ -35,7 +35,7 @@ impl Writer {
                 let mut framed = Framed::new(stream, PacketCodec);
                 // send publish message
                 if let Err(e) = framed.send(msg.packet).await {
-                    if let Err(e) = msg.res_tx.send(Err(e.into())) {
+                    if msg.res_tx.send(Err(e.into())).is_err() {
                         error!("client writer wait channel dropped");
                     }
                     return;
@@ -63,7 +63,7 @@ impl Writer {
                         return;
                     }
                 };
-                if let Err(e) = msg.res_tx.send(Ok(code)) {
+                if msg.res_tx.send(Ok(code)).is_err() {
                     error!("client writer wait channel dropped");
                 }
             });
