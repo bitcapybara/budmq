@@ -66,6 +66,16 @@ pub struct SendEvent {
     pub res_tx: oneshot::Sender<bool>,
 }
 
+impl std::fmt::Display for SendEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            r#"{{ "client_id": {}, "consumer_id": {}, "topic": {}, "message_id": {} }}"#,
+            self.client_id, self.consumer_id, self.topic_name, self.message_id
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Consumer {
     client_id: u64,

@@ -14,7 +14,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     broker::{BrokerMessage, ClientMessage},
-    helper::wait,
+    helper::wait_result,
 };
 
 use self::{reader::Reader, writer::Writer};
@@ -162,8 +162,8 @@ impl Client {
         let write_handle = tokio::spawn(write_task);
 
         // wait until the end
-        wait(read_handle, "client read").await;
-        wait(write_handle, "client write").await;
+        wait_result(read_handle, "client read").await;
+        wait_result(write_handle, "client write").await;
         Ok(())
     }
 }

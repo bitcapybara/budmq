@@ -133,6 +133,7 @@ impl TryFrom<u8> for SubType {
     }
 }
 
+#[derive(Debug)]
 #[repr(u8)]
 pub enum PacketType {
     Connect = 1,
@@ -192,6 +193,22 @@ impl Packet {
             Packet::Ping => Ok(()),
             Packet::Pong => Ok(()),
             Packet::Disconnect => Ok(()),
+        }
+    }
+
+    pub fn packet_type(&self) -> PacketType {
+        match self {
+            Packet::Connect(_) => PacketType::Connect,
+            Packet::Subscribe(_) => PacketType::Subscribe,
+            Packet::Unsubscribe(_) => PacketType::Unsubscribe,
+            Packet::Publish(_) => PacketType::Publish,
+            Packet::Send(_) => PacketType::Send,
+            Packet::ConsumeAck(_) => PacketType::ConsumeAck,
+            Packet::ControlFlow(_) => PacketType::ControlFlow,
+            Packet::ReturnCode(_) => PacketType::ReturnCode,
+            Packet::Ping => PacketType::Ping,
+            Packet::Pong => PacketType::Pong,
+            Packet::Disconnect => PacketType::Disconnect,
         }
     }
 }

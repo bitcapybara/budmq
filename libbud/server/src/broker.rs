@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use libbud_common::{
-    protocol::{self, Packet, ReturnCode, Send, Unsubscribe},
+    protocol::{self, Packet, PacketType, ReturnCode, Send, Unsubscribe},
     storage::Storage,
 };
-use log::error;
+use log::{debug, error};
 use tokio::{
     select,
     sync::{mpsc, oneshot, watch, RwLock},
@@ -29,6 +29,9 @@ pub enum Error {
     ReturnCode(ReturnCode),
     Subscription(subscription::Error),
     Topic(topic::Error),
+    UnsupportedPacket(PacketType),
+    /// do not throw
+    Internal(String),
 }
 
 impl std::error::Error for Error {}
@@ -42,6 +45,8 @@ impl Display for Error {
             Error::ReturnCode(c) => write!(f, "Receive ReturnCode {c}"),
             Error::Subscription(e) => write!(f, "Subscription error: {e}"),
             Error::Topic(e) => write!(f, "Topic error: {e}"),
+            Error::Internal(s) => write!(f, "Internal error: {s}"),
+            Error::UnsupportedPacket(t) => write!(f, "Unsupported packet type: {t:?}"),
         }
     }
 }
@@ -138,7 +143,7 @@ impl<S: Storage> Broker<S> {
         self,
         broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
         close_rx: watch::Receiver<()>,
-    ) -> Result<()> {
+    ) {
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
         let sub_task = self.clone().receive_subscription(send_rx, close_rx.clone());
@@ -152,8 +157,6 @@ impl<S: Storage> Broker<S> {
 
         wait(sub_handle, "broker subscription").await;
         wait(client_handle, "broker client").await;
-
-        Ok(())
     }
 
     /// process send event from all subscriptions
@@ -161,30 +164,33 @@ impl<S: Storage> Broker<S> {
         self,
         mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
         mut close_rx: watch::Receiver<()>,
-    ) -> Result<()> {
+    ) {
         loop {
             select! {
                 event = send_rx.recv() => {
                     let Some(event) = event else {
-                        return Ok(())
+                        return
                     };
-                    self.process_send_event(event).await?;
+                    if let Err(e) = self.process_send_event(event).await {
+                        error!("broker send message to consumer error: {e}")
+                    }
                 }
                 _ = close_rx.changed() => {
-                    return Ok(())
+                    return
                 }
             }
         }
     }
 
     async fn process_send_event(&self, event: SendEvent) -> Result<()> {
+        debug!("send packet to consumer: {event}");
         let topics = self.topics.read().await;
         let Some(topic) = topics.get(&event.topic_name) else {
-                unreachable!()
-            };
+            return Err(Error::Internal(format!("topic {} not found", event.topic_name)));
+        };
         let Some(message) = topic.get_message(event.message_id).await? else {
-                unreachable!()
-            };
+            return Err(Error::Internal(format!("message {} not found", event.message_id)));
+        };
         let clients = self.clients.read().await;
         if let Some(session) = clients.get(&event.client_id) {
             let (res_tx, res_rx) = oneshot::channel();
@@ -231,17 +237,19 @@ impl<S: Storage> Broker<S> {
         send_tx: mpsc::UnboundedSender<SendEvent>,
         mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
         mut close_rx: watch::Receiver<()>,
-    ) -> Result<()> {
+    ) {
         loop {
             select! {
                 msg = broker_rx.recv() => {
                     let Some(msg) = msg else {
-                        return Ok(())
+                        return
                     };
-                    self.process_packets(msg, send_tx.clone()).await?;
+                    if let Err(e) = self.process_packets(msg, send_tx.clone()).await {
+                        error!("broker process client packet error: {e}")
+                    }
                 }
                 _ = close_rx.changed() => {
-                    return Ok(())
+                    return
                 }
             }
         }
@@ -257,10 +265,10 @@ impl<S: Storage> Broker<S> {
         match msg.packet {
             Packet::Connect(_) => {
                 let Some(res_tx) = msg.res_tx else {
-                    unreachable!()
+                    return Err(Error::Internal("Connect res_tx channel not found".to_string()))
                 };
                 let Some(client_tx) = msg.client_tx else {
-                    unreachable!()
+                    return Err(Error::Internal("Connect client_tx channel not found".to_string()))
                 };
                 let mut clients = self.clients.write().await;
                 if clients.contains_key(&client_id) {
@@ -403,10 +411,10 @@ impl<S: Storage> Broker<S> {
                 };
                 let topics = self.topics.read().await;
                 let Some(topic) = topics.get(&info.topic_name) else {
-                    unreachable!()
+                    return Err(Error::Internal(format!("topic {} not found", info.topic_name)))
                 };
                 let Some(sp) = topic.get_subscription(&info.sub_name) else {
-                    unreachable!()
+                    return Err(Error::Internal(format!("subscription {} not found", info.sub_name)))
                 };
                 sp.additional_permits(client_id, c.consumer_id, c.permits)?;
             }
@@ -421,11 +429,11 @@ impl<S: Storage> Broker<S> {
                 };
                 let mut topics = self.topics.write().await;
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
-                    unreachable!()
+                    return Err(Error::Internal(format!("topic {} not found", info.topic_name)))
                 };
                 topic.consume_ack(&info.sub_name, c.message_id).await?;
             }
-            _ => unreachable!(),
+            p => return Err(Error::UnsupportedPacket(p.packet_type())),
         }
         Ok(())
     }

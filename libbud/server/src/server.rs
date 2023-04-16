@@ -11,7 +11,7 @@ use tokio::{
 use crate::{
     broker::{self, Broker},
     client::Client,
-    helper::wait,
+    helper::{wait, wait_result},
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -81,7 +81,7 @@ impl Server {
         // wait for broker
         wait(broker_handle, "broker task loop").await;
         // wait for server
-        wait(server_handle, "server task loop").await;
+        wait_result(server_handle, "server task loop").await;
 
         Ok(())
     }

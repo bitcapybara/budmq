@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use libbud_common::{
-    protocol::{ControlFlow, Packet, ReturnCode, Subscribe},
+    protocol::{ConsumeAck, ControlFlow, Packet, ReturnCode, Subscribe},
     subscription::{InitialPostion, SubType},
 };
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -144,5 +144,20 @@ impl Consumer {
             self.permits.fetch_add(1, Ordering::SeqCst);
         }
         msg
+    }
+
+    pub async fn ack(&self, message_id: u64) -> Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
+        self.server_tx.send(OutgoingMessage {
+            packet: Packet::ConsumeAck(ConsumeAck {
+                consumer_id: self.id,
+                message_id,
+            }),
+            res_tx,
+        })?;
+        match res_rx.await?? {
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
+        }
     }
 }
