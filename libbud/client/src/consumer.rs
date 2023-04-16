@@ -64,6 +64,7 @@ pub struct SubscribeMessage {
 }
 
 pub struct ConsumeMessage {
+    pub id: u64,
     pub payload: Bytes,
 }
 

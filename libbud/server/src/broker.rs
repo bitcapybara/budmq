@@ -196,6 +196,7 @@ impl<S: Storage> Broker<S> {
             let (res_tx, res_rx) = oneshot::channel();
             session.client_tx.send(BrokerMessage {
                 packet: Packet::Send(Send {
+                    message_id: event.message_id,
                     consumer_id: event.consumer_id,
                     payload: message.payload,
                 }),

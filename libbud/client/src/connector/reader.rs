@@ -39,7 +39,13 @@ impl Reader {
                             warn!("recv a message but consumer not found");
                             return
                         };
-                        if let Err(e) = sender.send(ConsumeMessage { payload: s.payload }).await {
+                        if let Err(e) = sender
+                            .send(ConsumeMessage {
+                                payload: s.payload,
+                                id: s.message_id,
+                            })
+                            .await
+                        {
                             error!("send message to consumer error: {e}")
                         }
                     }
