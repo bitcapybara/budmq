@@ -1,10 +1,16 @@
 use futures::{SinkExt, TryStreamExt};
 use libbud_common::protocol::{Packet, PacketCodec, ReturnCode};
+use log::error;
 use s2n_quic::connection::Handle;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::timeout,
+};
 use tokio_util::codec::Framed;
 
-use super::{Error, Result};
+use crate::WAIT_REPLY_TIMEOUT;
+
+use super::Result;
 
 pub struct OutgoingMessage {
     pub packet: Packet,
@@ -25,22 +31,42 @@ impl Writer {
         while let Some(msg) = self.server_rx.recv().await {
             // send message to connection
             let stream = self.handle.open_bidirectional_stream().await?;
-            let mut framed = Framed::new(stream, PacketCodec);
-            // send publish message
-            if let Err(e) = framed.send(msg.packet).await {
-                msg.res_tx
-                    .send(Err(e.into()))
-                    .map_err(|_| Error::WaitChannelDropped)?;
-                continue;
-            }
-            // wait for ack
-            // TODO timout
-            let Packet::ReturnCode(code) = framed.try_next().await?.ok_or(Error::StreamClosed)? else {
-                return Err(Error::UnexpectedPacket);
-            };
-            msg.res_tx
-                .send(Ok(code))
-                .map_err(|_| Error::WaitChannelDropped)?;
+            tokio::spawn(async move {
+                let mut framed = Framed::new(stream, PacketCodec);
+                // send publish message
+                if let Err(e) = framed.send(msg.packet).await {
+                    if let Err(e) = msg.res_tx.send(Err(e.into())) {
+                        error!("client writer wait channel dropped");
+                    }
+                    return;
+                }
+                // wait for ack
+                let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
+                    Ok(Ok(Some(Packet::ReturnCode(code)))) => code,
+                    Ok(Ok(Some(p))) => {
+                        error!(
+                            "client writer: expected Packet::ReturnCode, found {:?}",
+                            p.packet_type()
+                        );
+                        return;
+                    }
+                    Ok(Ok(None)) => {
+                        error!("client writer: framed stream dropped");
+                        return;
+                    }
+                    Ok(Err(e)) => {
+                        error!("client writer frame error: {e}");
+                        return;
+                    }
+                    Err(_) => {
+                        error!("client writer wait for reply timeout");
+                        return;
+                    }
+                };
+                if let Err(e) = msg.res_tx.send(Ok(code)) {
+                    error!("client writer wait channel dropped");
+                }
+            });
         }
         Ok(())
     }

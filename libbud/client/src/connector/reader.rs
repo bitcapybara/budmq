@@ -5,7 +5,7 @@ use std::sync::{
 
 use futures::TryStreamExt;
 use libbud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
-use log::warn;
+use log::{error, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
@@ -30,17 +30,30 @@ impl Reader {
     pub async fn run(mut self) -> Result<()> {
         // receive message from broker
         while let Some(stream) = self.acceptor.accept_bidirectional_stream().await? {
-            let mut framed = Framed::new(stream, PacketCodec);
-            match framed.try_next().await?.ok_or(Error::StreamClosed)? {
-                Packet::Send(s) => {
-                    let Some(sender) = self.consumers.get_consumer(s.consumer_id).await else {
-                        warn!("recv a message but consumer not found");
-                        continue;
-                    };
-                    sender.send(ConsumeMessage { payload: s.payload }).await?;
+            let consumers = self.consumers.clone();
+            tokio::spawn(async move {
+                let mut framed = Framed::new(stream, PacketCodec);
+                match framed.try_next().await {
+                    Ok(Some(Packet::Send(s))) => {
+                        let Some(sender) = consumers.get_consumer(s.consumer_id).await else {
+                            warn!("recv a message but consumer not found");
+                            return
+                        };
+                        if let Err(e) = sender.send(ConsumeMessage { payload: s.payload }).await {
+                            error!("send message to consumer error: {e}")
+                        }
+                    }
+                    Ok(Some(p)) => {
+                        error!("client received unexpected packet: {:?}", p.packet_type());
+                    }
+                    Ok(None) => {
+                        error!("client reader stream closed");
+                    }
+                    Err(e) => {
+                        error!("client reader error: {e}");
+                    }
                 }
-                _ => return Err(Error::UnexpectedPacket),
-            }
+            });
         }
         Ok(())
     }

@@ -90,22 +90,13 @@ impl From<oneshot::error::RecvError> for Error {
 }
 
 pub struct Connector {
-    connection: Connection,
+    addr: SocketAddr,
+    provider: MtlsProvider,
 }
 
 impl Connector {
-    pub async fn new(addr: SocketAddr, provider: MtlsProvider) -> Result<Self> {
-        // unwrap: with_tls error is infallible
-        let client: client::Client = client::Client::builder()
-            .with_tls(provider)
-            .unwrap()
-            .with_io("0.0.0.0:0")?
-            .start()?;
-        let connector = Connect::new(addr);
-        let mut connection = client.connect(connector).await?;
-        connection.keep_alive(true)?;
-
-        todo!()
+    pub async fn new(addr: SocketAddr, provider: MtlsProvider) -> Self {
+        Self { addr, provider }
     }
 
     pub async fn run(
@@ -113,7 +104,17 @@ impl Connector {
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         consumers: Consumers,
     ) -> Result<()> {
-        let (handle, acceptor) = self.connection.split();
+        // unwrap: with_tls error is infallible
+        let client: client::Client = client::Client::builder()
+            .with_tls(self.provider)
+            .unwrap()
+            .with_io("0.0.0.0:0")?
+            .start()?;
+        let connector = Connect::new(self.addr);
+        let mut connection = client.connect(connector).await?;
+        connection.keep_alive(true)?;
+
+        let (handle, acceptor) = connection.split();
 
         // producer task loop
         let producer_task = Writer::new(server_rx, handle).run();
@@ -123,23 +124,23 @@ impl Connector {
         let consumer_task = Reader::new(acceptor, consumers).run();
         let consumer_handle = tokio::spawn(consumer_task);
 
-        Self::wait(producer_handle, "connection reader").await;
-        Self::wait(consumer_handle, "connection writer").await;
+        wait(producer_handle, "connection reader").await;
+        wait(consumer_handle, "connection writer").await;
 
         Ok(())
     }
+}
 
-    async fn wait(handle: JoinHandle<Result<()>>, label: &str) {
-        match handle.await {
-            Ok(Ok(_)) => {
-                info!("{label} handle task exit successfully")
-            }
-            Ok(Err(e)) => {
-                error!("{label} handle task exit error: {e}")
-            }
-            Err(e) => {
-                error!("{label} handle task panic: {e}")
-            }
+async fn wait(handle: JoinHandle<Result<()>>, label: &str) {
+    match handle.await {
+        Ok(Ok(_)) => {
+            info!("{label} handle task exit successfully")
+        }
+        Ok(Err(e)) => {
+            error!("{label} handle task exit error: {e}")
+        }
+        Err(e) => {
+            error!("{label} handle task panic: {e}")
         }
     }
 }
