@@ -1,5 +1,5 @@
-use bytes::Bytes;
 use bud_common::protocol::{Packet, Publish, ReturnCode};
+use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connector::{self, OutgoingMessage};

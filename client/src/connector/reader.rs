@@ -3,8 +3,8 @@ use std::sync::{
     Arc,
 };
 
-use futures::TryStreamExt;
 use bud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
+use futures::TryStreamExt;
 use log::{error, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::sync::{mpsc, oneshot};

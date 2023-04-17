@@ -1,5 +1,5 @@
-use futures::{SinkExt, StreamExt};
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
+use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::{connection, stream::BidirectionalStream};
 use tokio::{

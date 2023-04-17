@@ -5,11 +5,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bud_common::{mtls::MtlsProvider, storage::memory::MemoryStorage};
+use bud_server::Server;
 use clap::Parser;
 use flexi_logger::{detailed_format, Age, Cleanup, Criterion, FileSpec, Logger, Naming};
 use futures::StreamExt;
-use bud_common::{mtls::MtlsProvider, storage::memory::MemoryStorage};
-use bud_server::Server;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use tokio::sync::watch;
