@@ -1,18 +1,19 @@
 mod reader;
 mod writer;
 
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, pin::pin};
 
 use bud_common::{
     helper::{wait, wait_result},
     mtls::MtlsProvider,
     protocol::{self, ReturnCode},
 };
+use futures::{future::select, stream::FuturesUnordered, StreamExt};
 use s2n_quic::{
     client::{self, Connect},
     connection, provider,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::consumer::Consumers;
 
@@ -114,16 +115,24 @@ impl Connector {
 
         let (handle, acceptor) = connection.split();
 
-        // producer task loop
-        let producer_task = Writer::new(handle).run(server_rx, keepalive);
-        let producer_handle = tokio::spawn(producer_task);
+        let (res_tx, res_rx) = watch::channel(());
 
-        // consumer task loop
-        let consumer_task = Reader::new(acceptor, consumers).run();
-        let consumer_handle = tokio::spawn(consumer_task);
+        // writer task loop
+        let writer_task = Writer::new(handle).run(server_rx, keepalive, res_rx.clone());
+        let writer_handle = tokio::spawn(writer_task);
 
-        wait(producer_handle, "connection reader").await;
-        wait_result(consumer_handle, "connection writer").await;
+        // reader task loop
+        let reader_task = Reader::new(acceptor, consumers).run();
+        let reader_handle = tokio::spawn(reader_task);
+
+        // wait for first complete
+        let futs = FuturesUnordered::from_iter(vec![
+            wait(writer_handle, "client writer"),
+            wait(reader_handle, "client reader"),
+        ]);
+
+        // TODO drop close_tx
+        while let Some(fut) = futs.next() {}
 
         Ok(())
     }

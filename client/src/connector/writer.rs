@@ -5,7 +5,8 @@ use futures::{SinkExt, TryStreamExt};
 use log::error;
 use s2n_quic::connection::Handle;
 use tokio::{
-    sync::{mpsc, oneshot},
+    select,
+    sync::{mpsc, oneshot, watch},
     time::timeout,
 };
 use tokio_util::codec::Framed;
@@ -31,36 +32,44 @@ impl Writer {
         mut self,
         mut server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         keepalive: u16,
+        mut close_rx: watch::Receiver<()>,
     ) {
         let keepalive = Duration::from_millis(keepalive as u64);
         loop {
-            match timeout(keepalive, server_rx.recv()).await {
-                Ok(res) => {
-                    let Some(msg) = res else {
-                        return;
-                    };
-                    if let Err(e) = self.write(msg).await {
-                        error!("write to connection error: {e}");
-                        continue;
+            select! {
+                res = timeout(keepalive, server_rx.recv()) => {
+                    match res {
+                        Ok(res) => {
+                            let Some(msg) = res else {
+                                return;
+                            };
+                            if let Err(e) = self.write(msg).await {
+                                error!("write to connection error: {e}");
+                                continue;
+                            }
+                        }
+                        Err(_) => {
+                            let (res_tx, res_rx) = oneshot::channel();
+                            // send ping
+                            let msg = OutgoingMessage {
+                                packet: Packet::Ping,
+                                res_tx,
+                            };
+                            if let Err(e) = self.write(msg).await {
+                                error!("client send ping error: {e}");
+                                continue;
+                            }
+                            tokio::spawn(async move {
+                                match res_rx.await {
+                                    Ok(_) => todo!(),
+                                    Err(_) => todo!(),
+                                }
+                            });
+                        }
                     }
                 }
-                Err(_) => {
-                    let (res_tx, res_rx) = oneshot::channel();
-                    // send ping
-                    let msg = OutgoingMessage {
-                        packet: Packet::Ping,
-                        res_tx,
-                    };
-                    if let Err(e) = self.write(msg).await {
-                        error!("client send ping error: {e}");
-                        continue;
-                    }
-                    tokio::spawn(async move {
-                        match res_rx.await {
-                            Ok(_) => todo!(),
-                            Err(_) => todo!(),
-                        }
-                    });
+                _ = close_rx.changed() => {
+                    return
                 }
             }
         }
