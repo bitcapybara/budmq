@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use futures::{SinkExt, StreamExt};
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
+use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
@@ -41,37 +41,47 @@ impl Reader {
     /// accept new stream to read a packet
     pub async fn read(mut self) -> Result<()> {
         // 1.5 times keepalive value
-        let keepalive = self.keepalive + self.keepalive / 2;
-        while let Some(stream) = timeout(
-            Duration::from_millis(keepalive as u64),
-            self.acceptor.accept_bidirectional_stream(),
-        )
-        .await
-        .map_err(|_| Error::ClientIdleTimeout)??
-        {
-            let mut framed = Framed::new(stream, PacketCodec);
-            match framed.next().await.ok_or(Error::StreamClosed)?? {
-                Packet::Connect(_) => {
-                    // Do not allow duplicate connections
-                    let code = ReturnCode::AlreadyConnected;
-                    framed.send(Packet::ReturnCode(code)).await?
-                }
-                p @ (Packet::Subscribe(_)
-                | Packet::Unsubscribe(_)
-                | Packet::Publish(_)
-                | Packet::ConsumeAck(_)
-                | Packet::ControlFlow(_)) => {
-                    self.send(p, framed).await?;
-                }
-                Packet::Ping => {
-                    // return pong packet directly
-                    tokio::spawn(async move {
-                        if let Err(e) = framed.send(Packet::Pong).await {
-                            error!("send pong packet error: {e}")
+        let keepalive = Duration::from_millis((self.keepalive + self.keepalive / 2) as u64);
+        loop {
+            match timeout(keepalive, self.acceptor.accept_bidirectional_stream()).await {
+                Ok(Ok(Some(stream))) => {
+                    let mut framed = Framed::new(stream, PacketCodec);
+                    match framed.next().await.ok_or(Error::StreamClosed)?? {
+                        Packet::Connect(_) => {
+                            // Do not allow duplicate connections
+                            let code = ReturnCode::AlreadyConnected;
+                            framed.send(Packet::ReturnCode(code)).await?
                         }
-                    });
+                        p @ (Packet::Subscribe(_)
+                        | Packet::Unsubscribe(_)
+                        | Packet::Publish(_)
+                        | Packet::ConsumeAck(_)
+                        | Packet::ControlFlow(_)) => {
+                            self.send(p, framed).await?;
+                        }
+                        Packet::Ping => {
+                            // return pong packet directly
+                            tokio::spawn(async move {
+                                if let Err(e) = framed.send(Packet::Pong).await {
+                                    error!("send pong packet error: {e}")
+                                }
+                            });
+                        }
+                        Packet::Disconnect => {
+                            self.broker_tx.send(broker::ClientMessage {
+                                client_id: self.client_id,
+                                packet: Packet::Disconnect,
+                                res_tx: None,
+                                client_tx: None,
+                            })?;
+                        }
+                        _ => return Err(Error::UnexpectedPacket),
+                    }
                 }
-                Packet::Disconnect => {
+                Ok(Ok(None)) => return Ok(()),
+                Ok(Err(e)) => return Err(e)?,
+                Err(_) => {
+                    // receive ping timeout
                     self.broker_tx.send(broker::ClientMessage {
                         client_id: self.client_id,
                         packet: Packet::Disconnect,
@@ -79,10 +89,8 @@ impl Reader {
                         client_tx: None,
                     })?;
                 }
-                _ => return Err(Error::UnexpectedPacket),
             }
         }
-        Ok(())
     }
 
     async fn send(

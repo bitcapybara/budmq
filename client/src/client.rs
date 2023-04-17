@@ -62,30 +62,48 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
-pub struct Client {
-    consumer_id_gen: u64,
-    server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-    consumers: Consumers,
+pub struct ClientBuilder {
+    addr: SocketAddr,
+    provider: MtlsProvider,
+    // default to 10000ms
+    keepalive: u16,
 }
 
-impl Client {
-    pub async fn new(addr: SocketAddr, provider: MtlsProvider) -> Result<Self> {
+impl ClientBuilder {
+    const DEFAULT_KEEPALIVE_MS: u16 = 10000;
+    pub fn new(addr: SocketAddr, provider: MtlsProvider) -> Self {
+        Self {
+            addr,
+            provider,
+            keepalive: Self::DEFAULT_KEEPALIVE_MS,
+        }
+    }
+
+    pub fn keepalive(mut self, keepalive: u16) -> Self {
+        self.keepalive = keepalive;
+        self
+    }
+
+    pub async fn build(self) -> Result<Client> {
         // Channel for sending messages to the server
         let (server_tx, server_rx) = mpsc::unbounded_channel();
         let consumers = Consumers::new();
 
         // connector task loop
-        let connector_task = Connector::new(addr, provider).run(server_rx, consumers.clone());
+        let connector_task = Connector::new(self.addr, self.provider).run(
+            server_rx,
+            consumers.clone(),
+            self.keepalive,
+        );
         // TODO End Notification and Waiting
         // TODO connect and reconnect
         tokio::spawn(connector_task);
 
         // send connect packet
-        const KEEP_ALIVE: u16 = 10000;
         let (conn_res_tx, conn_res_rx) = oneshot::channel();
         server_tx.send(OutgoingMessage {
             packet: Packet::Connect(Connect {
-                keepalive: KEEP_ALIVE,
+                keepalive: self.keepalive,
             }),
             res_tx: conn_res_tx,
         })?;
@@ -94,26 +112,21 @@ impl Client {
             code => return Err(Error::FromServer(code)),
         }
 
-        Ok(Self {
+        Ok(Client {
             server_tx,
             consumers,
             consumer_id_gen: 0,
         })
     }
+}
 
-    // TODO Drop?
-    async fn close(self) -> Result<()> {
-        let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
-        self.server_tx.send(OutgoingMessage {
-            packet: Packet::Disconnect,
-            res_tx: disconn_res_tx,
-        })?;
-        match disconn_res_rx.await?? {
-            ReturnCode::Success => Ok(()),
-            code => Err(Error::FromServer(code)),
-        }
-    }
+pub struct Client {
+    consumer_id_gen: u64,
+    server_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    consumers: Consumers,
+}
 
+impl Client {
     pub fn new_producer(&self, topic: &str) -> Producer {
         Producer::new(topic, self.server_tx.clone())
     }
@@ -137,5 +150,19 @@ impl Client {
             )
             .await;
         Ok(consumer)
+    }
+
+    // TODO Drop?
+    // TODO DISCONNECT
+    async fn close(self) -> Result<()> {
+        let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
+        self.server_tx.send(OutgoingMessage {
+            packet: Packet::Disconnect,
+            res_tx: disconn_res_tx,
+        })?;
+        match disconn_res_rx.await?? {
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
+        }
     }
 }

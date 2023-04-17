@@ -148,6 +148,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "log",
  "openssl",
  "rustls-pemfile",
  "s2n-quic",

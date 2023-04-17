@@ -4,18 +4,15 @@ mod writer;
 use std::{io, net::SocketAddr};
 
 use bud_common::{
+    helper::{wait, wait_result},
     mtls::MtlsProvider,
     protocol::{self, ReturnCode},
 };
-use log::{error, info};
 use s2n_quic::{
     client::{self, Connect},
     connection, provider,
 };
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::consumer::Consumers;
 
@@ -103,6 +100,7 @@ impl Connector {
         self,
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         consumers: Consumers,
+        keepalive: u16,
     ) -> Result<()> {
         // unwrap: with_tls error is infallible
         let client: client::Client = client::Client::builder()
@@ -117,7 +115,7 @@ impl Connector {
         let (handle, acceptor) = connection.split();
 
         // producer task loop
-        let producer_task = Writer::new(server_rx, handle).run();
+        let producer_task = Writer::new(handle).run(server_rx, keepalive);
         let producer_handle = tokio::spawn(producer_task);
 
         // consumer task loop
@@ -125,22 +123,8 @@ impl Connector {
         let consumer_handle = tokio::spawn(consumer_task);
 
         wait(producer_handle, "connection reader").await;
-        wait(consumer_handle, "connection writer").await;
+        wait_result(consumer_handle, "connection writer").await;
 
         Ok(())
-    }
-}
-
-async fn wait(handle: JoinHandle<Result<()>>, label: &str) {
-    match handle.await {
-        Ok(Ok(_)) => {
-            info!("{label} handle task exit successfully")
-        }
-        Ok(Err(e)) => {
-            error!("{label} handle task exit error: {e}")
-        }
-        Err(e) => {
-            error!("{label} handle task panic: {e}")
-        }
     }
 }

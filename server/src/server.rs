@@ -1,6 +1,10 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
-use bud_common::{mtls::MtlsProvider, storage::Storage};
+use bud_common::{
+    helper::{wait, wait_result},
+    mtls::MtlsProvider,
+    storage::Storage,
+};
 use log::error;
 use s2n_quic::{connection, provider, Connection};
 use tokio::{
@@ -11,7 +15,6 @@ use tokio::{
 use crate::{
     broker::{self, Broker},
     client::Client,
-    helper::{wait, wait_result},
 };
 
 type Result<T> = std::result::Result<T, Error>;

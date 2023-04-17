@@ -6,11 +6,11 @@ use std::{
     },
 };
 
-use bytes::Bytes;
 use bud_common::{
     protocol::{ConsumeAck, ControlFlow, Packet, ReturnCode, Subscribe},
     subscription::{InitialPostion, SubType},
 };
+use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::connector::{self, ConsumerSender, OutgoingMessage};
@@ -83,6 +83,12 @@ impl Consumers {
     pub async fn get_consumer(&self, consumer_id: u64) -> Option<ConsumerSender> {
         let consumers = self.0.read().await;
         consumers.get(&consumer_id).cloned()
+    }
+}
+
+impl Default for Consumers {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

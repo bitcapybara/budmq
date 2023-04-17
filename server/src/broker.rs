@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use bud_common::{
+    helper::wait,
     protocol::{self, Packet, PacketType, ReturnCode, Send, Unsubscribe},
     storage::Storage,
 };
@@ -13,7 +14,6 @@ use tokio::{
 
 use crate::{
     client,
-    helper::wait,
     subscription::{self, SendEvent, Subscription},
     topic::{self, Message, Topic},
     WAIT_REPLY_TIMEOUT,
