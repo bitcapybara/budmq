@@ -30,6 +30,6 @@ impl Codec for Send {
     }
 
     fn header(&self) -> Header {
-        Header::new(PacketType::Send, 8 + self.payload.len())
+        Header::new(PacketType::Send, 8 + 8 + self.payload.len())
     }
 }
