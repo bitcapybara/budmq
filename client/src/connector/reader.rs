@@ -7,7 +7,10 @@ use bud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
 use futures::TryStreamExt;
 use log::{error, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot, watch},
+};
 use tokio_util::codec::Framed;
 
 use crate::consumer::{ConsumeMessage, Consumers, CONSUME_CHANNEL_CAPACITY};
@@ -15,25 +18,28 @@ use crate::consumer::{ConsumeMessage, Consumers, CONSUME_CHANNEL_CAPACITY};
 use super::{Error, OutgoingMessage, Result};
 
 pub struct Reader {
-    acceptor: StreamAcceptor,
     consumers: Consumers,
 }
 
 impl Reader {
-    pub fn new(acceptor: StreamAcceptor, consumers: Consumers) -> Self {
-        Self {
-            acceptor,
-            consumers,
-        }
+    pub fn new(consumers: Consumers) -> Self {
+        Self { consumers }
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(self, mut acceptor: StreamAcceptor, mut close_rx: watch::Receiver<()>) {
         loop {
-            match self.acceptor.accept_bidirectional_stream().await {
-                Ok(Some(stream)) => self.read(stream).await,
-                Ok(None) => return,
-                Err(e) => {
-                    error!("connector reader accept stream error: {e}")
+            select! {
+                res = acceptor.accept_bidirectional_stream() => {
+                    match res {
+                        Ok(Some(stream)) => self.read(stream).await,
+                        Ok(None) => return,
+                        Err(e) => {
+                            error!("connector reader accept stream error: {e}")
+                        }
+                    }
+                }
+                _ = close_rx.changed() => {
+                    return
                 }
             }
         }

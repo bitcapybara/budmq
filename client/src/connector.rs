@@ -1,14 +1,14 @@
 mod reader;
 mod writer;
 
-use std::{io, net::SocketAddr, pin::pin};
+use std::{io, net::SocketAddr};
 
 use bud_common::{
-    helper::{wait, wait_result},
+    helper::wait,
     mtls::MtlsProvider,
     protocol::{self, ReturnCode},
 };
-use futures::{future::select, stream::FuturesUnordered, StreamExt};
+use futures::{stream::FuturesUnordered, StreamExt};
 use s2n_quic::{
     client::{self, Connect},
     connection, provider,
@@ -122,17 +122,19 @@ impl Connector {
         let writer_handle = tokio::spawn(writer_task);
 
         // reader task loop
-        let reader_task = Reader::new(acceptor, consumers).run();
+        let reader_task = Reader::new(consumers).run(acceptor, res_rx.clone());
         let reader_handle = tokio::spawn(reader_task);
 
         // wait for first complete
-        let futs = FuturesUnordered::from_iter(vec![
+        let mut futs = FuturesUnordered::from_iter(vec![
             wait(writer_handle, "client writer"),
             wait(reader_handle, "client reader"),
         ]);
 
-        // TODO drop close_tx
-        while let Some(fut) = futs.next() {}
+        // drop close_tx
+        while (futs.next().await).is_some() {
+            res_tx.send(()).unwrap();
+        }
 
         Ok(())
     }
