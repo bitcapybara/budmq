@@ -128,19 +128,52 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "bud-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bud-common",
+ "bytes",
+ "futures",
+ "log",
+ "s2n-quic",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "bud-common"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "openssl",
+ "rustls-pemfile",
+ "s2n-quic",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "bud-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bud-common",
+ "bud-server",
+ "bytes",
  "clap",
  "flexi_logger",
  "futures",
- "libbud-common",
- "libbud-server",
  "log",
+ "once_cell",
+ "roaring",
+ "s2n-quic",
  "signal-hook",
  "signal-hook-tokio",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -647,49 +680,6 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
-name = "libbud-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "futures",
- "libbud-common",
- "log",
- "s2n-quic",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "libbud-common"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "openssl",
- "rustls-pemfile",
- "s2n-quic",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "libbud-server"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures",
- "libbud-common",
- "log",
- "once_cell",
- "roaring",
- "s2n-quic",
- "tokio",
- "tokio-util",
-]
 
 [[package]]
 name = "libc"

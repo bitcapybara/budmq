@@ -1,0 +1,16 @@
+[package]
+name = "bud-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes.workspace = true
+futures.workspace = true
+bud-common.workspace = true
+log.workspace = true
+s2n-quic.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

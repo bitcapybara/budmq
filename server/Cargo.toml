@@ -4,13 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytes.workspace = true
+futures.workspace = true
+bud-common.workspace = true
+log.workspace = true
+once_cell.workspace = true
+roaring.workspace = true
+s2n-quic.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
 anyhow.workspace = true
 clap.workspace = true
 flexi_logger.workspace = true
 log.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread" ] }
-libbud-server.workspace = true
-libbud-common.workspace = true
+bud-server.workspace = true
+bud-common.workspace = true
 signal-hook-tokio.workspace = true
 signal-hook.workspace = true
 futures.workspace = true
+
