@@ -4,7 +4,7 @@ mod writer;
 use std::{fmt::Display, time::Duration};
 
 use bud_common::{
-    helper::wait_result,
+    helper::wait,
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 use futures::{SinkExt, StreamExt};
@@ -152,19 +152,17 @@ impl Client {
         let (handle, acceptor) = self.conn.split();
 
         // read
-        let reader = Reader::new(self.id, &local, self.broker_tx, acceptor, self.keepalive);
-        let read_task = reader.read();
+        let read_task = Reader::new(self.id, &local, self.broker_tx).run(acceptor, self.keepalive);
         let read_handle = tokio::spawn(read_task);
 
         // write
-        let writer = Writer::new(&local, self.client_rx, handle);
-        let write_task = writer.write();
+        let write_task = Writer::new(&local).run(self.client_rx, handle);
         let write_handle = tokio::spawn(write_task);
 
         // wait until the end
         // TODO close all when one of them exit
-        wait_result(read_handle, "client read").await;
-        wait_result(write_handle, "client write").await;
+        wait(read_handle, "client read").await;
+        wait(write_handle, "client write").await;
         Ok(())
     }
 }

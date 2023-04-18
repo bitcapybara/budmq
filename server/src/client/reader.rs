@@ -10,15 +10,13 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use super::{Error, Result};
+use super::Result;
 use crate::{broker, WAIT_REPLY_TIMEOUT};
 
 pub struct Reader {
     client_id: u64,
     local_addr: String,
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-    acceptor: StreamAcceptor,
-    keepalive: u16,
 }
 
 impl Reader {
@@ -26,68 +24,79 @@ impl Reader {
         client_id: u64,
         local_addr: &str,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-        acceptor: StreamAcceptor,
-        keepalive: u16,
     ) -> Self {
         Self {
             client_id,
             local_addr: local_addr.to_string(),
             broker_tx,
-            acceptor,
-            keepalive,
         }
     }
 
     /// accept new stream to read a packet
-    pub async fn read(mut self) -> Result<()> {
+    pub async fn run(self, mut acceptor: StreamAcceptor, keepalive: u16) {
         // 1.5 times keepalive value
-        let keepalive = Duration::from_millis((self.keepalive + self.keepalive / 2) as u64);
+        let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
         loop {
-            match timeout(keepalive, self.acceptor.accept_bidirectional_stream()).await {
+            match timeout(keepalive, acceptor.accept_bidirectional_stream()).await {
                 Ok(Ok(Some(stream))) => {
                     let mut framed = Framed::new(stream, PacketCodec);
-                    match framed.next().await.ok_or(Error::StreamClosed)?? {
-                        Packet::Connect(_) => {
-                            // Do not allow duplicate connections
-                            let code = ReturnCode::AlreadyConnected;
-                            framed.send(Packet::ReturnCode(code)).await?
-                        }
-                        p @ (Packet::Subscribe(_)
-                        | Packet::Unsubscribe(_)
-                        | Packet::Publish(_)
-                        | Packet::ConsumeAck(_)
-                        | Packet::ControlFlow(_)) => {
-                            self.send(p, framed).await?;
-                        }
-                        Packet::Ping => {
-                            // return pong packet directly
-                            tokio::spawn(async move {
-                                if let Err(e) = framed.send(Packet::Pong).await {
-                                    error!("send pong packet error: {e}")
+                    match framed.next().await {
+                        Some(Ok(packet)) => match packet {
+                            Packet::Connect(_) => {
+                                // Do not allow duplicate connections
+                                let code = ReturnCode::AlreadyConnected;
+                                if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
+                                    error!("send packet to client error: {e}");
                                 }
-                            });
-                        }
-                        Packet::Disconnect => {
-                            self.broker_tx.send(broker::ClientMessage {
-                                client_id: self.client_id,
-                                packet: Packet::Disconnect,
-                                res_tx: None,
-                                client_tx: None,
-                            })?;
-                        }
-                        _ => return Err(Error::UnexpectedPacket),
+                            }
+                            p @ (Packet::Subscribe(_)
+                            | Packet::Unsubscribe(_)
+                            | Packet::Publish(_)
+                            | Packet::ConsumeAck(_)
+                            | Packet::ControlFlow(_)) => {
+                                if let Err(e) = self.send(p, framed).await {
+                                    error!("send packet to broker error: {e}")
+                                }
+                            }
+                            Packet::Ping => {
+                                // return pong packet directly
+                                tokio::spawn(async move {
+                                    if let Err(e) = framed.send(Packet::Pong).await {
+                                        error!("send pong packet error: {e}")
+                                    }
+                                });
+                            }
+                            Packet::Disconnect => {
+                                if let Err(e) = self.broker_tx.send(broker::ClientMessage {
+                                    client_id: self.client_id,
+                                    packet: Packet::Disconnect,
+                                    res_tx: None,
+                                    client_tx: None,
+                                }) {
+                                    error!("send DISCONNECT to broker error: {e}");
+                                }
+                            }
+                            p => error!("received unsupported packet: {:?}", p.packet_type()),
+                        },
+                        Some(Err(e)) => error!("read from stream error: {e}"),
+                        None => error!("framed stream closed"),
                     }
                 }
-                Ok(Ok(None)) => return Ok(()),
-                Ok(Err(e)) => return Err(e)?,
+                Ok(Ok(None)) => return,
+                Ok(Err(e)) => {
+                    error!("accept stream error: {e}");
+                    continue;
+                }
                 Err(_) => {
                     // receive ping timeout
-                    self.broker_tx.send(broker::ClientMessage {
+                    if let Err(e) = self.broker_tx.send(broker::ClientMessage {
                         client_id: self.client_id,
                         packet: Packet::Disconnect,
                         res_tx: None,
                         client_tx: None,
-                    })?;
+                    }) {
+                        error!("send packet to broker error: {e}")
+                    }
                 }
             }
         }

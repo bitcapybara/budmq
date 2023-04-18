@@ -13,38 +13,46 @@ use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct Writer {
     local_addr: String,
-    client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
-    handle: connection::Handle,
 }
 
 impl Writer {
-    pub fn new(
-        local_addr: &str,
-        client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
-        handle: connection::Handle,
-    ) -> Self {
+    pub fn new(local_addr: &str) -> Self {
         Self {
             local_addr: local_addr.to_string(),
-            client_rx,
-            handle,
         }
     }
 
     /// messages sent from server to client
     /// need to open a new stream to send messages
     /// client_rx: receive message from broker
-    pub async fn write(mut self) -> Result<()> {
+    pub async fn run(
+        self,
+        mut client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
+        mut handle: connection::Handle,
+    ) {
         // * push message to client
-        while let Some(message) = self.client_rx.recv().await {
-            let stream = self.handle.open_bidirectional_stream().await?;
+        while let Some(message) = client_rx.recv().await {
+            let stream = match handle.open_bidirectional_stream().await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("open stream error: {e}");
+                    continue;
+                }
+            };
             let framed = Framed::new(stream, PacketCodec);
             // send to client: framed.send(Packet) async? error log?
             match message.packet {
-                p @ Packet::Send(_) => self.send(message.res_tx, framed, p).await?,
-                _ => unreachable!(),
+                p @ Packet::Send(_) => {
+                    if let Err(e) = self.send(message.res_tx, framed, p).await {
+                        error!("send message to client error: {e}");
+                    }
+                }
+                p => error!(
+                    "received unexpected packet from broker: {:?}",
+                    p.packet_type()
+                ),
             }
         }
-        Ok(())
     }
 
     async fn send(
