@@ -1,8 +1,8 @@
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 
 use crate::subscription::{InitialPostion, SubType};
 
-use super::{assert_len, read_string, write_string, Codec, Header, PacketType, Result};
+use super::{get_u64, get_u8, read_string, write_string, Codec, Header, PacketType, Result};
 
 /// Each consumer corresponds to a subscription
 pub struct Subscribe {
@@ -20,17 +20,11 @@ pub struct Subscribe {
 
 impl Codec for Subscribe {
     fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        assert_len(&buf, 8)?;
-        let consumer_id = buf.get_u64();
-
+        let consumer_id = get_u64(&mut buf)?;
         let topic = read_string(&mut buf)?;
         let sub_name = read_string(&mut buf)?;
-
-        assert_len(&buf, 1)?;
-        let sub_type = buf.get_u8().try_into()?;
-
-        assert_len(&buf, 1)?;
-        let initial_position = buf.get_u8().try_into()?;
+        let sub_type = get_u8(&mut buf)?.try_into()?;
+        let initial_position = get_u8(&mut buf)?.try_into()?;
 
         Ok(Self {
             consumer_id,

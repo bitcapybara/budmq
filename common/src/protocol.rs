@@ -329,3 +329,23 @@ fn write_bytes(buf: &mut BytesMut, bytes: &[u8]) {
 fn write_string(buf: &mut BytesMut, string: &str) {
     write_bytes(buf, string.as_bytes());
 }
+
+fn get_u8(buf: &mut Bytes) -> Result<u8> {
+    assert_len(buf, 1)?;
+    Ok(buf.get_u8())
+}
+
+fn get_u16(buf: &mut Bytes) -> Result<u16> {
+    assert_len(buf, 2)?;
+    Ok(buf.get_u16())
+}
+
+fn get_u32(buf: &mut Bytes) -> Result<u32> {
+    assert_len(buf, 4)?;
+    Ok(buf.get_u32())
+}
+
+fn get_u64(buf: &mut Bytes) -> Result<u64> {
+    assert_len(buf, 8)?;
+    Ok(buf.get_u64())
+}

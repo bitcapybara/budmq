@@ -1,6 +1,6 @@
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 
-use super::{assert_len, read_bytes, write_bytes, Codec, Header, PacketType, Result};
+use super::{get_u64, read_bytes, write_bytes, Codec, Header, PacketType, Result};
 
 pub struct Send {
     pub message_id: u64,
@@ -10,10 +10,8 @@ pub struct Send {
 
 impl Codec for Send {
     fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        assert_len(&buf, 8)?;
-        let message_id = buf.get_u64();
-        assert_len(&buf, 8)?;
-        let consumer_id = buf.get_u64();
+        let message_id = get_u64(&mut buf)?;
+        let consumer_id = get_u64(&mut buf)?;
         let payload = read_bytes(&mut buf)?;
         Ok(Self {
             message_id,

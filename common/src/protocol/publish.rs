@@ -1,8 +1,7 @@
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 
 use super::{
-    assert_len, read_bytes, read_string, write_bytes, write_string, Codec, Header, PacketType,
-    Result,
+    get_u64, read_bytes, read_string, write_bytes, write_string, Codec, Header, PacketType, Result,
 };
 
 pub struct Publish {
@@ -17,8 +16,7 @@ pub struct Publish {
 impl Codec for Publish {
     fn decode(mut buf: bytes::Bytes) -> Result<Self> {
         let topic = read_string(&mut buf)?;
-        assert_len(&buf, 8)?;
-        let sequence_id = buf.get_u64();
+        let sequence_id = get_u64(&mut buf)?;
         let payload = read_bytes(&mut buf)?;
         Ok(Self {
             topic,

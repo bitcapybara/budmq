@@ -1,6 +1,6 @@
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 
-use super::{assert_len, Codec, Header, PacketType, Result};
+use super::{get_u64, Codec, Header, PacketType, Result};
 
 pub struct Unsubscribe {
     /// consumer id
@@ -9,8 +9,7 @@ pub struct Unsubscribe {
 
 impl Codec for Unsubscribe {
     fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        assert_len(&buf, 8)?;
-        let consumer_id = buf.get_u64();
+        let consumer_id = get_u64(&mut buf)?;
         Ok(Self { consumer_id })
     }
 

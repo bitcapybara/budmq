@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 
-use super::{assert_len, Codec, Error, Header, PacketType, Result};
+use super::{get_u8, Codec, Error, Header, PacketType, Result};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -58,8 +58,7 @@ impl TryFrom<u8> for ReturnCode {
 
 impl Codec for ReturnCode {
     fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        assert_len(&buf, 1)?;
-        buf.get_u8().try_into()
+        get_u8(&mut buf)?.try_into()
     }
 
     fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
