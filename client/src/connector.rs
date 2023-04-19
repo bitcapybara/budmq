@@ -132,8 +132,8 @@ impl Connector {
         ]);
 
         // drop close_tx
-        while (futs.next().await).is_some() {
-            res_tx.send(()).unwrap();
+        while futs.next().await.is_some() {
+            res_tx.send(()).ok();
         }
 
         Ok(())

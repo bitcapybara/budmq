@@ -12,7 +12,7 @@ use flexi_logger::{detailed_format, Age, Cleanup, Criterion, FileSpec, Logger, N
 use futures::StreamExt;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
-use tokio::sync::watch;
+use tokio::sync::oneshot;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
@@ -64,7 +64,7 @@ fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
 async fn run(server: Server) -> anyhow::Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM, SIGQUIT])?;
     let handle = signals.handle();
-    let (close_tx, close_rx) = watch::channel(());
+    let (close_tx, close_rx) = oneshot::channel();
     tokio::spawn(async move {
         signals.next().await;
         drop(close_tx);

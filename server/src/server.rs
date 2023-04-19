@@ -1,15 +1,12 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
-use bud_common::{
-    helper::{wait, wait_result},
-    mtls::MtlsProvider,
-    storage::Storage,
-};
+use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
+use futures::{stream::FuturesUnordered, StreamExt};
 use log::error;
 use s2n_quic::{connection, provider, Connection};
 use tokio::{
     select,
-    sync::{mpsc, watch},
+    sync::{mpsc, oneshot, watch},
 };
 
 use crate::{
@@ -59,63 +56,78 @@ impl From<connection::Error> for Error {
 pub struct Server {
     provider: MtlsProvider,
     addr: SocketAddr,
-    client_id_gen: u64,
 }
 
 impl Server {
     pub fn new(provider: MtlsProvider, addr: SocketAddr) -> Self {
-        Self {
-            provider,
-            addr,
-            client_id_gen: 0,
-        }
+        Self { provider, addr }
     }
 
-    pub async fn start<S: Storage>(self, storage: S, close_rx: watch::Receiver<()>) -> Result<()> {
+    pub async fn start<S: Storage>(
+        self,
+        storage: S,
+        shutdown_rx: oneshot::Receiver<()>,
+    ) -> Result<()> {
+        //
+        let (close_tx, close_rx) = watch::channel(());
         // start broker loop
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
         let broker_task = Broker::new(storage).run(broker_rx, close_rx.clone());
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
-        let server_task = self.handle_accept(broker_tx, close_rx);
+        // unwrap: with_tls error is infallible
+        let server = s2n_quic::Server::builder()
+            .with_tls(self.provider)
+            .unwrap()
+            .with_io(self.addr)?
+            .start()?;
+        let server_task = Self::handle_accept(server, broker_tx, close_rx);
         let server_handle = tokio::spawn(server_task);
 
-        // wait for broker
-        wait(broker_handle, "broker task loop").await;
-        // wait for server
-        wait_result(server_handle, "server task loop").await;
+        let mut futs = FuturesUnordered::from_iter(vec![
+            // wait for broker
+            wait(broker_handle, "broker task loop"),
+            // wait for server
+            wait(server_handle, "server task loop"),
+        ]);
+
+        shutdown_rx.await.ok();
+        while futs.next().await.is_some() {
+            close_tx.send(()).ok();
+        }
 
         Ok(())
     }
 
     async fn handle_accept(
-        mut self,
+        mut server: s2n_quic::Server,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
         mut close_rx: watch::Receiver<()>,
-    ) -> Result<()> {
-        // unwrap: with_tls error is infallible
-        let mut server = s2n_quic::Server::builder()
-            .with_tls(self.provider)
-            .unwrap()
-            .with_io(self.addr)?
-            .start()?;
+    ) {
+        let mut client_id_gen = 0;
         // one connection per client
         loop {
             select! {
                 conn = server.accept() => {
                     let Some(conn) = conn else {
-                        return Ok(())
+                        return
                     };
-                    let local = conn.local_addr()?.to_string();
-                    let client_id = self.client_id_gen;
-                    self.client_id_gen += 1;
+                    let local = match conn.local_addr() {
+                        Ok(addr) => addr.to_string(),
+                        Err(e) => {
+                            error!("get client addr error: {e}");
+                            continue;
+                        }
+                    };
+                    let client_id = client_id_gen;
+                    client_id_gen += 1;
                     // start client
-                    let task = Self::handle_conn(local, client_id, conn, broker_tx.clone());
+                    let task = Self::handle_conn(local.to_string(), client_id, conn, broker_tx.clone());
                     tokio::spawn(task);
                 }
                 _ = close_rx.changed() => {
-                    return Ok(())
+                    return
                 }
             }
         }
