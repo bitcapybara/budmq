@@ -6,10 +6,10 @@ use log::error;
 use s2n_quic::connection::Handle;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot},
     time::timeout,
 };
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
 use crate::WAIT_REPLY_TIMEOUT;
 
@@ -32,7 +32,7 @@ impl Writer {
         mut self,
         mut server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         keepalive: u16,
-        mut close_rx: watch::Receiver<()>,
+        token: CancellationToken,
     ) {
         let keepalive = Duration::from_millis(keepalive as u64);
         loop {
@@ -68,7 +68,7 @@ impl Writer {
                         }
                     }
                 }
-                _ = close_rx.changed() => {
+                _ = token.cancelled() => {
                     return
                 }
             }

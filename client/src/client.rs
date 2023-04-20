@@ -4,10 +4,15 @@ use std::{
 };
 
 use bud_common::{
+    helper::wait_result,
     mtls::MtlsProvider,
     protocol::{Connect, Packet, ReturnCode},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     connector::{self, Connector, ConsumerSender, OutgoingMessage},
@@ -88,16 +93,16 @@ impl ClientBuilder {
         // Channel for sending messages to the server
         let (server_tx, server_rx) = mpsc::unbounded_channel();
         let consumers = Consumers::new();
+        let token = CancellationToken::new();
 
         // connector task loop
         let connector_task = Connector::new(self.addr, self.provider).run(
             server_rx,
             consumers.clone(),
             self.keepalive,
+            token.clone(),
         );
-        // TODO End Notification and Waiting
-        // TODO connect and reconnect
-        tokio::spawn(connector_task);
+        let connector_handle = tokio::spawn(connector_task);
 
         // send connect packet
         let (conn_res_tx, conn_res_rx) = oneshot::channel();
@@ -116,6 +121,8 @@ impl ClientBuilder {
             server_tx,
             consumers,
             consumer_id_gen: 0,
+            connector_handle,
+            token,
         })
     }
 }
@@ -124,6 +131,8 @@ pub struct Client {
     consumer_id_gen: u64,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumers: Consumers,
+    token: CancellationToken,
+    connector_handle: JoinHandle<connector::Result<()>>,
 }
 
 impl Client {
@@ -153,16 +162,18 @@ impl Client {
     }
 
     // TODO Drop?
-    // TODO DISCONNECT
-    async fn close(self) -> Result<()> {
+    pub async fn close(self) -> Result<()> {
+        self.token.cancel();
         let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
         self.server_tx.send(OutgoingMessage {
             packet: Packet::Disconnect,
             res_tx: disconn_res_tx,
         })?;
         match disconn_res_rx.await?? {
-            ReturnCode::Success => Ok(()),
-            code => Err(Error::FromServer(code)),
+            ReturnCode::Success => {}
+            code => return Err(Error::FromServer(code)),
         }
+        wait_result(self.connector_handle, "connector task loop").await;
+        Ok(())
     }
 }

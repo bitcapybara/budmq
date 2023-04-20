@@ -18,5 +18,7 @@ async fn main() -> anyhow::Result<()> {
     for _ in 0..10 {
         producer.send(b"hello, world").await?;
     }
+
+    client.close().await?;
     Ok(())
 }

@@ -8,9 +8,10 @@ use bud_common::{
 use log::{debug, error};
 use tokio::{
     select,
-    sync::{mpsc, oneshot, watch, RwLock},
+    sync::{mpsc, oneshot, RwLock},
     time::timeout,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     client,
@@ -142,17 +143,19 @@ impl<S: Storage> Broker<S> {
     pub async fn run(
         self,
         broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
-        close_rx: watch::Receiver<()>,
+        token: CancellationToken,
     ) {
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
-        let sub_task = self.clone().receive_subscription(send_rx, close_rx.clone());
+        let sub_task = self
+            .clone()
+            .receive_subscription(send_rx, token.child_token());
         let sub_handle = tokio::spawn(sub_task);
 
         // client task
         let client_task = self
             .clone()
-            .receive_client(send_tx, broker_rx, close_rx.clone());
+            .receive_client(send_tx, broker_rx, token.child_token());
         let client_handle = tokio::spawn(client_task);
 
         wait(sub_handle, "broker subscription").await;
@@ -163,7 +166,7 @@ impl<S: Storage> Broker<S> {
     async fn receive_subscription(
         self,
         mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
-        mut close_rx: watch::Receiver<()>,
+        token: CancellationToken,
     ) {
         loop {
             select! {
@@ -175,7 +178,7 @@ impl<S: Storage> Broker<S> {
                         error!("broker send message to consumer error: {e}")
                     }
                 }
-                _ = close_rx.changed() => {
+                _ = token.cancelled() => {
                     return
                 }
             }
@@ -237,7 +240,7 @@ impl<S: Storage> Broker<S> {
         self,
         send_tx: mpsc::UnboundedSender<SendEvent>,
         mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
-        mut close_rx: watch::Receiver<()>,
+        token: CancellationToken,
     ) {
         loop {
             select! {
@@ -249,7 +252,7 @@ impl<S: Storage> Broker<S> {
                         error!("broker process client packet error: {e}")
                     }
                 }
-                _ = close_rx.changed() => {
+                _ = token.cancelled() => {
                     return
                 }
             }

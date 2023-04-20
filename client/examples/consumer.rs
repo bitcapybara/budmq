@@ -30,5 +30,6 @@ async fn main() -> anyhow::Result<()> {
         let s = String::from_utf8(message.payload.to_vec())?;
         println!("received a message: {s}");
     }
+    client.close().await?;
     Ok(())
 }

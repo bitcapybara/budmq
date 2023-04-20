@@ -8,12 +8,12 @@ use bud_common::{
     mtls::MtlsProvider,
     protocol::{self, ReturnCode},
 };
-use futures::{stream::FuturesUnordered, StreamExt};
 use s2n_quic::{
     client::{self, Connect},
     connection, provider,
 };
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::consumer::Consumers;
 
@@ -102,6 +102,7 @@ impl Connector {
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         consumers: Consumers,
         keepalive: u16,
+        token: CancellationToken,
     ) -> Result<()> {
         // unwrap: with_tls error is infallible
         let client: client::Client = client::Client::builder()
@@ -115,26 +116,17 @@ impl Connector {
 
         let (handle, acceptor) = connection.split();
 
-        let (res_tx, res_rx) = watch::channel(());
-
         // writer task loop
-        let writer_task = Writer::new(handle).run(server_rx, keepalive, res_rx.clone());
+        let writer_task = Writer::new(handle).run(server_rx, keepalive, token.child_token());
         let writer_handle = tokio::spawn(writer_task);
 
         // reader task loop
-        let reader_task = Reader::new(consumers).run(acceptor, res_rx.clone());
+        let reader_task = Reader::new(consumers).run(acceptor, token.child_token());
         let reader_handle = tokio::spawn(reader_task);
 
         // wait for first complete
-        let mut futs = FuturesUnordered::from_iter(vec![
-            wait(writer_handle, "client writer"),
-            wait(reader_handle, "client reader"),
-        ]);
-
-        // drop close_tx
-        while futs.next().await.is_some() {
-            res_tx.send(()).ok();
-        }
+        wait(writer_handle, "client writer").await;
+        wait(reader_handle, "client reader").await;
 
         Ok(())
     }

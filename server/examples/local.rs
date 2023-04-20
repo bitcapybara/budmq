@@ -12,7 +12,7 @@ use flexi_logger::{detailed_format, Age, Cleanup, Criterion, FileSpec, Logger, N
 use futures::StreamExt;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
-use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
@@ -49,8 +49,8 @@ fn main() -> anyhow::Result<()> {
     let server_cert = read_file(&args.cert_dir.join("server.pem"))?;
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
-    let server = Server::new(provider, SocketAddr::new(args.addr.parse()?, args.port));
-    run(server)?;
+    let (token, server) = Server::new(provider, SocketAddr::new(args.addr.parse()?, args.port));
+    run(token, server)?;
     Ok(())
 }
 
@@ -61,18 +61,17 @@ fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
 }
 
 #[tokio::main]
-async fn run(server: Server) -> anyhow::Result<()> {
+async fn run(token: CancellationToken, server: Server) -> anyhow::Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM, SIGQUIT])?;
     let handle = signals.handle();
-    let (close_tx, close_rx) = oneshot::channel();
     tokio::spawn(async move {
         signals.next().await;
-        drop(close_tx);
+        token.cancel();
         handle.close();
     });
 
     // use memory storage
     let storage = MemoryStorage::new();
-    server.start(storage, close_rx).await?;
+    server.start(storage).await?;
     Ok(())
 }

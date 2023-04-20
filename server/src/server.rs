@@ -1,13 +1,10 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
 use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
-use futures::{stream::FuturesUnordered, StreamExt};
 use log::error;
 use s2n_quic::{connection, provider, Connection};
-use tokio::{
-    select,
-    sync::{mpsc, oneshot, watch},
-};
+use tokio::{select, sync::mpsc};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     broker::{self, Broker},
@@ -56,23 +53,26 @@ impl From<connection::Error> for Error {
 pub struct Server {
     provider: MtlsProvider,
     addr: SocketAddr,
+    token: CancellationToken,
 }
 
 impl Server {
-    pub fn new(provider: MtlsProvider, addr: SocketAddr) -> Self {
-        Self { provider, addr }
+    pub fn new(provider: MtlsProvider, addr: SocketAddr) -> (CancellationToken, Self) {
+        let token = CancellationToken::new();
+        (
+            token.clone(),
+            Self {
+                provider,
+                addr,
+                token,
+            },
+        )
     }
 
-    pub async fn start<S: Storage>(
-        self,
-        storage: S,
-        shutdown_rx: oneshot::Receiver<()>,
-    ) -> Result<()> {
-        //
-        let (close_tx, close_rx) = watch::channel(());
+    pub async fn start<S: Storage>(self, storage: S) -> Result<()> {
         // start broker loop
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new(storage).run(broker_rx, close_rx.clone());
+        let broker_task = Broker::new(storage).run(broker_rx, self.token.child_token());
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
@@ -82,20 +82,13 @@ impl Server {
             .unwrap()
             .with_io(self.addr)?
             .start()?;
-        let server_task = Self::handle_accept(server, broker_tx, close_rx);
+        let server_task = Self::handle_accept(server, broker_tx, self.token.child_token());
         let server_handle = tokio::spawn(server_task);
 
-        let mut futs = FuturesUnordered::from_iter(vec![
-            // wait for broker
-            wait(broker_handle, "broker task loop"),
-            // wait for server
-            wait(server_handle, "server task loop"),
-        ]);
-
-        shutdown_rx.await.ok();
-        while futs.next().await.is_some() {
-            close_tx.send(()).ok();
-        }
+        // wait for broker
+        wait(broker_handle, "broker task loop").await;
+        // wait for server
+        wait(server_handle, "server task loop").await;
 
         Ok(())
     }
@@ -103,7 +96,7 @@ impl Server {
     async fn handle_accept(
         mut server: s2n_quic::Server,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-        mut close_rx: watch::Receiver<()>,
+        token: CancellationToken,
     ) {
         let mut client_id_gen = 0;
         // one connection per client
@@ -126,7 +119,7 @@ impl Server {
                     let task = Self::handle_conn(local.to_string(), client_id, conn, broker_tx.clone());
                     tokio::spawn(task);
                 }
-                _ = close_rx.changed() => {
+                _ = token.cancelled() => {
                     return
                 }
             }

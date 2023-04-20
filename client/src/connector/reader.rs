@@ -9,9 +9,9 @@ use log::{error, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot},
 };
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
 use crate::consumer::{ConsumeMessage, Consumers, CONSUME_CHANNEL_CAPACITY};
 
@@ -26,7 +26,7 @@ impl Reader {
         Self { consumers }
     }
 
-    pub async fn run(self, mut acceptor: StreamAcceptor, mut close_rx: watch::Receiver<()>) {
+    pub async fn run(self, mut acceptor: StreamAcceptor, token: CancellationToken) {
         loop {
             select! {
                 res = acceptor.accept_bidirectional_stream() => {
@@ -38,7 +38,7 @@ impl Reader {
                         }
                     }
                 }
-                _ = close_rx.changed() => {
+                _ = token.cancelled() => {
                     return
                 }
             }
