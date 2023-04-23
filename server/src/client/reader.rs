@@ -38,55 +38,12 @@ impl Reader {
         let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
         loop {
             match timeout(keepalive, acceptor.accept_bidirectional_stream()).await {
-                Ok(Ok(Some(stream))) => {
-                    let mut framed = Framed::new(stream, PacketCodec);
-                    match framed.next().await {
-                        Some(Ok(packet)) => match packet {
-                            Packet::Connect(_) => {
-                                // Do not allow duplicate connections
-                                let code = ReturnCode::AlreadyConnected;
-                                if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
-                                    error!("send packet to client error: {e}");
-                                }
-                            }
-                            p @ (Packet::Subscribe(_)
-                            | Packet::Unsubscribe(_)
-                            | Packet::Publish(_)
-                            | Packet::ConsumeAck(_)
-                            | Packet::ControlFlow(_)) => {
-                                if let Err(e) = self.send(p, framed).await {
-                                    error!("send packet to broker error: {e}")
-                                }
-                            }
-                            Packet::Ping => {
-                                // return pong packet directly
-                                tokio::spawn(async move {
-                                    if let Err(e) = framed.send(Packet::Pong).await {
-                                        error!("send pong packet error: {e}")
-                                    }
-                                });
-                            }
-                            Packet::Disconnect => {
-                                if let Err(e) = self.broker_tx.send(broker::ClientMessage {
-                                    client_id: self.client_id,
-                                    packet: Packet::Disconnect,
-                                    res_tx: None,
-                                    client_tx: None,
-                                }) {
-                                    error!("send DISCONNECT to broker error: {e}");
-                                }
-                            }
-                            p => error!("received unsupported packet: {:?}", p.packet_type()),
-                        },
-                        Some(Err(e)) => error!("read from stream error: {e}"),
-                        None => error!("framed stream closed"),
-                    }
+                Ok(Ok(Some(stream))) => self.process_stream(stream).await,
+                Ok(Ok(None)) => {
+                    error!("server connection closed");
+                    return;
                 }
-                Ok(Ok(None)) => return,
-                Ok(Err(e)) => {
-                    error!("accept stream error: {e}");
-                    continue;
-                }
+                Ok(Err(e)) => error!("accept stream error: {e}"),
                 Err(_) => {
                     // receive ping timeout
                     if let Err(e) = self.broker_tx.send(broker::ClientMessage {
@@ -99,6 +56,51 @@ impl Reader {
                     }
                 }
             }
+        }
+    }
+
+    async fn process_stream(&self, stream: BidirectionalStream) {
+        let mut framed = Framed::new(stream, PacketCodec);
+        match framed.next().await {
+            Some(Ok(packet)) => match packet {
+                Packet::Connect(_) => {
+                    // Do not allow duplicate connections
+                    let code = ReturnCode::AlreadyConnected;
+                    if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
+                        error!("send packet to client error: {e}");
+                    }
+                }
+                p @ (Packet::Subscribe(_)
+                | Packet::Unsubscribe(_)
+                | Packet::Publish(_)
+                | Packet::ConsumeAck(_)
+                | Packet::ControlFlow(_)) => {
+                    if let Err(e) = self.send(p, framed).await {
+                        error!("send packet to broker error: {e}")
+                    }
+                }
+                Packet::Ping => {
+                    // return pong packet directly
+                    tokio::spawn(async move {
+                        if let Err(e) = framed.send(Packet::Pong).await {
+                            error!("send pong packet error: {e}")
+                        }
+                    });
+                }
+                Packet::Disconnect => {
+                    if let Err(e) = self.broker_tx.send(broker::ClientMessage {
+                        client_id: self.client_id,
+                        packet: Packet::Disconnect,
+                        res_tx: None,
+                        client_tx: None,
+                    }) {
+                        error!("send DISCONNECT to broker error: {e}");
+                    }
+                }
+                p => error!("received unsupported packet: {:?}", p.packet_type()),
+            },
+            Some(Err(e)) => error!("read from stream error: {e}"),
+            None => error!("framed stream closed"),
         }
     }
 

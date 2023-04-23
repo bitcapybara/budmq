@@ -104,6 +104,7 @@ impl Connector {
         keepalive: u16,
         token: CancellationToken,
     ) -> Result<()> {
+        // TODO handle reconnect here
         // unwrap: with_tls error is infallible
         let client: client::Client = client::Client::builder()
             .with_tls(self.provider)
