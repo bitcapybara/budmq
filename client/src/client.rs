@@ -163,17 +163,21 @@ impl Client {
 
     // TODO Drop?
     pub async fn close(self) -> Result<()> {
+        // cancel token
         self.token.cancel();
+
+        // wait for connection handler exit
+        wait_result(self.connector_handle, "connector task loop").await;
+
+        // send disconnect message to server
         let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
         self.server_tx.send(OutgoingMessage {
             packet: Packet::Disconnect,
             res_tx: disconn_res_tx,
         })?;
         match disconn_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
         }
-        wait_result(self.connector_handle, "connector task loop").await;
-        Ok(())
     }
 }
