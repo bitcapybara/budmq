@@ -69,21 +69,40 @@ pub struct ConsumeMessage {
     pub payload: Bytes,
 }
 
+pub struct Session {
+    sub_info: SubscribeMessage,
+    sender: ConsumerSender,
+}
+
 #[derive(Clone)]
-pub struct Consumers(Arc<RwLock<HashMap<u64, ConsumerSender>>>);
+pub struct Consumers(Arc<RwLock<HashMap<u64, Session>>>);
 
 impl Consumers {
     pub fn new() -> Self {
         Self(Arc::new(RwLock::new(HashMap::new())))
     }
-    pub async fn add_consumer(&self, consumer_id: u64, consumer_sender: ConsumerSender) {
+    pub async fn add_consumer(
+        &self,
+        consumer_id: u64,
+        sub_info: SubscribeMessage,
+        sender: ConsumerSender,
+    ) {
         let mut consumers = self.0.write().await;
-        consumers.insert(consumer_id, consumer_sender);
+        consumers.insert(consumer_id, Session { sub_info, sender });
     }
 
-    pub async fn get_consumer(&self, consumer_id: u64) -> Option<ConsumerSender> {
+    pub async fn get_consumer_sender(&self, consumer_id: u64) -> Option<ConsumerSender> {
         let consumers = self.0.read().await;
-        consumers.get(&consumer_id).cloned()
+        consumers.get(&consumer_id).map(|c| c.sender.clone())
+    }
+
+    pub async fn all_sub_infos(&self) -> Vec<(u64, SubscribeMessage)> {
+        let consumers = self.0.read().await;
+        let mut subs = Vec::with_capacity(consumers.len());
+        for (id, session) in consumers.iter() {
+            subs.push((*id, session.sub_info.clone()));
+        }
+        subs
     }
 }
 
@@ -105,7 +124,7 @@ impl Consumer {
     pub async fn new(
         id: u64,
         permits: Arc<AtomicU32>,
-        sub: SubscribeMessage,
+        sub: &SubscribeMessage,
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
         consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     ) -> Result<Self> {
@@ -126,8 +145,8 @@ impl Consumer {
         let (sub_res_tx, sub_res_rx) = oneshot::channel();
         server_tx.send(OutgoingMessage {
             packet: Packet::Subscribe(Subscribe {
-                topic: sub.topic,
-                sub_name: sub.sub_name,
+                topic: sub.topic.clone(),
+                sub_name: sub.sub_name.clone(),
                 sub_type: sub.sub_type,
                 consumer_id: id,
                 initial_position: sub.initial_postion,

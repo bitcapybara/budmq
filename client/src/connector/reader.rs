@@ -51,7 +51,7 @@ impl Reader {
             let mut framed = Framed::new(stream, PacketCodec);
             match framed.try_next().await {
                 Ok(Some(Packet::Send(s))) => {
-                    let Some(sender) = consumers.get_consumer(s.consumer_id).await else {
+                    let Some(sender) = consumers.get_consumer_sender(s.consumer_id).await else {
                         warn!("recv a message but consumer not found");
                         return
                     };

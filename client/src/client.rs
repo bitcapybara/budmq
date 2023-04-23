@@ -147,16 +147,14 @@ impl Client {
         let consumer = Consumer::new(
             self.consumer_id_gen,
             permits.clone(),
-            subscribe,
+            &subscribe,
             self.server_tx.clone(),
             consumer_rx,
         )
         .await?;
+        let sender = ConsumerSender::new(consumer.id, permits, self.server_tx.clone(), consumer_tx);
         self.consumers
-            .add_consumer(
-                consumer.id,
-                ConsumerSender::new(consumer.id, permits, self.server_tx.clone(), consumer_tx),
-            )
+            .add_consumer(consumer.id, subscribe, sender)
             .await;
         Ok(consumer)
     }
