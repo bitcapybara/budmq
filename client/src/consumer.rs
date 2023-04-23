@@ -56,6 +56,7 @@ impl From<connector::Error> for Error {
     }
 }
 
+#[derive(Clone)]
 pub struct SubscribeMessage {
     pub topic: String,
     pub sub_name: String,
