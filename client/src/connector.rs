@@ -33,6 +33,7 @@ pub enum Error {
     FromQuic(String),
     Protocol(protocol::Error),
     Internal(String),
+    Disconnect,
 }
 
 impl std::error::Error for Error {}
@@ -47,6 +48,7 @@ impl std::fmt::Display for Error {
             Error::FromQuic(e) => write!(f, "receive error from quic: {e}"),
             Error::Protocol(e) => write!(f, "protocol error: {e}"),
             Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Disconnect => write!(f, "receive DISCONNECT packet from Server"),
         }
     }
 }
