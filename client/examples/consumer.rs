@@ -1,4 +1,7 @@
-use bud_client::{client::ClientBuilder, consumer::SubscribeMessage};
+use bud_client::{
+    client::ClientBuilder,
+    consumer::{Consumer, SubscribeMessage},
+};
 use bud_common::{
     mtls::MtlsProvider,
     subscription::{InitialPostion, SubType},
@@ -16,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let mut consumer = client
+    let consumer = client
         .new_consumer(SubscribeMessage {
             topic: "test-topic".to_string(),
             sub_name: "test-subscription".to_string(),
@@ -24,12 +27,18 @@ async fn main() -> anyhow::Result<()> {
             initial_postion: InitialPostion::Latest,
         })
         .await?;
+    if let Err(e) = consume(consumer).await {
+        println!("consume error: {e}")
+    }
+    client.close().await?;
+    Ok(())
+}
 
+async fn consume(mut consumer: Consumer) -> anyhow::Result<()> {
     while let Some(message) = consumer.next().await {
         consumer.ack(message.id).await?;
         let s = String::from_utf8(message.payload.to_vec())?;
         println!("received a message: {s}");
     }
-    client.close().await?;
     Ok(())
 }

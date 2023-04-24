@@ -1,4 +1,4 @@
-use bud_client::client::ClientBuilder;
+use bud_client::{client::ClientBuilder, producer::Producer};
 use bud_common::mtls::MtlsProvider;
 
 const CA_CERT: &[u8] = include_bytes!("../../certs/ca.pem");
@@ -13,12 +13,17 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let mut producer = client.new_producer("test-topic");
+    let producer = client.new_producer("test-topic");
+    if let Err(e) = produce(producer).await {
+        println!("produce error: {e}")
+    }
+    client.close().await?;
+    Ok(())
+}
 
+async fn produce(mut producer: Producer) -> anyhow::Result<()> {
     for _ in 0..10 {
         producer.send(b"hello, world").await?;
     }
-
-    client.close().await?;
     Ok(())
 }
