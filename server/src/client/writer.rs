@@ -3,10 +3,11 @@ use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::{connection, stream::BidirectionalStream};
 use tokio::{
+    select,
     sync::{mpsc, oneshot},
     time::timeout,
 };
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
 use super::{Error, Result};
 use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
@@ -29,28 +30,38 @@ impl Writer {
         self,
         mut client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
         mut handle: connection::Handle,
+        token: CancellationToken,
     ) {
-        // * push message to client
-        while let Some(message) = client_rx.recv().await {
-            let stream = match handle.open_bidirectional_stream().await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    error!("open stream error: {e}");
-                    continue;
-                }
-            };
-            let framed = Framed::new(stream, PacketCodec);
-            // send to client: framed.send(Packet) async? error log?
-            match message.packet {
-                p @ Packet::Send(_) => {
-                    if let Err(e) = self.send(message.res_tx, framed, p).await {
-                        error!("send message to client error: {e}");
+        loop {
+            select! {
+                res = client_rx.recv() => {
+                    let Some(message) = res else {
+                        return
+                    };
+                    let stream = match handle.open_bidirectional_stream().await {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("open stream error: {e}");
+                            continue;
+                        }
+                    };
+                    let framed = Framed::new(stream, PacketCodec);
+                    // send to client: framed.send(Packet) async? error log?
+                    match message.packet {
+                        p @ Packet::Send(_) => {
+                            if let Err(e) = self.send(message.res_tx, framed, p).await {
+                                error!("send message to client error: {e}");
+                            }
+                        }
+                        p => error!(
+                            "received unexpected packet from broker: {:?}",
+                            p.packet_type()
+                        ),
                     }
                 }
-                p => error!(
-                    "received unexpected packet from broker: {:?}",
-                    p.packet_type()
-                ),
+                _ = token.cancelled() => {
+                    return
+                }
             }
         }
     }

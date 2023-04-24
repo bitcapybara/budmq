@@ -7,13 +7,13 @@ use bud_common::{
     helper::wait,
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
-use futures::{SinkExt, StreamExt};
+use futures::{stream::FuturesUnordered, SinkExt, StreamExt};
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
     time::timeout,
 };
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
 use crate::broker::{BrokerMessage, ClientMessage};
 
@@ -151,18 +151,29 @@ impl Client {
         let local = self.conn.local_addr()?.to_string();
         let (handle, acceptor) = self.conn.split();
 
+        let token = CancellationToken::new();
+
         // read
-        let read_task = Reader::new(self.id, &local, self.broker_tx).run(acceptor, self.keepalive);
+        let read_task = Reader::new(self.id, &local, self.broker_tx).run(
+            acceptor,
+            self.keepalive,
+            token.clone(),
+        );
         let read_handle = tokio::spawn(read_task);
 
         // write
-        let write_task = Writer::new(&local).run(self.client_rx, handle);
+        let write_task = Writer::new(&local).run(self.client_rx, handle, token.clone());
         let write_handle = tokio::spawn(write_task);
 
         // wait until the end
-        // TODO close all when one of them exit
-        wait(read_handle, "client read").await;
-        wait(write_handle, "client write").await;
+        let mut futs = FuturesUnordered::from_iter([
+            wait(read_handle, "client read"),
+            wait(write_handle, "client write"),
+        ]);
+
+        while futs.next().await.is_some() {
+            token.cancel();
+        }
         Ok(())
     }
 }

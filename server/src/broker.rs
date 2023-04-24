@@ -404,7 +404,6 @@ impl<S: Storage> Broker<S> {
                 }
             }
             Packet::ControlFlow(c) => {
-                // TODO simplify code
                 let clients = self.clients.read().await;
                 // add permits to subscription
                 let Some(session) = clients.get(&client_id) else {
@@ -423,7 +422,6 @@ impl<S: Storage> Broker<S> {
                 sp.additional_permits(client_id, c.consumer_id, c.permits)?;
             }
             Packet::ConsumeAck(c) => {
-                // TODO simplify code
                 let clients = self.clients.read().await;
                 let Some(session) = clients.get(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected))

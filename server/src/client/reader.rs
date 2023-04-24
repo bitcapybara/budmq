@@ -5,10 +5,11 @@ use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
+    select,
     sync::{mpsc, oneshot},
     time::timeout,
 };
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
 use super::Result;
 use crate::{broker, WAIT_REPLY_TIMEOUT};
@@ -33,27 +34,34 @@ impl Reader {
     }
 
     /// accept new stream to read a packet
-    pub async fn run(self, mut acceptor: StreamAcceptor, keepalive: u16) {
+    pub async fn run(self, mut acceptor: StreamAcceptor, keepalive: u16, token: CancellationToken) {
         // 1.5 times keepalive value
         let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
         loop {
-            match timeout(keepalive, acceptor.accept_bidirectional_stream()).await {
-                Ok(Ok(Some(stream))) => self.process_stream(stream).await,
-                Ok(Ok(None)) => {
-                    error!("server connection closed");
-                    return;
-                }
-                Ok(Err(e)) => error!("accept stream error: {e}"),
-                Err(_) => {
-                    // receive ping timeout
-                    if let Err(e) = self.broker_tx.send(broker::ClientMessage {
-                        client_id: self.client_id,
-                        packet: Packet::Disconnect,
-                        res_tx: None,
-                        client_tx: None,
-                    }) {
-                        error!("send packet to broker error: {e}")
+            select! {
+                res =timeout(keepalive, acceptor.accept_bidirectional_stream()) => {
+                    match res {
+                        Ok(Ok(Some(stream))) => self.process_stream(stream).await,
+                        Ok(Ok(None)) => {
+                            error!("server connection closed");
+                            return;
+                        }
+                        Ok(Err(e)) => error!("accept stream error: {e}"),
+                        Err(_) => {
+                            // receive ping timeout
+                            if let Err(e) = self.broker_tx.send(broker::ClientMessage {
+                                client_id: self.client_id,
+                                packet: Packet::Disconnect,
+                                res_tx: None,
+                                client_tx: None,
+                            }) {
+                                error!("send packet to broker error: {e}")
+                            }
+                        }
                     }
+                }
+                _ = token.cancelled() => {
+                    return
                 }
             }
         }
