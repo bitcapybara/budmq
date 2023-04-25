@@ -5,7 +5,7 @@ ENV RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
 
 ARG CARGO_CONFIG=$CARGO_HOME/config
 
-RUN apk update && apk add --no-cache build-base perl cmake && \
+RUN apk update && apk add build-base perl cmake && \
     rustup component add rustfmt clippy && \
     echo "[source.crates-io]" >> $CARGO_CONFIG && \
     echo "replace-with = 'rsproxy-sparse'" >> $CARGO_CONFIG && \
