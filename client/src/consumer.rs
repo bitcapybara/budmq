@@ -69,9 +69,11 @@ pub struct ConsumeMessage {
     pub payload: Bytes,
 }
 
+#[derive(Clone)]
 pub struct Session {
-    sub_info: SubscribeMessage,
-    sender: ConsumerSender,
+    pub consumer_id: u64,
+    pub sub_info: SubscribeMessage,
+    pub sender: ConsumerSender,
 }
 
 #[derive(Clone)]
@@ -81,6 +83,7 @@ impl Consumers {
     pub fn new() -> Self {
         Self(Arc::new(RwLock::new(HashMap::new())))
     }
+
     pub async fn add_consumer(
         &self,
         consumer_id: u64,
@@ -88,7 +91,19 @@ impl Consumers {
         sender: ConsumerSender,
     ) {
         let mut consumers = self.0.write().await;
-        consumers.insert(consumer_id, Session { sub_info, sender });
+        consumers.insert(
+            consumer_id,
+            Session {
+                consumer_id,
+                sub_info,
+                sender,
+            },
+        );
+    }
+
+    pub async fn get(&self, consumer_id: u64) -> Option<Session> {
+        let consumers = self.0.read().await;
+        consumers.get(&consumer_id).cloned()
     }
 
     pub async fn get_consumer_sender(&self, consumer_id: u64) -> Option<ConsumerSender> {
@@ -96,13 +111,14 @@ impl Consumers {
         consumers.get(&consumer_id).map(|c| c.sender.clone())
     }
 
-    pub async fn all_sub_infos(&self) -> Vec<(u64, SubscribeMessage)> {
+    pub async fn get_consumer_ids(&self) -> Vec<u64> {
         let consumers = self.0.read().await;
-        let mut subs = Vec::with_capacity(consumers.len());
-        for (id, session) in consumers.iter() {
-            subs.push((*id, session.sub_info.clone()));
+        let mut ids = Vec::with_capacity(consumers.len());
+        for id in consumers.keys() {
+            ids.push(*id)
         }
-        subs
+
+        ids
     }
 }
 
@@ -128,19 +144,6 @@ impl Consumer {
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
         consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     ) -> Result<Self> {
-        // send permits packet on init
-        let (permits_res_tx, permits_res_rx) = oneshot::channel();
-        server_tx.send(OutgoingMessage {
-            packet: Packet::ControlFlow(ControlFlow {
-                consumer_id: id,
-                permits: permits.load(Ordering::SeqCst),
-            }),
-            res_tx: permits_res_tx,
-        })?;
-        match permits_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
-        }
         // send subscribe message
         let (sub_res_tx, sub_res_rx) = oneshot::channel();
         server_tx.send(OutgoingMessage {
@@ -154,6 +157,19 @@ impl Consumer {
             res_tx: sub_res_tx,
         })?;
         match sub_res_rx.await?? {
+            ReturnCode::Success => {}
+            code => return Err(Error::FromServer(code)),
+        }
+        // send permits packet on init
+        let (permits_res_tx, permits_res_rx) = oneshot::channel();
+        server_tx.send(OutgoingMessage {
+            packet: Packet::ControlFlow(ControlFlow {
+                consumer_id: id,
+                permits: permits.load(Ordering::SeqCst),
+            }),
+            res_tx: permits_res_tx,
+        })?;
+        match permits_res_rx.await?? {
             ReturnCode::Success => {}
             code => return Err(Error::FromServer(code)),
         }

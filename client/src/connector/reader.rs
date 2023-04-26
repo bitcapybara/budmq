@@ -100,8 +100,8 @@ impl Reader {
 
 #[derive(Clone)]
 pub struct ConsumerSender {
-    consumer_id: u64,
-    permits: Arc<AtomicU32>,
+    pub consumer_id: u64,
+    pub permits: Arc<AtomicU32>,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumer_tx: mpsc::UnboundedSender<ConsumeMessage>,
 }

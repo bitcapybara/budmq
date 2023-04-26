@@ -96,12 +96,13 @@ impl ClientBuilder {
         let token = CancellationToken::new();
 
         // connector task loop
-        let connector_task = Connector::new(self.addr, self.provider).run(
-            server_rx,
+        let connector_task = Connector::new(
+            self.addr,
+            self.provider,
             consumers.clone(),
-            self.keepalive,
-            token.clone(),
-        );
+            server_tx.clone(),
+        )
+        .run(server_rx, self.keepalive, token.clone());
         let connector_handle = tokio::spawn(connector_task);
 
         // send connect packet
