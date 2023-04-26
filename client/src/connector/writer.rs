@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use futures::{SinkExt, TryStreamExt};
@@ -6,7 +6,7 @@ use log::error;
 use s2n_quic::connection::Handle;
 use tokio::{
     select,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex},
     time::timeout,
 };
 use tokio_util::{codec::Framed, sync::CancellationToken};
@@ -30,11 +30,12 @@ impl Writer {
     }
     pub async fn run(
         mut self,
-        mut server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        server_rx: Arc<Mutex<mpsc::UnboundedReceiver<OutgoingMessage>>>,
         keepalive: u16,
         token: CancellationToken,
     ) {
         let keepalive = Duration::from_millis(keepalive as u64);
+        let mut server_rx = server_rx.lock().await;
         loop {
             select! {
                 res = timeout(keepalive, server_rx.recv()) => {

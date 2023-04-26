@@ -1,7 +1,7 @@
 mod reader;
 mod writer;
 
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, sync::Arc};
 
 use bud_common::{
     helper::wait,
@@ -12,7 +12,7 @@ use s2n_quic::{
     client::{self, Connect},
     connection, provider,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::consumer::Consumers;
@@ -106,31 +106,32 @@ impl Connector {
         keepalive: u16,
         token: CancellationToken,
     ) -> Result<()> {
-        // TODO handle reconnect here
-        // unwrap safe: with_tls error is infallible
-        let client: client::Client = client::Client::builder()
-            .with_tls(self.provider)
-            .unwrap()
-            .with_io("0.0.0.0:0")?
-            .start()?;
-        let connector = Connect::new(self.addr);
-        let mut connection = client.connect(connector).await?;
-        connection.keep_alive(true)?;
+        let server_rx = Arc::new(Mutex::new(server_rx));
+        loop {
+            // unwrap safe: with_tls error is infallible
+            let client: client::Client = client::Client::builder()
+                .with_tls(self.provider.clone())
+                .unwrap()
+                .with_io("0.0.0.0:0")?
+                .start()?;
+            let connector = Connect::new(self.addr);
+            let mut connection = client.connect(connector).await?;
+            connection.keep_alive(true)?;
 
-        let (handle, acceptor) = connection.split();
+            let (handle, acceptor) = connection.split();
 
-        // writer task loop
-        let writer_task = Writer::new(handle).run(server_rx, keepalive, token.child_token());
-        let writer_handle = tokio::spawn(writer_task);
+            // writer task loop
+            let writer_task =
+                Writer::new(handle).run(server_rx.clone(), keepalive, token.child_token());
+            let writer_handle = tokio::spawn(writer_task);
 
-        // reader task loop
-        let reader_task = Reader::new(consumers).run(acceptor, token.child_token());
-        let reader_handle = tokio::spawn(reader_task);
+            // reader task loop
+            let reader_task = Reader::new(consumers.clone()).run(acceptor, token.child_token());
+            let reader_handle = tokio::spawn(reader_task);
 
-        // wait for first complete
-        wait(writer_handle, "client writer").await;
-        wait(reader_handle, "client reader").await;
-
-        Ok(())
+            // wait for completing
+            wait(writer_handle, "client writer").await;
+            wait(reader_handle, "client reader").await;
+        }
     }
 }
