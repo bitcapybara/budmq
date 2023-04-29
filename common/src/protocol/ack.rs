@@ -67,6 +67,6 @@ impl Codec for ReturnCode {
     }
 
     fn header(&self) -> Header {
-        Header::new(PacketType::ReturnCode, 1)
+        Header::new(PacketType::Response, 1)
     }
 }

@@ -1,6 +1,6 @@
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use futures::{SinkExt, StreamExt};
-use log::error;
+use log::{error, trace};
 use s2n_quic::{connection, stream::BidirectionalStream};
 use tokio::{
     select,
@@ -39,6 +39,7 @@ impl Writer {
                         token.cancel();
                         return
                     };
+                    trace!("client:writer: receive a new packet task, open stream");
                     let stream = match handle.open_bidirectional_stream().await {
                         Ok(stream) => stream,
                         Err(e) => {
@@ -50,6 +51,7 @@ impl Writer {
                     // send to client: framed.send(Packet) async? error log?
                     match message.packet {
                         p @ Packet::Send(_) => {
+                            trace!("client::writer: Send SEND packet to client");
                             if let Err(e) = self.send(message.res_tx, framed, p).await {
                                 error!("send message to client error: {e}");
                             }
@@ -76,13 +78,14 @@ impl Writer {
         let local = self.local_addr.clone();
         match res_tx {
             Some(tx) => {
-                // sync send, wait for reply
                 tokio::spawn(async move {
+                    trace!("client::writer[spawn]: send packet to client");
                     if let Err(e) = framed.send(packet).await {
                         error!("send packet to client {local} error: {e}")
                     }
+                    trace!("client::writer[spawn]: waiting for response from client");
                     match timeout(WAIT_REPLY_TIMEOUT, framed.next()).await {
-                        Ok(Some(Ok(Packet::ReturnCode(code)))) => {
+                        Ok(Some(Ok(Packet::Response(code)))) => {
                             let res = match code {
                                 ReturnCode::Success => Ok(()),
                                 _ => Err(Error::Client(code)),
@@ -115,8 +118,10 @@ impl Writer {
                 });
             }
             None => {
-                // async send, log error
                 tokio::spawn(async move {
+                    trace!(
+                        "client::writer[spawn]: send packet to client without waiting for response"
+                    );
                     if let Err(e) = framed.send(packet).await {
                         error!("send packet to client {local} error: {e}")
                     }

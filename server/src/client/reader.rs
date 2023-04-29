@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use futures::{SinkExt, StreamExt};
-use log::error;
+use log::{error, trace, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
@@ -44,10 +44,12 @@ impl Reader {
                         Ok(Ok(Some(stream))) => self.process_stream(stream).await,
                         Ok(Ok(None)) => {
                             error!("server connection closed");
+                            token.cancel();
                             return;
                         }
                         Ok(Err(e)) => error!("accept stream error: {e}"),
                         Err(_) => {
+                            trace!("client::reader::run: waiting for PING packet timeout");
                             // receive ping timeout
                             if let Err(e) = self.broker_tx.send(broker::ClientMessage {
                                 client_id: self.client_id,
@@ -72,12 +74,14 @@ impl Reader {
 
     async fn process_stream(&self, stream: BidirectionalStream) {
         let mut framed = Framed::new(stream, PacketCodec);
+        trace!("client::reader: waiting for framed packet");
         match framed.next().await {
             Some(Ok(packet)) => match packet {
                 Packet::Connect(_) => {
+                    warn!("client::reader: receive a CONNECT packet after handshake");
                     // Do not allow duplicate connections
                     let code = ReturnCode::AlreadyConnected;
-                    if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
+                    if let Err(e) = framed.send(Packet::Response(code)).await {
                         error!("send packet to client error: {e}");
                     }
                 }
@@ -86,12 +90,14 @@ impl Reader {
                 | Packet::Publish(_)
                 | Packet::ConsumeAck(_)
                 | Packet::ControlFlow(_)) => {
+                    trace!("client::reader: receive {} packet", p.packet_type());
                     if let Err(e) = self.send(p, framed).await {
                         error!("send packet to broker error: {e}")
                     }
                 }
                 Packet::Ping => {
                     // return pong packet directly
+                    trace!("client::reader: receive PING packet");
                     tokio::spawn(async move {
                         if let Err(e) = framed.send(Packet::Pong).await {
                             error!("send pong packet error: {e}")
@@ -108,7 +114,7 @@ impl Reader {
                         error!("send DISCONNECT to broker error: {e}");
                     }
                 }
-                p => error!("received unsupported packet: {:?}", p.packet_type()),
+                p => error!("received unsupported packet: {}", p.packet_type()),
             },
             Some(Err(e)) => error!("read from stream error: {e}"),
             None => error!("framed stream closed"),
@@ -122,6 +128,7 @@ impl Reader {
     ) -> Result<()> {
         let (res_tx, res_rx) = oneshot::channel();
         // send to broker
+        trace!("client::reader: send packet to broker");
         self.broker_tx.send(broker::ClientMessage {
             client_id: self.client_id,
             packet,
@@ -132,9 +139,11 @@ impl Reader {
         let local = self.local_addr.clone();
         tokio::spawn(async move {
             // wait for reply from broker
+            trace!("client::reader[spawn]: waiting for response from broker");
             match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
                 Ok(Ok(code)) => {
-                    if let Err(e) = framed.send(Packet::ReturnCode(code)).await {
+                    trace!("client::reader[spawn]: response from broker: {code}");
+                    if let Err(e) = framed.send(Packet::Response(code)).await {
                         error!("send reply to client {local} error: {e}",)
                     }
                 }

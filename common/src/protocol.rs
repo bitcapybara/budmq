@@ -82,7 +82,7 @@ impl Decoder for PacketCodec {
             PacketType::Send => Packet::Send(Send::decode(bytes)?),
             PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
-            PacketType::ReturnCode => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
+            PacketType::Response => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::Ping => Packet::Ping,
             PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
@@ -143,10 +143,29 @@ pub enum PacketType {
     Send,
     ConsumeAck,
     ControlFlow,
-    ReturnCode,
+    Response,
     Ping,
     Pong,
     Disconnect,
+}
+
+impl std::fmt::Display for PacketType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            PacketType::Connect => "CONNECT",
+            PacketType::Subscribe => "SUBSCRIBE",
+            PacketType::Unsubscribe => "UNSUBSCRIBE",
+            PacketType::Publish => "PUBLISH",
+            PacketType::Send => "SEND",
+            PacketType::ConsumeAck => "CONSUMEACK",
+            PacketType::ControlFlow => "CONTROLFLOW",
+            PacketType::Response => "RESPONSE",
+            PacketType::Ping => "PING",
+            PacketType::Pong => "PONG",
+            PacketType::Disconnect => "DISCONNECT",
+        };
+        write!(f, "{s}")
+    }
 }
 
 pub enum Packet {
@@ -157,7 +176,7 @@ pub enum Packet {
     Send(Send),
     ConsumeAck(ConsumeAck),
     ControlFlow(ControlFlow),
-    ReturnCode(ReturnCode),
+    Response(ReturnCode),
     Ping,
     Pong,
     Disconnect,
@@ -173,7 +192,7 @@ impl Packet {
             Packet::Send(s) => s.header(),
             Packet::ConsumeAck(c) => c.header(),
             Packet::ControlFlow(c) => c.header(),
-            Packet::ReturnCode(r) => r.header(),
+            Packet::Response(r) => r.header(),
             Packet::Ping => Header::new(PacketType::Ping, 0),
             Packet::Pong => Header::new(PacketType::Pong, 0),
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
@@ -189,7 +208,7 @@ impl Packet {
             Packet::Send(s) => s.encode(buf),
             Packet::ConsumeAck(a) => a.encode(buf),
             Packet::ControlFlow(c) => c.encode(buf),
-            Packet::ReturnCode(r) => r.encode(buf),
+            Packet::Response(r) => r.encode(buf),
             Packet::Ping => Ok(()),
             Packet::Pong => Ok(()),
             Packet::Disconnect => Ok(()),
@@ -205,7 +224,7 @@ impl Packet {
             Packet::Send(_) => PacketType::Send,
             Packet::ConsumeAck(_) => PacketType::ConsumeAck,
             Packet::ControlFlow(_) => PacketType::ControlFlow,
-            Packet::ReturnCode(_) => PacketType::ReturnCode,
+            Packet::Response(_) => PacketType::Response,
             Packet::Ping => PacketType::Ping,
             Packet::Pong => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
@@ -292,7 +311,7 @@ impl Header {
             5 => PacketType::Send,
             6 => PacketType::ConsumeAck,
             7 => PacketType::ControlFlow,
-            8 => PacketType::ReturnCode,
+            8 => PacketType::Response,
             9 => PacketType::Ping,
             10 => PacketType::Pong,
             11 => PacketType::Disconnect,

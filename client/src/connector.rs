@@ -217,9 +217,9 @@ impl Connector {
             }),
             res_tx: sub_res_tx,
         })?;
-        match sub_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+        let code = sub_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
         }
         // send premits
         let (permits_res_tx, permits_res_rx) = oneshot::channel();
@@ -232,9 +232,8 @@ impl Connector {
             res_tx: permits_res_tx,
         })?;
         match permits_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+            ReturnCode::Success => Ok(()),
+            code => Err(Error::FromServer(code)),
         }
-        Ok(())
     }
 }

@@ -113,9 +113,9 @@ impl ClientBuilder {
             }),
             res_tx: conn_res_tx,
         })?;
-        match conn_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+        let code = conn_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
         }
 
         Ok(Client {

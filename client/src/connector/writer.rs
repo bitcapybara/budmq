@@ -36,6 +36,7 @@ impl Writer {
     ) {
         let keepalive = Duration::from_millis(keepalive as u64);
         let mut server_rx = server_rx.lock().await;
+        let mut ping_err_count = 0;
         loop {
             select! {
                 res = timeout(keepalive, server_rx.recv()) => {
@@ -61,12 +62,26 @@ impl Writer {
                                 error!("client send ping error: {e}");
                                 continue;
                             }
-                            tokio::spawn(async move {
-                                match res_rx.await {
-                                    Ok(_) => todo!(),
-                                    Err(_) => todo!(),
+
+                            match res_rx.await {
+                                Ok(Ok(ReturnCode::Success)) => {},
+                                Ok(Ok(code)) => {
+                                    error!("client send ping: {code}");
+                                    token.cancel();
+                                    return
                                 }
-                            });
+                                Ok(Err(e)) => {
+                                    error!("client send ping error: {e}");
+                                    ping_err_count += 1;
+                                    if ping_err_count >= 3 {
+                                        token.cancel();
+                                        return
+                                    }
+                                },
+                                Err(_) => {
+                                    error!("client ping res_tx dropped");
+                                }
+                            }
                         }
                     }
                 }
@@ -91,7 +106,7 @@ impl Writer {
             }
             // wait for ack
             let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
-                Ok(Ok(Some(Packet::ReturnCode(code)))) => code,
+                Ok(Ok(Some(Packet::Response(code)))) => code,
                 Ok(Ok(Some(p))) => {
                     error!(
                         "client writer: expected Packet::ReturnCode, found {:?}",

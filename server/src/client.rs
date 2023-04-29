@@ -8,6 +8,7 @@ use bud_common::{
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 use futures::{future, SinkExt, StreamExt};
+use log::trace;
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -109,20 +110,24 @@ impl Client {
         mut conn: Connection,
         broker_tx: mpsc::UnboundedSender<ClientMessage>,
     ) -> Result<Self> {
+        trace!("client::handshake: waiting on accepting a bi stream");
         let stream = conn
             .accept_bidirectional_stream()
             .await?
             .ok_or(Error::StreamClosed)?;
         let mut framed = Framed::new(stream, PacketCodec);
+        trace!("client::handshake: waiting for the first framed packet");
         let handshake = timeout(HANDSHAKE_TIMOUT, framed.next())
             .await
             .map_err(|_| Error::HandshakeTimeout)?
             .ok_or(Error::StreamClosed)??;
         match handshake {
             Packet::Connect(connect) => {
+                trace!("client::handshake: receive CONNECT packet");
                 let (res_tx, res_rx) = oneshot::channel();
                 let (client_tx, client_rx) = mpsc::unbounded_channel();
                 // send to broker
+                trace!("client::handshake: send packet to broker");
                 broker_tx.send(ClientMessage {
                     client_id: id,
                     packet: Packet::Connect(connect),
@@ -130,11 +135,14 @@ impl Client {
                     client_tx: Some(client_tx),
                 })?;
                 // wait for reply
+                trace!("client::handshake: waiting for response from broker");
                 let code = res_rx.await?;
-                framed.send(Packet::ReturnCode(code)).await?;
+                trace!("client::handshake: send response to client");
+                framed.send(Packet::Response(code)).await?;
                 if !matches!(code, ReturnCode::Success) {
                     return Err(Error::Server(code));
                 }
+                trace!("client::handshake: build new Client");
                 Ok(Self {
                     id,
                     conn,
@@ -154,6 +162,7 @@ impl Client {
         let token = CancellationToken::new();
 
         // read
+        trace!("client::start: start read task");
         let read_task = Reader::new(self.id, &local, self.broker_tx).run(
             acceptor,
             self.keepalive,
@@ -162,6 +171,7 @@ impl Client {
         let read_handle = tokio::spawn(read_task);
 
         // write
+        trace!("client::start: start write task");
         let write_task = Writer::new(&local).run(self.client_rx, handle, token.clone());
         let write_handle = tokio::spawn(write_task);
 
@@ -171,7 +181,7 @@ impl Client {
             wait(write_handle, "client write"),
         )
         .await;
-
+        trace!("client::start: exit");
         Ok(())
     }
 }

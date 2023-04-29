@@ -6,7 +6,7 @@ use bud_common::{
     storage::Storage,
 };
 use futures::future;
-use log::{debug, error};
+use log::{debug, error, trace};
 use tokio::{
     select,
     sync::{mpsc, oneshot, RwLock},
@@ -93,6 +93,7 @@ struct SubInfo {
 /// One session per client
 /// Save a client's connection information
 struct Session {
+    /// send to client
     client_tx: mpsc::UnboundedSender<BrokerMessage>,
     /// key = consumer_id, value = sub_info
     consumers: HashMap<u64, SubInfo>,
@@ -149,27 +150,29 @@ impl<S: Storage> Broker<S> {
         let task_token = token.child_token();
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
-        let sub_task = self
+        let send_task = self
             .clone()
-            .receive_subscription(send_rx, task_token.clone());
-        let sub_handle = tokio::spawn(sub_task);
+            .handle_send_message(send_rx, task_token.clone());
+        let send_handle = tokio::spawn(send_task);
+        trace!("broker::run: start handle send message task");
 
         // client task
         let client_task = self
             .clone()
             .receive_client(send_tx, broker_rx, task_token.clone());
         let client_handle = tokio::spawn(client_task);
+        trace!("broker::run start handle client message task");
 
         future::join(
-            wait(sub_handle, "broker subscription"),
-            wait(client_handle, "broker client"),
+            wait(send_handle, "broker handle send message"),
+            wait(client_handle, "broker handle client message"),
         )
         .await;
         token.cancel();
     }
 
     /// process send event from all subscriptions
-    async fn receive_subscription(
+    async fn handle_send_message(
         self,
         mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
         token: CancellationToken,
@@ -181,6 +184,7 @@ impl<S: Storage> Broker<S> {
                         token.cancel();
                         return
                     };
+                    trace!("broker::handle_send_message task: receive a message");
                     if let Err(e) = self.process_send_event(event).await {
                         error!("broker send message to consumer error: {e}")
                     }
@@ -193,7 +197,7 @@ impl<S: Storage> Broker<S> {
     }
 
     async fn process_send_event(&self, event: SendEvent) -> Result<()> {
-        debug!("send packet to consumer: {event}");
+        debug!("broker::process_send_event: send packet to consumer: {event}");
         let topics = self.topics.read().await;
         let Some(topic) = topics.get(&event.topic_name) else {
             return Err(Error::Internal(format!("topic {} not found", event.topic_name)));
@@ -202,44 +206,51 @@ impl<S: Storage> Broker<S> {
             return Err(Error::Internal(format!("message {} not found", event.message_id)));
         };
         let clients = self.clients.read().await;
-        if let Some(session) = clients.get(&event.client_id) {
-            let (res_tx, res_rx) = oneshot::channel();
-            session.client_tx.send(BrokerMessage {
-                packet: Packet::Send(Send {
-                    message_id: event.message_id,
-                    consumer_id: event.consumer_id,
-                    payload: message.payload,
-                }),
-                res_tx: Some(res_tx),
-            })?;
-            tokio::spawn(async move {
-                match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-                    Ok(Ok(Ok(_))) => {
+
+        let Some(session) = clients.get(&event.client_id) else {
+            return Ok(());
+        };
+        trace!(
+            "broker::process_send_event: send to client: {}",
+            event.client_id
+        );
+        let (res_tx, res_rx) = oneshot::channel();
+        session.client_tx.send(BrokerMessage {
+            packet: Packet::Send(Send {
+                message_id: event.message_id,
+                consumer_id: event.consumer_id,
+                payload: message.payload,
+            }),
+            res_tx: Some(res_tx),
+        })?;
+        trace!("broker::process_send_event: send response to subscription");
+        tokio::spawn(async move {
+            match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                Ok(Ok(Ok(_))) => {
+                    if event.res_tx.send(true).is_err() {
+                        error!("broker reply ok to send event error")
+                    }
+                    return;
+                }
+                Ok(Ok(Err(e))) => {
+                    if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
                         if event.res_tx.send(true).is_err() {
                             error!("broker reply ok to send event error")
                         }
                         return;
                     }
-                    Ok(Ok(Err(e))) => {
-                        if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
-                            if event.res_tx.send(true).is_err() {
-                                error!("broker reply ok to send event error")
-                            }
-                            return;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        error!("recving SEND reply from client error: {e}")
-                    }
-                    Err(_) => {
-                        error!("wait client SEND reply timout")
-                    }
                 }
-                if event.res_tx.send(false).is_err() {
-                    error!("broker reply non-ok to send event error")
+                Ok(Err(e)) => {
+                    error!("recving SEND reply from client error: {e}")
                 }
-            });
-        }
+                Err(_) => {
+                    error!("wait client SEND reply timout")
+                }
+            }
+            if event.res_tx.send(false).is_err() {
+                error!("broker reply non-ok to send event error")
+            }
+        });
         Ok(())
     }
 
@@ -256,6 +267,7 @@ impl<S: Storage> Broker<S> {
                         token.cancel();
                         return
                     };
+                    trace!("broker::receive_client: receive a message from client");
                     if let Err(e) = self.process_packets(msg, send_tx.clone()).await {
                         error!("broker process client packet error: {e}")
                     }
@@ -276,6 +288,7 @@ impl<S: Storage> Broker<S> {
         // handshake process
         match msg.packet {
             Packet::Connect(_) => {
+                trace!("broker::process_packets: broker receive CONNECT packet");
                 let Some(res_tx) = msg.res_tx else {
                     return Err(Error::Internal("Connect res_tx channel not found".to_string()))
                 };
@@ -295,22 +308,33 @@ impl<S: Storage> Broker<S> {
                         consumers: HashMap::new(),
                     },
                 );
+                trace!("broker::process_packets: add new client: {}", client_id);
             }
             Packet::Disconnect => {
+                trace!("broker::process_packets: broker receive DISCONNECT packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.remove(&client_id) else {
                     return Ok(())
-                    };
+                };
+                trace!("broker::process_packets: remove client: {}", client_id);
                 let consumers = session.consumers();
                 let mut topics = self.topics.write().await;
                 for (consumer_id, sub_info) in consumers {
-                    let Some(mut topic) = topics.remove(&sub_info.topic_name) else {
+                    let Some(topic) = topics.get_mut(&sub_info.topic_name) else {
                         continue;
                     };
                     let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
                         continue;
                     };
+                    trace!(
+                        "broker::process_packets: remove subscription from topic: {}",
+                        sub_info.sub_name
+                    );
                     sp.del_consumer(client_id, consumer_id).await?;
+                    trace!(
+                        "broker::process_packets: remove consumer from subscription: {}",
+                        consumer_id
+                    );
                 }
             }
             _ => {
@@ -340,6 +364,7 @@ impl<S: Storage> Broker<S> {
     ) -> Result<()> {
         match packet {
             Packet::Subscribe(sub) => {
+                trace!("broker::process_packets: receive SUBSCRIBE packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected));
@@ -352,9 +377,11 @@ impl<S: Storage> Broker<S> {
                 match topics.get_mut(&sub.topic) {
                     Some(topic) => match topic.get_subscription(&sub.sub_name) {
                         Some(sp) => {
+                            trace!("broker::process_packets: add consumer to subscription");
                             sp.add_consumer(client_id, &sub).await?;
                         }
                         None => {
+                            trace!("broker::process_peckets: create new subscription");
                             let sp = Subscription::from_subscribe(
                                 client_id,
                                 sub.consumer_id,
@@ -363,13 +390,17 @@ impl<S: Storage> Broker<S> {
                                 self.storage.clone(),
                             )
                             .await?;
+                            trace!("broker::process_packets: add consumer to subscription");
                             sp.add_consumer(client_id, &sub).await?;
+                            trace!("broker::process_packets: add subscription to topic");
                             topic.add_subscription(sp);
                         }
                     },
                     None => {
+                        trace!("broker::process_packets: create new topic");
                         let mut topic =
                             Topic::new(&sub.topic, send_tx.clone(), self.storage.clone()).await?;
+                        trace!("broker::process_packets: create subscription");
                         let sp = Subscription::from_subscribe(
                             client_id,
                             sub.consumer_id,
@@ -378,14 +409,17 @@ impl<S: Storage> Broker<S> {
                             self.storage.clone(),
                         )
                         .await?;
+                        trace!("broker::process_packets: add subscription to topic");
                         topic.add_subscription(sp);
                         topics.insert(sub.topic.clone(), topic);
                     }
                 }
                 // add consumer to session
+                trace!("broker::process_packets: add consumer to session");
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
+                trace!("broker::process_packets: receive UNSUBSCRIBE packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
                     return Ok(());
@@ -395,23 +429,28 @@ impl<S: Storage> Broker<S> {
                 };
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
+                    trace!("broker::process_packets: remove subscription from topic");
                     tp.del_subscription(&info.sub_name);
                 }
+                trace!("broker::process_packets: remove consumer from session");
                 session.del_consumer(consumer_id);
             }
             Packet::Publish(p) => {
+                trace!("broker::process_packets: receive PUBLISH packet");
                 // add to topic
                 let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
                 let message = Message::from_publish(p);
                 match topics.get_mut(&topic) {
                     Some(topic) => {
+                        trace!("broker::process_packets: add message to topic");
                         topic.add_message(message).await?;
                     }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
             }
             Packet::ControlFlow(c) => {
+                trace!("broker::process_packets: receive CONTROLFLOW packet");
                 let clients = self.clients.read().await;
                 // add permits to subscription
                 let Some(session) = clients.get(&client_id) else {
@@ -427,9 +466,11 @@ impl<S: Storage> Broker<S> {
                 let Some(sp) = topic.get_subscription(&info.sub_name) else {
                     return Err(Error::Internal(format!("subscription {} not found", info.sub_name)))
                 };
+                trace!("broker::process_packets: add permits to subscription");
                 sp.additional_permits(client_id, c.consumer_id, c.permits)?;
             }
             Packet::ConsumeAck(c) => {
+                trace!("broker::process_packets: receive CONSUMEACK packet");
                 let clients = self.clients.read().await;
                 let Some(session) = clients.get(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected))
@@ -441,6 +482,7 @@ impl<S: Storage> Broker<S> {
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
                     return Err(Error::Internal(format!("topic {} not found", info.topic_name)))
                 };
+                trace!("broker::process_packets: ack message in topic");
                 topic.consume_ack(&info.sub_name, c.message_id).await?;
             }
             p => return Err(Error::UnsupportedPacket(p.packet_type())),

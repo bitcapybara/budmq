@@ -156,9 +156,9 @@ impl Consumer {
             }),
             res_tx: sub_res_tx,
         })?;
-        match sub_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+        let code = sub_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
         }
         // send permits packet on init
         let (permits_res_tx, permits_res_rx) = oneshot::channel();
@@ -169,9 +169,9 @@ impl Consumer {
             }),
             res_tx: permits_res_tx,
         })?;
-        match permits_res_rx.await?? {
-            ReturnCode::Success => {}
-            code => return Err(Error::FromServer(code)),
+        let code = permits_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
         }
         Ok(Self {
             id,

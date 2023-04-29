@@ -2,7 +2,7 @@ use std::{fmt::Display, io, net::SocketAddr};
 
 use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
 use futures::future;
-use log::error;
+use log::{error, trace};
 use s2n_quic::{connection, provider, Connection};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
@@ -76,6 +76,7 @@ impl Server {
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
         let broker_task = Broker::new(storage).run(broker_rx, token.clone());
         let broker_handle = tokio::spawn(broker_task);
+        trace!("server::start: start broker task");
 
         // start server loop
         // unwrap: with_tls error is infallible
@@ -86,6 +87,7 @@ impl Server {
             .start()?;
         let server_task = Self::handle_accept(server, broker_tx, token.clone());
         let server_handle = tokio::spawn(server_task);
+        trace!("server::start: start accept task");
 
         // wait for tasks done
         future::join(
@@ -105,13 +107,14 @@ impl Server {
         token: CancellationToken,
     ) {
         let mut client_id_gen = 0;
-        // one connection per client
         loop {
             select! {
                 conn = server.accept() => {
                     let Some(conn) = conn else {
+                        token.cancel();
                         return
                     };
+                    trace!("server::handle_accept: accept a new connection");
                     let client_addr = match conn.local_addr() {
                         Ok(addr) => addr.to_string(),
                         Err(e) => {
@@ -138,8 +141,10 @@ impl Server {
         conn: Connection,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     ) {
+        trace!("server::handle_conn: waiting for handshake");
         match Client::handshake(client_id, conn, broker_tx).await {
             Ok(client) => {
+                trace!("server::handle_conn: start client");
                 if let Err(e) = client.start().await {
                     error!("handle connection from {local} error: {e}");
                 }
