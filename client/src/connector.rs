@@ -12,11 +12,16 @@ use bud_common::{
     mtls::MtlsProvider,
     protocol::{self, ControlFlow, Packet, ReturnCode, Subscribe},
 };
+use futures::future;
+use log::error;
 use s2n_quic::{
     client::{self, Connect},
     connection, provider, Connection,
 };
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot, Mutex},
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::consumer::{Consumers, Session};
@@ -123,27 +128,51 @@ impl Connector {
     ) -> Result<()> {
         let server_rx = Arc::new(Mutex::new(server_rx));
         loop {
-            // build connection
-            let connection = self.connect().await?;
-            let (handle, acceptor) = connection.split();
-
-            // resub
-            self.resub().await?;
-
-            // writer task loop
-            let writer_task =
-                Writer::new(handle).run(server_rx.clone(), keepalive, token.child_token());
-            let writer_handle = tokio::spawn(writer_task);
-
-            // reader task loop
-            let reader_task =
-                Reader::new(self.consumers.clone()).run(acceptor, token.child_token());
-            let reader_handle = tokio::spawn(reader_task);
-
-            // wait for completing
-            wait(writer_handle, "client writer").await;
-            wait(reader_handle, "client reader").await;
+            select! {
+                _ = token.cancelled() => {
+                    return Ok(())
+                }
+                else => {
+                    if let Err(e) = self.run_task(server_rx.clone(), keepalive, token.child_token()).await {
+                        error!("client connector task error: {e}");
+                        token.cancel();
+                        return Err(e)
+                    }
+                }
+            }
         }
+    }
+
+    async fn run_task(
+        &self,
+        server_rx: Arc<Mutex<mpsc::UnboundedReceiver<OutgoingMessage>>>,
+        keepalive: u16,
+        token: CancellationToken,
+    ) -> Result<()> {
+        let task_token = token.child_token();
+        // build connection
+        let connection = self.connect().await?;
+        let (handle, acceptor) = connection.split();
+
+        // resub
+        self.resub().await?;
+
+        // writer task loop
+        let writer_task = Writer::new(handle).run(server_rx, keepalive, task_token.clone());
+        let writer_handle = tokio::spawn(writer_task);
+
+        // reader task loop
+        let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
+        let reader_handle = tokio::spawn(reader_task);
+
+        // wait for completing
+        future::join(
+            wait(writer_handle, "client writer"),
+            wait(reader_handle, "client reader"),
+        )
+        .await;
+        token.cancel();
+        Ok(())
     }
 
     async fn connect(&self) -> Result<Connection> {

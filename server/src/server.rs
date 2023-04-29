@@ -1,6 +1,7 @@
 use std::{fmt::Display, io, net::SocketAddr};
 
 use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
+use futures::future;
 use log::error;
 use s2n_quic::{connection, provider, Connection};
 use tokio::{select, sync::mpsc};
@@ -70,9 +71,10 @@ impl Server {
     }
 
     pub async fn start<S: Storage>(self, storage: S) -> Result<()> {
+        let token = self.token.child_token();
         // start broker loop
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new(storage).run(broker_rx, self.token.child_token());
+        let broker_task = Broker::new(storage).run(broker_rx, token.clone());
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
@@ -82,13 +84,17 @@ impl Server {
             .unwrap()
             .with_io(self.addr)?
             .start()?;
-        let server_task = Self::handle_accept(server, broker_tx, self.token.child_token());
+        let server_task = Self::handle_accept(server, broker_tx, token.clone());
         let server_handle = tokio::spawn(server_task);
 
-        // wait for broker
-        wait(broker_handle, "broker task loop").await;
-        // wait for server
-        wait(server_handle, "server task loop").await;
+        // wait for tasks done
+        future::join(
+            // wait for broker
+            wait(broker_handle, "broker task loop"),
+            // wait for server
+            wait(server_handle, "server task loop"),
+        )
+        .await;
 
         Ok(())
     }
@@ -106,7 +112,7 @@ impl Server {
                     let Some(conn) = conn else {
                         return
                     };
-                    let local = match conn.local_addr() {
+                    let client_addr = match conn.local_addr() {
                         Ok(addr) => addr.to_string(),
                         Err(e) => {
                             error!("get client addr error: {e}");
@@ -116,7 +122,7 @@ impl Server {
                     let client_id = client_id_gen;
                     client_id_gen += 1;
                     // start client
-                    let task = Self::handle_conn(local.to_string(), client_id, conn, broker_tx.clone());
+                    let task = Self::handle_conn(client_addr, client_id, conn, broker_tx.clone());
                     tokio::spawn(task);
                 }
                 _ = token.cancelled() => {

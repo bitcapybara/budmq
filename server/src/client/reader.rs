@@ -39,7 +39,7 @@ impl Reader {
         let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
         loop {
             select! {
-                res =timeout(keepalive, acceptor.accept_bidirectional_stream()) => {
+                res = timeout(keepalive, acceptor.accept_bidirectional_stream()) => {
                     match res {
                         Ok(Ok(Some(stream))) => self.process_stream(stream).await,
                         Ok(Ok(None)) => {
@@ -55,8 +55,11 @@ impl Reader {
                                 res_tx: None,
                                 client_tx: None,
                             }) {
-                                error!("send packet to broker error: {e}")
+                                error!("wait for PING timeout, send DISCONNECT packet to broker error: {e}")
                             }
+                            // quit the loop
+                            token.cancel();
+                            return
                         }
                     }
                 }

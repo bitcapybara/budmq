@@ -65,6 +65,7 @@ async fn run(token: CancellationToken, server: Server) -> anyhow::Result<()> {
 
     // use memory storage
     let storage = MemoryStorage::new();
+    // start server
     server.start(storage).await?;
     Ok(())
 }

@@ -5,6 +5,7 @@ use bud_common::{
     protocol::{self, Packet, PacketType, ReturnCode, Send, Unsubscribe},
     storage::Storage,
 };
+use futures::future;
 use log::{debug, error};
 use tokio::{
     select,
@@ -145,21 +146,26 @@ impl<S: Storage> Broker<S> {
         broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
         token: CancellationToken,
     ) {
+        let task_token = token.child_token();
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
         let sub_task = self
             .clone()
-            .receive_subscription(send_rx, token.child_token());
+            .receive_subscription(send_rx, task_token.clone());
         let sub_handle = tokio::spawn(sub_task);
 
         // client task
         let client_task = self
             .clone()
-            .receive_client(send_tx, broker_rx, token.child_token());
+            .receive_client(send_tx, broker_rx, task_token.clone());
         let client_handle = tokio::spawn(client_task);
 
-        wait(sub_handle, "broker subscription").await;
-        wait(client_handle, "broker client").await;
+        future::join(
+            wait(sub_handle, "broker subscription"),
+            wait(client_handle, "broker client"),
+        )
+        .await;
+        token.cancel();
     }
 
     /// process send event from all subscriptions
@@ -172,6 +178,7 @@ impl<S: Storage> Broker<S> {
             select! {
                 event = send_rx.recv() => {
                     let Some(event) = event else {
+                        token.cancel();
                         return
                     };
                     if let Err(e) = self.process_send_event(event).await {
@@ -246,6 +253,7 @@ impl<S: Storage> Broker<S> {
             select! {
                 msg = broker_rx.recv() => {
                     let Some(msg) = msg else {
+                        token.cancel();
                         return
                     };
                     if let Err(e) = self.process_packets(msg, send_tx.clone()).await {

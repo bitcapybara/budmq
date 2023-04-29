@@ -42,6 +42,7 @@ impl Writer {
                     match res {
                         Ok(res) => {
                             let Some(msg) = res else {
+                                token.cancel();
                                 return;
                             };
                             if let Err(e) = self.write(msg).await {

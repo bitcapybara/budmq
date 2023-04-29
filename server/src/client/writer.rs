@@ -36,6 +36,7 @@ impl Writer {
             select! {
                 res = client_rx.recv() => {
                     let Some(message) = res else {
+                        token.cancel();
                         return
                     };
                     let stream = match handle.open_bidirectional_stream().await {

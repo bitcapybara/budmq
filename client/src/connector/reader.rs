@@ -33,10 +33,14 @@ impl Reader {
                     match res {
                         Ok(Some(stream)) => {
                             if self.read(stream, self.consumers.clone(), token.clone()).await.is_err() {
+                                token.cancel();
                                 return
                             }
                         },
-                        Ok(None) => return,
+                        Ok(None) => {
+                            token.cancel();
+                            return
+                        },
                         Err(e) => {
                             error!("connector reader accept stream error: {e}")
                         }

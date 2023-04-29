@@ -7,7 +7,7 @@ use bud_common::{
     helper::wait,
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
-use futures::{stream::FuturesUnordered, SinkExt, StreamExt};
+use futures::{future, SinkExt, StreamExt};
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -165,15 +165,13 @@ impl Client {
         let write_task = Writer::new(&local).run(self.client_rx, handle, token.clone());
         let write_handle = tokio::spawn(write_task);
 
-        // wait until the end
-        let mut futs = FuturesUnordered::from_iter([
+        // reader or writer may self-exit
+        future::join(
             wait(read_handle, "client read"),
             wait(write_handle, "client write"),
-        ]);
+        )
+        .await;
 
-        while futs.next().await.is_some() {
-            token.cancel();
-        }
         Ok(())
     }
 }
