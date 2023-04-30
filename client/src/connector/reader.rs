@@ -42,7 +42,9 @@ impl Reader {
                             return
                         },
                         Err(e) => {
-                            error!("connector reader accept stream error: {e}")
+                            error!("connector reader accept stream error: {e}");
+                            token.cancel();
+                            return
                         }
                     }
                 }

@@ -10,18 +10,26 @@ use std::{
 use bud_common::{
     helper::wait,
     mtls::MtlsProvider,
-    protocol::{self, Connect, ControlFlow, Packet, ReturnCode, Subscribe},
+    protocol::{self, Connect, ControlFlow, Packet, PacketCodec, ReturnCode, Subscribe},
 };
-use futures::future;
+use futures::{future, SinkExt, TryStreamExt};
 use log::{error, trace};
-use s2n_quic::{client, connection, provider, Connection};
+use s2n_quic::{
+    client,
+    connection::{self, Handle},
+    provider, Connection,
+};
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
+    time::timeout,
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::{codec::Framed, sync::CancellationToken};
 
-use crate::consumer::{Consumers, Session};
+use crate::{
+    consumer::{Consumers, Session},
+    WAIT_REPLY_TIMEOUT,
+};
 
 use self::{reader::Reader, writer::Writer};
 
@@ -154,6 +162,10 @@ impl Connector {
         let connection = self.connect().await?;
         let (handle, acceptor) = connection.split();
 
+        // handshake
+        trace!("connector::run_task: handshake to server");
+        self.handshake(handle.clone(), keepalive).await?;
+
         // resub
         trace!("connector::run_task: consumers subscribe");
         self.subscribe().await?;
@@ -167,12 +179,6 @@ impl Connector {
         trace!("connector::run_task: start reader task loop");
         let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
         let reader_handle = tokio::spawn(reader_task);
-
-        // handshake
-        if let Err(e) = self.handshake().await {
-            error!("client handshake error: {e}");
-            token.cancel();
-        }
 
         // wait for completing
         trace!("connector::run_task: waiting for tasks exit");
@@ -215,20 +221,40 @@ impl Connector {
         Ok(())
     }
 
-    async fn handshake(&self) -> Result<()> {
+    async fn handshake(&self, mut handle: Handle, keepalive: u16) -> Result<()> {
         // send connect packet
         trace!("connector::new: send CONNECT packet to server");
-        let (conn_res_tx, conn_res_rx) = oneshot::channel();
-        self.server_tx.send(OutgoingMessage {
-            packet: Packet::Connect(Connect {
-                keepalive: self.keepalive,
-            }),
-            res_tx: conn_res_tx,
-        })?;
+        let stream = handle.open_bidirectional_stream().await?;
+        let mut framed = Framed::new(stream, PacketCodec);
+        if let Err(e) = framed.send(Packet::Connect(Connect { keepalive })).await {
+            error!("client send handshake packet error: {e}");
+            return Err(e)?;
+        }
         trace!("connector::new: waiting for CONNECT response");
-        let code = conn_res_rx.await??;
+        let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
+            Ok(Ok(Some(Packet::Response(code)))) => code,
+            Ok(Ok(Some(p))) => {
+                error!(
+                    "client handshake: expected Packet::Response, found {}",
+                    p.packet_type()
+                );
+                return Err(Error::UnexpectedPacket);
+            }
+            Ok(Ok(None)) => {
+                error!("client handshake: framed stream dropped");
+                return Err(Error::StreamClosed);
+            }
+            Ok(Err(e)) => {
+                error!("client handshake: decode frame error: {e}");
+                return Err(Error::Protocol(e));
+            }
+            Err(_) => {
+                error!("client handshake: wait for reply timeout");
+                return Err(Error::Internal("handshake timeout".to_string()));
+            }
+        };
         if !matches!(code, ReturnCode::Success) {
-            return Err(Error::FromServer(code));
+            error!("client handshake: receive code from server: {code}");
         }
 
         Ok(())

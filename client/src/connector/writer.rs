@@ -107,7 +107,7 @@ impl Writer {
                     return;
                 }
                 Ok(Err(e)) => {
-                    error!("client writer frame error: {e}");
+                    error!("client writer decode frame error: {e}");
                     return;
                 }
                 Err(_) => {

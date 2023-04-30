@@ -70,13 +70,10 @@ impl Decoder for PacketCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
         let (header, header_len) = Header::read(src.iter())?;
         // header + body + other
-        println!("======={}", header.remain_len + header_len);
-        println!("=======src: {:?}, len: {}", src.to_vec(), src.len());
         let bytes = src
             .split_to(header.remain_len + header_len) // header + body
             .split_off(header_len) // body
             .freeze();
-        println!("==--====={bytes:?}");
         Ok(Some(match header.packet_type()? {
             PacketType::Connect => Packet::Connect(Connect::decode(bytes)?),
             PacketType::Subscribe => Packet::Subscribe(Subscribe::decode(bytes)?),
@@ -85,7 +82,7 @@ impl Decoder for PacketCodec {
             PacketType::Send => Packet::Send(Send::decode(bytes)?),
             PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
-            PacketType::Response => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
+            PacketType::Response => Packet::Response(ReturnCode::decode(bytes)?),
             PacketType::Ping => Packet::Ping,
             PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
@@ -421,7 +418,7 @@ mod tests {
 
     #[test]
     fn codec_connect() {
-        codec_works(Packet::Connect(Connect { keepalive: 1000 }))
+        codec_works(Packet::Connect(Connect { keepalive: 10000 }))
     }
 
     #[test]
@@ -433,6 +430,11 @@ mod tests {
             sub_type: SubType::Exclusive,
             initial_position: InitialPostion::Latest,
         }))
+    }
+
+    #[test]
+    fn codec_response() {
+        codec_works(Packet::Response(ReturnCode::Success))
     }
 
     fn codec_works(packet: Packet) {
