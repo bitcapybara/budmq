@@ -10,14 +10,11 @@ use std::{
 use bud_common::{
     helper::wait,
     mtls::MtlsProvider,
-    protocol::{self, ControlFlow, Packet, ReturnCode, Subscribe},
+    protocol::{self, Connect, ControlFlow, Packet, ReturnCode, Subscribe},
 };
 use futures::future;
-use log::error;
-use s2n_quic::{
-    client::{self, Connect},
-    connection, provider, Connection,
-};
+use log::{error, trace};
+use s2n_quic::{client, connection, provider, Connection};
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
@@ -100,30 +97,44 @@ impl From<oneshot::error::RecvError> for Error {
 
 pub struct Connector {
     addr: SocketAddr,
+    keepalive: u16,
     provider: MtlsProvider,
     consumers: Consumers,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
 }
 
 impl Connector {
-    pub fn new(
+    pub async fn new(
         addr: SocketAddr,
+        keepalive: u16,
         provider: MtlsProvider,
         consumers: Consumers,
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        // send connect packet
+        trace!("connector::new: send CONNECT packet to server");
+        let (conn_res_tx, conn_res_rx) = oneshot::channel();
+        server_tx.send(OutgoingMessage {
+            packet: Packet::Connect(Connect { keepalive }),
+            res_tx: conn_res_tx,
+        })?;
+        trace!("connector::new: waiting for CONNECT response");
+        let code = conn_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
+        }
+        Ok(Self {
             addr,
             provider,
             consumers,
             server_tx,
-        }
+            keepalive,
+        })
     }
 
     pub async fn run(
         self,
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        keepalive: u16,
         token: CancellationToken,
     ) -> Result<()> {
         let server_rx = Arc::new(Mutex::new(server_rx));
@@ -133,7 +144,7 @@ impl Connector {
                     return Ok(())
                 }
                 else => {
-                    if let Err(e) = self.run_task(server_rx.clone(), keepalive, token.child_token()).await {
+                    if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token()).await {
                         error!("client connector task error: {e}");
                         token.cancel();
                         return Err(e)
@@ -151,62 +162,71 @@ impl Connector {
     ) -> Result<()> {
         let task_token = token.child_token();
         // build connection
+        trace!("connector::run_task: connect to server");
         let connection = self.connect().await?;
         let (handle, acceptor) = connection.split();
 
         // resub
-        self.resub().await?;
+        trace!("connector::run_task: consumers subscribe");
+        self.subscribe().await?;
 
         // writer task loop
+        trace!("connector::run_task: start writer task loop");
         let writer_task = Writer::new(handle).run(server_rx, keepalive, task_token.clone());
         let writer_handle = tokio::spawn(writer_task);
 
         // reader task loop
+        trace!("connector::run_task: start reader task loop");
         let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
         let reader_handle = tokio::spawn(reader_task);
 
         // wait for completing
+        trace!("connector::run_task: waiting for tasks exit");
         future::join(
             wait(writer_handle, "client writer"),
             wait(reader_handle, "client reader"),
         )
         .await;
         token.cancel();
+
+        trace!("connector::run_task: exit");
         Ok(())
     }
 
     async fn connect(&self) -> Result<Connection> {
         // unwrap safe: with_tls error is infallible
+        trace!("connector::connect: create client and connect");
         let client: client::Client = client::Client::builder()
             .with_tls(self.provider.clone())
             .unwrap()
             .with_io("0.0.0.0:0")?
             .start()?;
-        let connector = Connect::new(self.addr);
+        let connector = s2n_quic::client::Connect::new(self.addr);
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
         Ok(connection)
     }
 
-    async fn resub(&self) -> Result<()> {
+    async fn subscribe(&self) -> Result<()> {
         let consumer_ids = self.consumers.get_consumer_ids().await;
         for id in consumer_ids {
             let session = self.consumers.get(id).await;
             let Some(session) = session else {
                 continue;
             };
-            self.resub_one(&session).await?;
+            self.subscribe_one(&session).await?;
         }
 
         Ok(())
     }
 
-    async fn resub_one(&self, session: &Session) -> Result<()> {
+    async fn subscribe_one(&self, session: &Session) -> Result<()> {
         let consumer_id = session.consumer_id;
         // subscribe first, wait for server reply
         // if server reply "duplicated consumer" error, abort
         let (sub_res_tx, sub_res_rx) = oneshot::channel();
         let sub = &session.sub_info;
+        trace!("connector::subscribe_one: send SUBSCRIBE message");
         self.server_tx.send(OutgoingMessage {
             packet: Packet::Subscribe(Subscribe {
                 consumer_id,
@@ -222,6 +242,7 @@ impl Connector {
             return Err(Error::FromServer(code));
         }
         // send premits
+        trace!("connector::subscribe_one: send CONTROLFLOW message");
         let (permits_res_tx, permits_res_rx) = oneshot::channel();
         let permits = session.sender.permits.load(Ordering::SeqCst);
         self.server_tx.send(OutgoingMessage {

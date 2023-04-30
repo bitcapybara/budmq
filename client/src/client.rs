@@ -6,8 +6,9 @@ use std::{
 use bud_common::{
     helper::wait_result,
     mtls::MtlsProvider,
-    protocol::{Connect, Packet, ReturnCode},
+    protocol::{Packet, ReturnCode},
 };
+use log::trace;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -96,27 +97,17 @@ impl ClientBuilder {
         let token = CancellationToken::new();
 
         // connector task loop
+        trace!("client::build: start connector task loop");
         let connector_task = Connector::new(
             self.addr,
+            self.keepalive,
             self.provider,
             consumers.clone(),
             server_tx.clone(),
         )
-        .run(server_rx, self.keepalive, token.clone());
+        .await?
+        .run(server_rx, token.clone());
         let connector_handle = tokio::spawn(connector_task);
-
-        // send connect packet
-        let (conn_res_tx, conn_res_rx) = oneshot::channel();
-        server_tx.send(OutgoingMessage {
-            packet: Packet::Connect(Connect {
-                keepalive: self.keepalive,
-            }),
-            res_tx: conn_res_tx,
-        })?;
-        let code = conn_res_rx.await??;
-        if !matches!(code, ReturnCode::Success) {
-            return Err(Error::FromServer(code));
-        }
 
         Ok(Client {
             server_tx,

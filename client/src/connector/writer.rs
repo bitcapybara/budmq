@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
 use futures::{SinkExt, TryStreamExt};
-use log::error;
+use log::{error, trace};
 use s2n_quic::connection::Handle;
 use tokio::{
     select,
@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_util::{codec::Framed, sync::CancellationToken};
 
-use crate::WAIT_REPLY_TIMEOUT;
+use crate::{connector::Error, WAIT_REPLY_TIMEOUT};
 
 use super::Result;
 
@@ -52,26 +52,10 @@ impl Writer {
                             }
                         }
                         Err(_) => {
-                            let (res_tx, res_rx) = oneshot::channel();
-                            // send ping
-                            let msg = OutgoingMessage {
-                                packet: Packet::Ping,
-                                res_tx,
-                            };
-                            if let Err(e) = self.write(msg).await {
-                                error!("client send ping error: {e}");
-                                continue;
-                            }
-
-                            match res_rx.await {
-                                Ok(Ok(ReturnCode::Success)) => {},
-                                Ok(Ok(code)) => {
-                                    error!("client send ping: {code}");
-                                    token.cancel();
-                                    return
-                                }
-                                Ok(Err(e)) => {
-                                    error!("client send ping error: {e}");
+                            match self.ping().await {
+                                Ok(Some(_)) => {},
+                                Ok(None) => {
+                                    trace!("connector::writer::run: miss pong packet");
                                     ping_err_count += 1;
                                     if ping_err_count >= 3 {
                                         token.cancel();
@@ -79,8 +63,9 @@ impl Writer {
                                     }
                                 },
                                 Err(_) => {
-                                    error!("client ping res_tx dropped");
-                                }
+                                    token.cancel();
+                                    return
+                                },
                             }
                         }
                     }
@@ -94,10 +79,12 @@ impl Writer {
 
     async fn write(&mut self, msg: OutgoingMessage) -> Result<()> {
         // send message to connection
+        trace!("connector::writer::run: receive outgoing message, open bi stream");
         let stream = self.handle.open_bidirectional_stream().await?;
         tokio::spawn(async move {
             let mut framed = Framed::new(stream, PacketCodec);
             // send publish message
+            trace!("connector::writer::run: send message to server");
             if let Err(e) = framed.send(msg.packet).await {
                 if msg.res_tx.send(Err(e.into())).is_err() {
                     error!("client writer wait channel dropped");
@@ -105,6 +92,7 @@ impl Writer {
                 return;
             }
             // wait for ack
+            trace!("connector::writer::run: waiting for server response");
             let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
                 Ok(Ok(Some(Packet::Response(code)))) => code,
                 Ok(Ok(Some(p))) => {
@@ -132,5 +120,33 @@ impl Writer {
             }
         });
         Ok(())
+    }
+
+    async fn ping(&mut self) -> Result<Option<()>> {
+        trace!("connector::writer::run: send PING packet to server, open bi stream");
+        // send ping
+        let stream = self.handle.open_bidirectional_stream().await?;
+        let mut framed = Framed::new(stream, PacketCodec);
+        framed.send(Packet::Ping).await?;
+        trace!("connector::writer::run: waiting for PONG packet");
+        match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
+            Ok(Ok(Some(Packet::Pong))) => Ok(Some(())),
+            Ok(Ok(Some(_))) => {
+                error!("received unexpected packet, expected PONG packet");
+                Ok(None)
+            }
+            Ok(Ok(None)) => {
+                error!("client send ping error: stream closed");
+                Err(Error::StreamClosed)
+            }
+            Ok(Err(e)) => {
+                error!("client send ping error: {e}");
+                Err(Error::Internal(e.to_string()))
+            }
+            Err(_) => {
+                error!("waiting for PONG packet timeout");
+                Ok(None)
+            }
+        }
     }
 }
