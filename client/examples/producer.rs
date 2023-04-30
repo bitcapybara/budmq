@@ -1,10 +1,8 @@
+use std::{fs, io::Read, path::Path};
+
 use bud_client::{client::ClientBuilder, producer::Producer};
 use bud_common::mtls::MtlsProvider;
 use flexi_logger::{detailed_format, Logger};
-
-const CA_CERT: &[u8] = include_bytes!("../../certs/ca-cert.pem");
-const CLIENT_CERT: &[u8] = include_bytes!("../../certs/client-cert.pem");
-const CLIENT_KEY_CERT: &[u8] = include_bytes!("../../certs/client-key.pem");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,7 +12,10 @@ async fn main() -> anyhow::Result<()> {
         .format(detailed_format)
         .start()
         .unwrap();
-    let provider = MtlsProvider::new(CA_CERT, CLIENT_CERT, CLIENT_KEY_CERT)?;
+    let ca_cert = read_file("../../certs/ca-cert.pem")?;
+    let client_cert = read_file("../../certs/client-cert.pem")?;
+    let client_key_cert = read_file("../../certs/client-key.pem")?;
+    let provider = MtlsProvider::new(&ca_cert, &client_cert, &client_key_cert)?;
     let client = ClientBuilder::new("127.0.0.1:9080".parse()?, provider)
         .keepalive(10000)
         .build()
@@ -33,4 +34,10 @@ async fn produce(mut producer: Producer) -> anyhow::Result<()> {
         producer.send(b"hello, world").await?;
     }
     Ok(())
+}
+
+fn read_file(path: impl AsRef<Path>) -> anyhow::Result<Vec<u8>> {
+    let mut buf = vec![];
+    fs::File::open(path)?.read_to_end(&mut buf)?;
+    Ok(buf)
 }
