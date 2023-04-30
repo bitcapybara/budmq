@@ -2,6 +2,7 @@ use bytes::BufMut;
 
 use super::{get_u64, Codec, Header, PacketType, Result};
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct ConsumeAck {
     pub consumer_id: u64,
     /// which message to ack

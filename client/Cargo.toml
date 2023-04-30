@@ -14,3 +14,5 @@ tokio-util.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+flexi_logger.workspace = true
+clap.workspace = true

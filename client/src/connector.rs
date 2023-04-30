@@ -104,32 +104,20 @@ pub struct Connector {
 }
 
 impl Connector {
-    pub async fn new(
+    pub fn new(
         addr: SocketAddr,
         keepalive: u16,
         provider: MtlsProvider,
         consumers: Consumers,
         server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-    ) -> Result<Self> {
-        // send connect packet
-        trace!("connector::new: send CONNECT packet to server");
-        let (conn_res_tx, conn_res_rx) = oneshot::channel();
-        server_tx.send(OutgoingMessage {
-            packet: Packet::Connect(Connect { keepalive }),
-            res_tx: conn_res_tx,
-        })?;
-        trace!("connector::new: waiting for CONNECT response");
-        let code = conn_res_rx.await??;
-        if !matches!(code, ReturnCode::Success) {
-            return Err(Error::FromServer(code));
-        }
-        Ok(Self {
+    ) -> Self {
+        Self {
             addr,
             provider,
             consumers,
             server_tx,
             keepalive,
-        })
+        }
     }
 
     pub async fn run(
@@ -142,8 +130,8 @@ impl Connector {
             select! {
                 _ = token.cancelled() => {
                     return Ok(())
-                }
-                else => {
+                },
+                _ = async {} => {
                     if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token()).await {
                         error!("client connector task error: {e}");
                         token.cancel();
@@ -180,6 +168,12 @@ impl Connector {
         let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
         let reader_handle = tokio::spawn(reader_task);
 
+        // handshake
+        if let Err(e) = self.handshake().await {
+            error!("client handshake error: {e}");
+            token.cancel();
+        }
+
         // wait for completing
         trace!("connector::run_task: waiting for tasks exit");
         future::join(
@@ -201,7 +195,8 @@ impl Connector {
             .unwrap()
             .with_io("0.0.0.0:0")?
             .start()?;
-        let connector = s2n_quic::client::Connect::new(self.addr);
+        // TODO server name must be `localhost`?
+        let connector = s2n_quic::client::Connect::new(self.addr).with_server_name("localhost");
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
         Ok(connection)
@@ -215,6 +210,25 @@ impl Connector {
                 continue;
             };
             self.subscribe_one(&session).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handshake(&self) -> Result<()> {
+        // send connect packet
+        trace!("connector::new: send CONNECT packet to server");
+        let (conn_res_tx, conn_res_rx) = oneshot::channel();
+        self.server_tx.send(OutgoingMessage {
+            packet: Packet::Connect(Connect {
+                keepalive: self.keepalive,
+            }),
+            res_tx: conn_res_tx,
+        })?;
+        trace!("connector::new: waiting for CONNECT response");
+        let code = conn_res_rx.await??;
+        if !matches!(code, ReturnCode::Success) {
+            return Err(Error::FromServer(code));
         }
 
         Ok(())

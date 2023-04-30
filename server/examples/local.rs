@@ -38,8 +38,8 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     // start server
-    let ca = read_file(&args.cert_dir.join("ca.pem"))?;
-    let server_cert = read_file(&args.cert_dir.join("server.pem"))?;
+    let ca = read_file(&args.cert_dir.join("ca-cert.pem"))?;
+    let server_cert = read_file(&args.cert_dir.join("server-cert.pem"))?;
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
     let (token, server) = Server::new(provider, SocketAddr::new(args.addr.parse()?, args.port));

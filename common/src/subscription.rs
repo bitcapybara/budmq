@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum SubType {
     /// Each subscription is only allowed to contain one client
@@ -7,7 +7,7 @@ pub enum SubType {
     Shared,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum InitialPostion {
     Latest = 1,

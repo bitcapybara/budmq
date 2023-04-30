@@ -4,6 +4,7 @@ use super::{
     get_u64, read_bytes, read_string, write_bytes, write_string, Codec, Header, PacketType, Result,
 };
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Publish {
     /// pub subject
     pub topic: String,
@@ -35,7 +36,7 @@ impl Codec for Publish {
     fn header(&self) -> Header {
         Header::new(
             PacketType::Publish,
-            self.topic.len() + 8 + self.payload.len(),
+            self.topic.len() + 2 + 8 + self.payload.len() + 2,
         )
     }
 }

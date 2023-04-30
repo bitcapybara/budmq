@@ -105,7 +105,6 @@ impl ClientBuilder {
             consumers.clone(),
             server_tx.clone(),
         )
-        .await?
         .run(server_rx, token.clone());
         let connector_handle = tokio::spawn(connector_task);
 

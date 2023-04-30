@@ -2,6 +2,7 @@ use bytes::BufMut;
 
 use super::{get_u32, get_u64, Codec, Header, PacketType, Result};
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct ControlFlow {
     pub consumer_id: u64,
     /// number of additional messages requested

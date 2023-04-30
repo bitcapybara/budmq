@@ -5,6 +5,7 @@ use crate::subscription::{InitialPostion, SubType};
 use super::{get_u64, get_u8, read_string, write_string, Codec, Header, PacketType, Result};
 
 /// Each consumer corresponds to a subscription
+#[derive(Debug, PartialEq, Clone)]
 pub struct Subscribe {
     /// consumer_id, unique within one connection
     pub consumer_id: u64,
@@ -47,7 +48,7 @@ impl Codec for Subscribe {
     fn header(&self) -> Header {
         Header::new(
             PacketType::Subscribe,
-            8 + self.topic.len() + self.sub_name.len() + 1 + 1,
+            8 + self.topic.len() + 2 + self.sub_name.len() + 2 + 1 + 1,
         )
     }
 }

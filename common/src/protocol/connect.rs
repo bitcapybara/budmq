@@ -2,7 +2,7 @@ use bytes::BufMut;
 
 use super::{get_u16, Codec, Header, PacketType, Result};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Connect {
     /// keepalive(ms)
     pub keepalive: u16,

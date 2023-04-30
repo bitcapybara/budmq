@@ -2,6 +2,7 @@ use bytes::{BufMut, Bytes};
 
 use super::{get_u64, read_bytes, write_bytes, Codec, Header, PacketType, Result};
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Send {
     pub message_id: u64,
     pub consumer_id: u64,
@@ -28,6 +29,6 @@ impl Codec for Send {
     }
 
     fn header(&self) -> Header {
-        Header::new(PacketType::Send, 8 + 8 + self.payload.len())
+        Header::new(PacketType::Send, 8 + 8 + self.payload.len() + 2)
     }
 }

@@ -300,6 +300,7 @@ impl<S: Storage> Broker<S> {
                     res_tx
                         .send(ReturnCode::AlreadyConnected)
                         .map_err(|_| Error::ReplyChannelClosed)?;
+                    return Ok(());
                 }
                 clients.insert(
                     client_id,
@@ -308,6 +309,9 @@ impl<S: Storage> Broker<S> {
                         consumers: HashMap::new(),
                     },
                 );
+                res_tx
+                    .send(ReturnCode::Success)
+                    .map_err(|_| Error::ReplyChannelClosed)?;
                 trace!("broker::process_packets: add new client: {}", client_id);
             }
             Packet::Disconnect => {

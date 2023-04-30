@@ -7,8 +7,8 @@ use bud_common::{
     subscription::{InitialPostion, SubType},
 };
 
-const CA_CERT: &[u8] = include_bytes!("../../certs/ca.pem");
-const CLIENT_CERT: &[u8] = include_bytes!("../../certs/client.pem");
+const CA_CERT: &[u8] = include_bytes!("../../certs/ca-cert.pem");
+const CLIENT_CERT: &[u8] = include_bytes!("../../certs/client-cert.pem");
 const CLIENT_KEY_CERT: &[u8] = include_bytes!("../../certs/client-key.pem");
 
 #[tokio::main]

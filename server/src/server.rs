@@ -73,13 +73,14 @@ impl Server {
     pub async fn start<S: Storage>(self, storage: S) -> Result<()> {
         let token = self.token.child_token();
         // start broker loop
+        trace!("server::start: start broker task");
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
         let broker_task = Broker::new(storage).run(broker_rx, token.clone());
         let broker_handle = tokio::spawn(broker_task);
-        trace!("server::start: start broker task");
 
         // start server loop
         // unwrap: with_tls error is infallible
+        trace!("server::start: start accept task");
         let server = s2n_quic::Server::builder()
             .with_tls(self.provider)
             .unwrap()
@@ -87,7 +88,6 @@ impl Server {
             .start()?;
         let server_task = Self::handle_accept(server, broker_tx, token.clone());
         let server_handle = tokio::spawn(server_task);
-        trace!("server::start: start accept task");
 
         // wait for tasks done
         future::join(
@@ -97,7 +97,7 @@ impl Server {
             wait(server_handle, "server task loop"),
         )
         .await;
-
+        trace!("server::start: server loop exit");
         Ok(())
     }
 

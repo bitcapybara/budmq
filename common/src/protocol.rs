@@ -70,10 +70,13 @@ impl Decoder for PacketCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
         let (header, header_len) = Header::read(src.iter())?;
         // header + body + other
+        println!("======={}", header.remain_len + header_len);
+        println!("=======src: {:?}, len: {}", src.to_vec(), src.len());
         let bytes = src
             .split_to(header.remain_len + header_len) // header + body
             .split_off(header_len) // body
             .freeze();
+        println!("==--====={bytes:?}");
         Ok(Some(match header.packet_type()? {
             PacketType::Connect => Packet::Connect(Connect::decode(bytes)?),
             PacketType::Subscribe => Packet::Subscribe(Subscribe::decode(bytes)?),
@@ -168,6 +171,7 @@ impl std::fmt::Display for PacketType {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum Packet {
     Connect(Connect),
     Subscribe(Subscribe),
@@ -232,6 +236,7 @@ impl Packet {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Header {
     /// 8 bits
     type_byte: u8,
@@ -329,8 +334,7 @@ fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
 }
 
 fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
-    assert_len(buf, 2)?;
-    let len = buf.get_u16() as usize;
+    let len = get_u16(buf)? as usize;
     assert_len(buf, len)?;
     Ok(buf.split_to(len))
 }
@@ -367,4 +371,73 @@ fn get_u32(buf: &mut Bytes) -> Result<u32> {
 fn get_u64(buf: &mut Bytes) -> Result<u64> {
     assert_len(buf, 8)?;
     Ok(buf.get_u64())
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::codec::Encoder;
+
+    use super::*;
+
+    #[test]
+    fn codec_header() {
+        {
+            let mut bytes = BytesMut::new();
+            let header_write = Header::new(PacketType::Subscribe, 32);
+            header_write.write(&mut bytes).unwrap();
+            let (header_read, header_len) = Header::read(bytes.freeze().iter()).unwrap();
+            assert_eq!(header_len, 2);
+            assert_eq!(header_read.remain_len, 32);
+            assert_eq!(header_write, header_read);
+        }
+        {
+            let mut bytes = BytesMut::new();
+            let header_write = Header::new(PacketType::Subscribe, 352);
+            header_write.write(&mut bytes).unwrap();
+            let (header_read, header_len) = Header::read(bytes.freeze().iter()).unwrap();
+            assert_eq!(header_len, 3);
+            assert_eq!(header_read.remain_len, 352);
+            assert_eq!(header_write, header_read);
+        }
+        {
+            let mut bytes = BytesMut::new();
+            let header_write = Header::new(PacketType::Subscribe, 15352);
+            header_write.write(&mut bytes).unwrap();
+            let (header_read, header_len) = Header::read(bytes.freeze().iter()).unwrap();
+            assert_eq!(header_len, 3);
+            assert_eq!(header_read.remain_len, 15352);
+            assert_eq!(header_write, header_read);
+        }
+    }
+
+    #[test]
+    fn codec_string() {
+        let test_string = "test_string";
+        let mut bytes = BytesMut::new();
+        write_string(&mut bytes, test_string);
+        assert_eq!(bytes.len(), 11 + 2);
+        assert_eq!(test_string, read_string(&mut bytes.freeze()).unwrap());
+    }
+
+    #[test]
+    fn codec_connect() {
+        codec_works(Packet::Connect(Connect { keepalive: 1000 }))
+    }
+
+    #[test]
+    fn codec_subscribe() {
+        codec_works(Packet::Subscribe(Subscribe {
+            consumer_id: 1,
+            topic: "test-topic".to_string(),
+            sub_name: "test-subname".to_string(),
+            sub_type: SubType::Exclusive,
+            initial_position: InitialPostion::Latest,
+        }))
+    }
+
+    fn codec_works(packet: Packet) {
+        let mut bytes = BytesMut::new();
+        PacketCodec.encode(packet.clone(), &mut bytes).unwrap();
+        assert_eq!(packet, PacketCodec.decode(&mut bytes).unwrap().unwrap());
+    }
 }

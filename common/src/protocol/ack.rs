@@ -4,7 +4,7 @@ use bytes::BufMut;
 
 use super::{get_u8, Codec, Error, Header, PacketType, Result};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ReturnCode {
     Success = 0,
