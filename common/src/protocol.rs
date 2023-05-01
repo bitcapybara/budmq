@@ -433,8 +433,58 @@ mod tests {
     }
 
     #[test]
+    fn codec_unsubscribe() {
+        codec_works(Packet::Unsubscribe(Unsubscribe { consumer_id: 1 }))
+    }
+
+    #[test]
+    fn codec_publish() {
+        codec_works(Packet::Publish(Publish {
+            topic: "test-topic".to_string(),
+            sequence_id: 200,
+            payload: Bytes::from_static(b"hello, world"),
+        }))
+    }
+
+    #[test]
+    fn codec_send() {
+        codec_works(Packet::Send(Send {
+            message_id: 1234,
+            consumer_id: 3456,
+            payload: Bytes::from_static(b"hello, world"),
+        }))
+    }
+
+    #[test]
+    fn codec_consume_ack() {
+        codec_works(Packet::ConsumeAck(ConsumeAck {
+            consumer_id: 12345,
+            message_id: 23456,
+        }))
+    }
+
+    #[test]
+    fn codec_control_flow() {
+        codec_works(Packet::ControlFlow(ControlFlow {
+            consumer_id: 123,
+            permits: 500,
+        }))
+    }
+
+    #[test]
     fn codec_response() {
         codec_works(Packet::Response(ReturnCode::Success))
+    }
+
+    #[test]
+    fn codec_ping_pong() {
+        codec_works(Packet::Ping);
+        codec_works(Packet::Pong);
+    }
+
+    #[test]
+    fn codec_disconnect() {
+        codec_works(Packet::Disconnect)
     }
 
     fn codec_works(packet: Packet) {
