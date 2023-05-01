@@ -128,10 +128,8 @@ impl Connector {
         self,
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         token: CancellationToken,
-        ready_tx: oneshot::Sender<()>,
     ) -> Result<()> {
         let server_rx = Arc::new(Mutex::new(server_rx));
-        let mut ready_tx = Some(ready_tx);
         loop {
             select! {
                 biased;
@@ -139,7 +137,7 @@ impl Connector {
                     return Ok(())
                 },
                 _ = async {} => {
-                    if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token(), ready_tx.take()).await {
+                    if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token()).await {
                         error!("client connector task error: {e}");
                         token.cancel();
                         return Err(e)
@@ -154,7 +152,6 @@ impl Connector {
         server_rx: Arc<Mutex<mpsc::UnboundedReceiver<OutgoingMessage>>>,
         keepalive: u16,
         token: CancellationToken,
-        ready_tx: Option<oneshot::Sender<()>>,
     ) -> Result<()> {
         let task_token = token.child_token();
         // build connection
@@ -183,10 +180,6 @@ impl Connector {
         // resub
         trace!("connector::run_task: consumers subscribe");
         self.subscribe().await?;
-
-        if let Some(ready_tx) = ready_tx {
-            ready_tx.send(()).ok();
-        }
 
         // wait for completing
         trace!("connector::run_task: waiting for tasks exit");
