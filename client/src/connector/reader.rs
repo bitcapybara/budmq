@@ -5,7 +5,7 @@ use std::sync::{
 
 use bud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
 use futures::TryStreamExt;
-use log::{error, warn};
+use log::{error, trace, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
@@ -32,12 +32,14 @@ impl Reader {
                 res = acceptor.accept_bidirectional_stream() => {
                     match res {
                         Ok(Some(stream)) => {
+                            trace!("connector::reader: accept a new stream");
                             if self.read(stream, self.consumers.clone(), token.clone()).await.is_err() {
                                 token.cancel();
                                 return
                             }
                         },
                         Ok(None) => {
+                            trace!("connector::reader: accept none, exit");
                             token.cancel();
                             return
                         },

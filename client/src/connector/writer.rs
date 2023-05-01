@@ -43,6 +43,7 @@ impl Writer {
                     match res {
                         Ok(res) => {
                             let Some(msg) = res else {
+                                trace!("connector::writer: receive none, exit");
                                 token.cancel();
                                 return;
                             };

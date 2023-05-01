@@ -134,6 +134,7 @@ impl Connector {
         let mut ready_tx = Some(ready_tx);
         loop {
             select! {
+                biased;
                 _ = token.cancelled() => {
                     return Ok(())
                 },
@@ -169,10 +170,6 @@ impl Connector {
             return Err(e)?;
         }
 
-        // resub
-        trace!("connector::run_task: consumers subscribe");
-        self.subscribe().await?;
-
         // writer task loop
         trace!("connector::run_task: start writer task loop");
         let writer_task = Writer::new(handle).run(server_rx, keepalive, task_token.clone());
@@ -182,6 +179,10 @@ impl Connector {
         trace!("connector::run_task: start reader task loop");
         let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
         let reader_handle = tokio::spawn(reader_task);
+
+        // resub
+        trace!("connector::run_task: consumers subscribe");
+        self.subscribe().await?;
 
         if let Some(ready_tx) = ready_tx {
             ready_tx.send(()).ok();

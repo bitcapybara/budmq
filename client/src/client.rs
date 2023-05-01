@@ -154,21 +154,23 @@ impl Client {
 
     // TODO Drop?
     pub async fn close(self) -> Result<()> {
-        // cancel token
-        self.token.cancel();
-
-        // wait for connection handler exit
-        wait_result(self.connector_handle, "connector task loop").await;
+        trace!("client::close: close the client");
 
         // send disconnect message to server
+        trace!("client::close: send DISCONNECT packet to server");
         let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
         self.server_tx.send(OutgoingMessage {
             packet: Packet::Disconnect,
             res_tx: disconn_res_tx,
         })?;
-        match disconn_res_rx.await?? {
-            ReturnCode::Success => Ok(()),
-            code => Err(Error::FromServer(code)),
-        }
+        disconn_res_rx.await.ok();
+        // cancel token
+        self.token.cancel();
+
+        // wait for connection handler exit
+        trace!("client::close: waiting for connecotor task exit");
+        wait_result(self.connector_handle, "connector task loop").await;
+
+        Ok(())
     }
 }

@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = produce(producer).await {
         println!("produce error: {e}")
     }
-    client.close().await?;
+    client.close().await.ok();
     Ok(())
 }
 
