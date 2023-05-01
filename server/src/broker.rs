@@ -450,7 +450,13 @@ impl<S: Storage> Broker<S> {
                         trace!("broker::process_packets: add message to topic");
                         topic.add_message(message).await?;
                     }
-                    None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
+                    None => {
+                        trace!("broker::process_packets: create new topic");
+                        let mut topic =
+                            Topic::new(&topic, send_tx.clone(), self.storage.clone()).await?;
+                        trace!("broker::process_packets: add message to topic");
+                        topic.add_message(message).await?;
+                    }
                 }
             }
             Packet::ControlFlow(c) => {
