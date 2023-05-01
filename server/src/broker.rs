@@ -348,7 +348,10 @@ impl<S: Storage> Broker<S> {
                 {
                     Ok(_) => ReturnCode::Success,
                     Err(Error::ReturnCode(code)) => code,
-                    Err(e) => Err(e)?,
+                    Err(e) => {
+                        error!("internal error when process_packet: {e}");
+                        ReturnCode::ServerInternal
+                    }
                 };
                 if let Some(res_tx) = msg.res_tx {
                     res_tx.send(code).map_err(|_| Error::ReplyChannelClosed)?;
@@ -452,10 +455,11 @@ impl<S: Storage> Broker<S> {
                     }
                     None => {
                         trace!("broker::process_packets: create new topic");
-                        let mut topic =
+                        let mut new_topic =
                             Topic::new(&topic, send_tx.clone(), self.storage.clone()).await?;
                         trace!("broker::process_packets: add message to topic");
-                        topic.add_message(message).await?;
+                        new_topic.add_message(message).await?;
+                        topics.insert(topic, new_topic);
                     }
                 }
             }

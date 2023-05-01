@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
-use bud_common::{protocol::Publish, storage::Storage};
+use bud_common::{
+    protocol::{Publish, ReturnCode},
+    storage::Storage,
+};
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
@@ -13,7 +16,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    ProducerMessageDuplicated,
+    ReturnCode(ReturnCode),
     Storage(storage::Error),
     Subscription(subscription::Error),
 }
@@ -23,9 +26,9 @@ impl std::error::Error for Error {}
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::ProducerMessageDuplicated => write!(f, "Produce message duplicated"),
             Error::Storage(e) => write!(f, "Storage error: {e}"),
             Error::Subscription(e) => write!(f, "Subscription error: {e}"),
+            Error::ReturnCode(code) => write!(f, "{code}"),
         }
     }
 }
@@ -124,7 +127,7 @@ impl<S: Storage> Topic<S> {
     /// save message in topic
     pub async fn add_message(&mut self, message: Message) -> Result<()> {
         if message.seq_id <= self.seq_id {
-            return Err(Error::ProducerMessageDuplicated);
+            return Err(Error::ReturnCode(ReturnCode::ProduceMessageDuplicated));
         }
         let message_id = self.storage.add_message(&message).await?;
         self.seq_id = message.seq_id;
