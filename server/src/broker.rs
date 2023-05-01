@@ -82,7 +82,7 @@ pub struct ClientMessage {
 /// messages from broker to client
 pub struct BrokerMessage {
     pub packet: protocol::Packet,
-    pub res_tx: Option<oneshot::Sender<client::Result<()>>>,
+    pub res_tx: oneshot::Sender<client::Result<()>>,
 }
 
 struct SubInfo {
@@ -221,7 +221,7 @@ impl<S: Storage> Broker<S> {
                 consumer_id: event.consumer_id,
                 payload: message.payload,
             }),
-            res_tx: Some(res_tx),
+            res_tx,
         })?;
         trace!("broker::process_send_event: send response to subscription");
         tokio::spawn(async move {

@@ -14,11 +14,7 @@ use bud_common::{
 };
 use futures::{future, SinkExt, TryStreamExt};
 use log::{error, trace};
-use s2n_quic::{
-    client,
-    connection::{self, Handle},
-    provider, Connection,
-};
+use s2n_quic::{client, connection, provider, stream::BidirectionalStream, Connection};
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
@@ -132,15 +128,17 @@ impl Connector {
         self,
         server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         token: CancellationToken,
+        ready_tx: oneshot::Sender<()>,
     ) -> Result<()> {
         let server_rx = Arc::new(Mutex::new(server_rx));
+        let mut ready_tx = Some(ready_tx);
         loop {
             select! {
                 _ = token.cancelled() => {
                     return Ok(())
                 },
                 _ = async {} => {
-                    if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token()).await {
+                    if let Err(e) = self.run_task(server_rx.clone(), self.keepalive, token.child_token(), ready_tx.take()).await {
                         error!("client connector task error: {e}");
                         token.cancel();
                         return Err(e)
@@ -155,16 +153,21 @@ impl Connector {
         server_rx: Arc<Mutex<mpsc::UnboundedReceiver<OutgoingMessage>>>,
         keepalive: u16,
         token: CancellationToken,
+        ready_tx: Option<oneshot::Sender<()>>,
     ) -> Result<()> {
         let task_token = token.child_token();
         // build connection
         trace!("connector::run_task: connect to server");
         let connection = self.connect().await?;
-        let (handle, acceptor) = connection.split();
+        let (mut handle, acceptor) = connection.split();
 
         // handshake
         trace!("connector::run_task: handshake to server");
-        self.handshake(handle.clone(), keepalive).await?;
+        let mut framed = Framed::new(handle.open_bidirectional_stream().await?, PacketCodec);
+        if let Err(e) = self.handshake(&mut framed, keepalive).await {
+            framed.close().await.ok();
+            return Err(e)?;
+        }
 
         // resub
         trace!("connector::run_task: consumers subscribe");
@@ -179,6 +182,10 @@ impl Connector {
         trace!("connector::run_task: start reader task loop");
         let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
         let reader_handle = tokio::spawn(reader_task);
+
+        if let Some(ready_tx) = ready_tx {
+            ready_tx.send(()).ok();
+        }
 
         // wait for completing
         trace!("connector::run_task: waiting for tasks exit");
@@ -221,16 +228,18 @@ impl Connector {
         Ok(())
     }
 
-    async fn handshake(&self, mut handle: Handle, keepalive: u16) -> Result<()> {
+    async fn handshake(
+        &self,
+        framed: &mut Framed<BidirectionalStream, PacketCodec>,
+        keepalive: u16,
+    ) -> Result<()> {
         // send connect packet
-        trace!("connector::new: send CONNECT packet to server");
-        let stream = handle.open_bidirectional_stream().await?;
-        let mut framed = Framed::new(stream, PacketCodec);
+        trace!("connector::handshake: send CONNECT packet to server");
         if let Err(e) = framed.send(Packet::Connect(Connect { keepalive })).await {
             error!("client send handshake packet error: {e}");
             return Err(e)?;
         }
-        trace!("connector::new: waiting for CONNECT response");
+        trace!("connector::handshake: waiting for CONNECT response");
         let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
             Ok(Ok(Some(Packet::Response(code)))) => code,
             Ok(Ok(Some(p))) => {
@@ -255,6 +264,7 @@ impl Connector {
         };
         if !matches!(code, ReturnCode::Success) {
             error!("client handshake: receive code from server: {code}");
+            return Err(Error::FromServer(code));
         }
 
         Ok(())

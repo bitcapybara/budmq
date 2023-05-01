@@ -71,63 +71,50 @@ impl Writer {
 
     async fn send(
         &self,
-        res_tx: Option<oneshot::Sender<Result<()>>>,
+        res_tx: oneshot::Sender<Result<()>>,
         mut framed: Framed<BidirectionalStream, PacketCodec>,
         packet: Packet,
     ) -> Result<()> {
         let local = self.local_addr.clone();
-        match res_tx {
-            Some(tx) => {
-                tokio::spawn(async move {
-                    trace!("client::writer[spawn]: send packet to client");
-                    if let Err(e) = framed.send(packet).await {
-                        error!("send packet to client {local} error: {e}")
-                    }
-                    trace!("client::writer[spawn]: waiting for response from client");
-                    match timeout(WAIT_REPLY_TIMEOUT, framed.next()).await {
-                        Ok(Some(Ok(Packet::Response(code)))) => {
-                            let res = match code {
-                                ReturnCode::Success => Ok(()),
-                                _ => Err(Error::Client(code)),
-                            };
-                            if let Err(e) = tx.send(res) {
-                                error!("send SEND reply to broker error: {e:?}")
-                            }
-                        }
-                        Ok(Some(Ok(_))) => {
-                            if tx.send(Err(Error::UnexpectedPacket)).is_err() {
-                                error!("recv unexpected packet from client {local}")
-                            }
-                        }
-                        Ok(Some(Err(e))) => {
-                            if let Err(e) = tx.send(Err(e.into())) {
-                                error!("recv reply from client {local} error: {e:?}")
-                            }
-                        }
-                        Ok(None) => {
-                            if tx.send(Err(Error::StreamClosed)).is_err() {
-                                error!("client {local} stream closed")
-                            }
-                        }
-                        Err(e) => {
-                            if tx.send(Err(e.into())).is_err() {
-                                error!("wait for client {local} reply timout")
-                            }
-                        }
-                    }
-                });
+        tokio::spawn(async move {
+            trace!("client::writer[spawn]: send packet to client");
+            if let Err(e) = framed.send(packet).await {
+                error!("send packet to client {local} error: {e}")
             }
-            None => {
-                tokio::spawn(async move {
-                    trace!(
-                        "client::writer[spawn]: send packet to client without waiting for response"
-                    );
-                    if let Err(e) = framed.send(packet).await {
-                        error!("send packet to client {local} error: {e}")
+            trace!("client::writer[spawn]: waiting for response from client");
+            match timeout(WAIT_REPLY_TIMEOUT, framed.next()).await {
+                Ok(Some(Ok(Packet::Response(code)))) => {
+                    let res = match code {
+                        ReturnCode::Success => Ok(()),
+                        _ => Err(Error::Client(code)),
+                    };
+                    if let Err(e) = res_tx.send(res) {
+                        error!("send SEND reply to broker error: {e:?}")
                     }
-                });
+                }
+                Ok(Some(Ok(_))) => {
+                    if res_tx.send(Err(Error::UnexpectedPacket)).is_err() {
+                        error!("recv unexpected packet from client {local}")
+                    }
+                }
+                Ok(Some(Err(e))) => {
+                    if let Err(e) = res_tx.send(Err(e.into())) {
+                        error!("recv reply from client {local} error: {e:?}")
+                    }
+                }
+                Ok(None) => {
+                    if res_tx.send(Err(Error::StreamClosed)).is_err() {
+                        error!("client {local} stream closed")
+                    }
+                }
+                Err(e) => {
+                    if res_tx.send(Err(e.into())).is_err() {
+                        error!("wait for client {local} reply timout")
+                    }
+                }
             }
-        }
+            framed.close().await.ok();
+        });
         Ok(())
     }
 }

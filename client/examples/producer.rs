@@ -1,10 +1,8 @@
-use core::time;
 use std::{fs, io::Read, path::Path};
 
 use bud_client::{client::ClientBuilder, producer::Producer};
 use bud_common::mtls::MtlsProvider;
 use flexi_logger::{detailed_format, Logger};
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,7 +21,6 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    sleep(time::Duration::from_millis(200)).await;
     let producer = client.new_producer("test-topic");
     if let Err(e) = produce(producer).await {
         println!("produce error: {e}")
@@ -33,9 +30,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn produce(mut producer: Producer) -> anyhow::Result<()> {
-    for _ in 0..10 {
-        producer.send(b"hello, world").await?;
-    }
+    // for _ in 0..10 {
+    producer.send(b"hello, world").await?;
+    // }
     Ok(())
 }
 

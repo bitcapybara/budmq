@@ -98,6 +98,7 @@ impl ClientBuilder {
 
         // connector task loop
         trace!("client::build: start connector task loop");
+        let (ready_tx, ready_rx) = oneshot::channel();
         let connector_task = Connector::new(
             self.addr,
             self.keepalive,
@@ -105,8 +106,9 @@ impl ClientBuilder {
             consumers.clone(),
             server_tx.clone(),
         )
-        .run(server_rx, token.clone());
+        .run(server_rx, token.clone(), ready_tx);
         let connector_handle = tokio::spawn(connector_task);
+        ready_rx.await.ok();
 
         Ok(Client {
             server_tx,
