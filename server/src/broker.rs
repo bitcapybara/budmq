@@ -327,18 +327,21 @@ impl<S: Storage> Broker<S> {
                     let Some(topic) = topics.get_mut(&sub_info.topic_name) else {
                         continue;
                     };
-                    let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
-                        continue;
-                    };
                     trace!(
                         "broker::process_packets: remove subscription from topic: {}",
                         sub_info.sub_name
                     );
-                    sp.del_consumer(client_id, consumer_id).await?;
+                    let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
+                        continue;
+                    };
                     trace!(
                         "broker::process_packets: remove consumer from subscription: {}",
                         consumer_id
                     );
+                    sp.del_consumer(client_id, consumer_id).await?;
+                    trace!("broker::process_packets: subscription task exiting");
+                    sp.close().await;
+                    trace!("broker::process_packets: subscription task exit");
                 }
             }
             _ => {
@@ -435,7 +438,11 @@ impl<S: Storage> Broker<S> {
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
                     trace!("broker::process_packets: remove subscription from topic");
-                    tp.del_subscription(&info.sub_name);
+                    if let Some(sp) = tp.del_subscription(&info.sub_name) {
+                        trace!("broker::process_packets: subscription exiting");
+                        sp.close().await;
+                        trace!("broker::process_packets: subscription exit");
+                    }
                 }
                 trace!("broker::process_packets: remove consumer from session");
                 session.del_consumer(consumer_id);
