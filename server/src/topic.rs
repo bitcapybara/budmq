@@ -6,6 +6,7 @@ use bud_common::{
 };
 use bytes::Bytes;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     storage::{self, TopicStorage},
@@ -87,6 +88,7 @@ impl<S: Storage> Topic<S> {
         topic: &str,
         send_tx: mpsc::UnboundedSender<SendEvent>,
         store: S,
+        token: CancellationToken,
     ) -> Result<Self> {
         let storage = TopicStorage::new(topic, store.clone())?;
         let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
@@ -95,8 +97,14 @@ impl<S: Storage> Topic<S> {
         let mut delete_position = u64::MAX;
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
-            let subscription =
-                Subscription::new(&sub.topic, &sub.name, send_tx.clone(), store.clone()).await?;
+            let subscription = Subscription::new(
+                &sub.topic,
+                &sub.name,
+                send_tx.clone(),
+                store.clone(),
+                token.clone(),
+            )
+            .await?;
             let sub_delete_pos = subscription.delete_position().await;
             if sub_delete_pos < delete_position {
                 delete_position = sub_delete_pos;

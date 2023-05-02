@@ -5,11 +5,8 @@ use log::trace;
 use tokio::{
     select,
     sync::{mpsc, oneshot, RwLock},
-    time::timeout,
 };
 use tokio_util::sync::CancellationToken;
-
-use crate::WAIT_REPLY_TIMEOUT;
 
 use super::{
     cursor::Cursor, Consumer, Consumers, ConsumersType, Error, Result, SendEvent, SubType,
@@ -204,11 +201,14 @@ impl<S: Storage> Dispatcher<S> {
                         }
                     }
                     let mut cursor = self.cursor.write().await;
+                    trace!("dispatcher::run cursor peek a message");
                     while let Some(next_message) = cursor.peek_message() {
+                        trace!("dispatcher::run: find available consumers");
                         let Some(consumer) = self.available_consumer().await else {
                             return Ok(());
                         };
                         // serial processing
+                        trace!("dispatcher::run: send message to broker");
                         let (res_tx, res_rx) = oneshot::channel();
                         send_tx.send(SendEvent {
                             client_id: consumer.client_id,
@@ -217,7 +217,8 @@ impl<S: Storage> Dispatcher<S> {
                             consumer_id: consumer.consumer_id,
                             res_tx,
                         })?;
-                        if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                        trace!("dispatcher::run: waiting for replay");
+                        if let Ok(true) = res_rx.await {
                             cursor.read_advance().await?;
                             self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
                                 .await;

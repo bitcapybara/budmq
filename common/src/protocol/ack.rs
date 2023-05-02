@@ -17,7 +17,8 @@ pub enum ReturnCode {
     ConsumerNotFound = 7,
     ProduceMessageDuplicated = 8,
     ConsumeMessageDuplicated = 9,
-    ServerInternal = 10,
+    InternalError = 10,
+    UnexpectedPacket = 11,
 }
 
 impl Display for ReturnCode {
@@ -33,7 +34,8 @@ impl Display for ReturnCode {
             ReturnCode::ConsumerNotFound => write!(f, "ConsumerNotFound"),
             ReturnCode::ProduceMessageDuplicated => write!(f, "ProduceMessageDuplicated"),
             ReturnCode::ConsumeMessageDuplicated => write!(f, "ConsumeMessageDuplicated"),
-            ReturnCode::ServerInternal => write!(f, "ServerInternalError"),
+            ReturnCode::InternalError => write!(f, "ServerInternalError"),
+            ReturnCode::UnexpectedPacket => write!(f, "UnecpectedPacket"),
         }
     }
 }
@@ -53,7 +55,8 @@ impl TryFrom<u8> for ReturnCode {
             7 => Self::ConsumerNotFound,
             8 => Self::ProduceMessageDuplicated,
             9 => Self::ConsumeMessageDuplicated,
-            10 => Self::ServerInternal,
+            10 => Self::InternalError,
+            11 => Self::UnexpectedPacket,
             _ => return Err(Error::UnsupportedReturnCode),
         })
     }

@@ -131,23 +131,22 @@ pub struct Broker<S> {
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
     topics: Arc<RwLock<HashMap<String, Topic<S>>>>,
+    /// token
+    token: CancellationToken,
 }
 
 impl<S: Storage> Broker<S> {
-    pub fn new(storage: S) -> Self {
+    pub fn new(storage: S, token: CancellationToken) -> Self {
         Self {
             storage,
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
+            token,
         }
     }
 
-    pub async fn run(
-        self,
-        broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
-        token: CancellationToken,
-    ) {
-        let task_token = token.child_token();
+    pub async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) {
+        let task_token = self.token.child_token();
         // subscription task
         let (send_tx, send_rx) = mpsc::unbounded_channel();
         let send_task = self
@@ -168,7 +167,7 @@ impl<S: Storage> Broker<S> {
             wait(client_handle, "broker handle client message"),
         )
         .await;
-        token.cancel();
+        self.token.cancel();
     }
 
     /// process send event from all subscriptions
@@ -353,7 +352,7 @@ impl<S: Storage> Broker<S> {
                     Err(Error::ReturnCode(code)) => code,
                     Err(e) => {
                         error!("internal error when process_packet: {e}");
-                        ReturnCode::ServerInternal
+                        ReturnCode::InternalError
                     }
                 };
                 if let Some(res_tx) = msg.res_tx {
@@ -406,8 +405,13 @@ impl<S: Storage> Broker<S> {
                     },
                     None => {
                         trace!("broker::process_packets: create new topic");
-                        let mut topic =
-                            Topic::new(&sub.topic, send_tx.clone(), self.storage.clone()).await?;
+                        let mut topic = Topic::new(
+                            &sub.topic,
+                            send_tx.clone(),
+                            self.storage.clone(),
+                            self.token.clone(),
+                        )
+                        .await?;
                         trace!("broker::process_packets: create subscription");
                         let sp = Subscription::from_subscribe(
                             client_id,
@@ -458,14 +462,7 @@ impl<S: Storage> Broker<S> {
                         trace!("broker::process_packets: add message to topic");
                         topic.add_message(message).await?;
                     }
-                    None => {
-                        trace!("broker::process_packets: create new topic");
-                        let mut new_topic =
-                            Topic::new(&topic, send_tx.clone(), self.storage.clone()).await?;
-                        trace!("broker::process_packets: add message to topic");
-                        new_topic.add_message(message).await?;
-                        topics.insert(topic, new_topic);
-                    }
+                    None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
             }
             Packet::ControlFlow(c) => {

@@ -44,6 +44,7 @@ pub enum Error {
     Protocol(protocol::Error),
     Internal(String),
     Disconnect,
+    ReturnCode(ReturnCode),
 }
 
 impl std::error::Error for Error {}
@@ -59,6 +60,7 @@ impl std::fmt::Display for Error {
             Error::Protocol(e) => write!(f, "protocol error: {e}"),
             Error::Internal(e) => write!(f, "internal error: {e}"),
             Error::Disconnect => write!(f, "receive DISCONNECT packet from Server"),
+            Error::ReturnCode(code) => write!(f, "return code {code} to server"),
         }
     }
 }

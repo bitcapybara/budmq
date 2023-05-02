@@ -188,10 +188,10 @@ impl<S: Storage> Subscription<S> {
         sub_name: &str,
         send_tx: mpsc::UnboundedSender<SendEvent>,
         storage: S,
+        token: CancellationToken,
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let dispatcher = Dispatcher::new(sub_name, storage).await?;
-        let token = CancellationToken::new();
         let handle = tokio::spawn(dispatcher.clone().run(notify_rx, send_tx, token.clone()));
         Ok(Self {
             topic: topic.to_string(),

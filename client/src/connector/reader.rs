@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use bud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
-use futures::TryStreamExt;
+use futures::{SinkExt, TryStreamExt};
 use log::{error, trace, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
@@ -33,9 +33,17 @@ impl Reader {
                     match res {
                         Ok(Some(stream)) => {
                             trace!("connector::reader: accept a new stream");
-                            if self.read(stream, self.consumers.clone(), token.clone()).await.is_err() {
-                                token.cancel();
-                                return
+                            let mut framed = Framed::new(stream, PacketCodec);
+                            let code = match self.read(&mut framed, self.consumers.clone(), token.clone()).await {
+                                Ok(_) => ReturnCode::Success,
+                                Err(Error::ReturnCode(code)) => code,
+                                Err(e) => {
+                                    error!("client process SEND packet error: {e}");
+                                    continue;
+                                }
+                            };
+                            if let Err(e) = framed.send(Packet::Response(code)).await {
+                                error!("client connector reader send reponse error: {e}");
                             }
                         },
                         Ok(None) => {
@@ -59,18 +67,21 @@ impl Reader {
 
     async fn read(
         &self,
-        stream: BidirectionalStream,
+        framed: &mut Framed<BidirectionalStream, PacketCodec>,
         consumers: Consumers,
         token: CancellationToken,
     ) -> Result<()> {
-        let mut framed = Framed::new(stream, PacketCodec);
         select! {
+            biased;
+            _ = token.cancelled() => {
+                Ok(())
+            }
             res = framed.try_next() => {
                 match res {
                     Ok(Some(Packet::Send(s))) => {
                         let Some(sender) = consumers.get_consumer_sender(s.consumer_id).await else {
                             warn!("recv a message but consumer not found");
-                            return Ok(());
+                            return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound));
                         };
                         if let Err(e) = sender
                             .send(ConsumeMessage {
@@ -79,30 +90,30 @@ impl Reader {
                             })
                             .await
                         {
-                            error!("send message to consumer error: {e}")
+                            error!("send message to consumer error: {e}");
+                            return Err(Error::ReturnCode(ReturnCode::InternalError))
                         }
+                        Ok(())
                     }
                     Ok(Some(Packet::Disconnect)) => {
                         error!("receive DISCONNECT packet from server");
-                        return Err(Error::Disconnect)
+                        Err(Error::Disconnect)
                     }
                     Ok(Some(p)) => {
                         error!("client received unexpected packet: {:?}", p.packet_type());
+                        Err(Error::ReturnCode(ReturnCode::UnexpectedPacket))
                     }
                     Ok(None) => {
                         error!("client reader stream closed");
+                        Err(Error::StreamClosed)
                     }
                     Err(e) => {
                         error!("client reader error: {e}");
+                        Err(Error::FromQuic(e.to_string()))
                     }
                 }
             }
-            _ = token.cancelled() => {
-                return Ok(());
-            }
         }
-
-        Ok(())
     }
 }
 
@@ -132,16 +143,17 @@ impl ConsumerSender {
     pub async fn send(&self, message: ConsumeMessage) -> Result<()> {
         self.consumer_tx.send(message)?;
         let prev = self.permits.fetch_sub(1, Ordering::SeqCst);
-        let (res_tx, res_rx) = oneshot::channel();
-        if prev <= CONSUME_CHANNEL_CAPACITY / 2 {
-            self.server_tx.send(OutgoingMessage {
-                packet: Packet::ControlFlow(ControlFlow {
-                    consumer_id: self.consumer_id,
-                    permits: self.permits.load(Ordering::SeqCst),
-                }),
-                res_tx,
-            })?;
+        if prev > CONSUME_CHANNEL_CAPACITY / 2 {
+            return Ok(());
         }
+        let (res_tx, res_rx) = oneshot::channel();
+        self.server_tx.send(OutgoingMessage {
+            packet: Packet::ControlFlow(ControlFlow {
+                consumer_id: self.consumer_id,
+                permits: self.permits.load(Ordering::SeqCst),
+            }),
+            res_tx,
+        })?;
         match res_rx.await?? {
             ReturnCode::Success => Ok(()),
             code => Err(Error::FromServer(code)),
