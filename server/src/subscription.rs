@@ -256,8 +256,8 @@ impl<S: Storage> Subscription<S> {
         Ok(())
     }
 
-    pub async fn consume_ack(&self, message_id: u64) -> Result<()> {
-        self.dispatcher.consume_ack(message_id).await
+    pub async fn consume_ack(&self, cursor_id: u64) -> Result<()> {
+        self.dispatcher.consume_ack(cursor_id).await
     }
 
     pub async fn delete_position(&self) -> u64 {

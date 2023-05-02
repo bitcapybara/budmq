@@ -160,9 +160,9 @@ impl<S: Storage> Dispatcher<S> {
         }
     }
 
-    pub async fn consume_ack(&self, message_id: u64) -> Result<()> {
+    pub async fn consume_ack(&self, cursor_id: u64) -> Result<()> {
         let mut cursor = self.cursor.write().await;
-        cursor.ack(message_id).await?;
+        cursor.ack(cursor_id).await?;
         Ok(())
     }
 

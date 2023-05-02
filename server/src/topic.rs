@@ -47,18 +47,24 @@ impl From<subscription::Error> for Error {
     }
 }
 
-pub struct Message {
+pub struct TopicMessage {
+    /// topic name
+    pub topic_name: String,
+    /// topic curosr id, topic unique
+    pub topic_cursor_id: u64,
     /// producer sequence id
     pub seq_id: u64,
     /// message payload
     pub payload: Bytes,
 }
 
-impl Message {
-    pub fn from_publish(publish: Publish) -> Self {
+impl TopicMessage {
+    pub fn new(topic: &str, cursor_id: u64, seq_id: u64, payload: Bytes) -> Self {
         Self {
-            seq_id: publish.sequence_id,
-            payload: publish.payload,
+            topic_name: topic.to_string(),
+            topic_cursor_id: cursor_id,
+            seq_id,
+            payload,
         }
     }
 }
@@ -74,7 +80,7 @@ pub struct Topic<S> {
     /// topic name
     pub name: String,
     /// producer message sequence id
-    seq_id: u64,
+    latest_seq_id: u64,
     /// all subscriptions in memory
     /// key = sub_name
     subscriptions: HashMap<String, Subscription<S>>,
@@ -82,6 +88,8 @@ pub struct Topic<S> {
     storage: TopicStorage<S>,
     /// delete position
     delete_position: u64,
+    /// latest cursor id
+    latest_cursor_id: u64,
 }
 
 impl<S: Storage> Topic<S> {
@@ -92,7 +100,8 @@ impl<S: Storage> Topic<S> {
         token: CancellationToken,
     ) -> Result<Self> {
         let storage = TopicStorage::new(topic, store.clone())?;
-        let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
+        let latest_seq_id = storage.get_latest_sequence_id().await?.unwrap_or_default();
+        let latest_cursor_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = if loaded_subscriptions.is_empty() {
@@ -118,10 +127,11 @@ impl<S: Storage> Topic<S> {
         }
         Ok(Self {
             name: topic.to_string(),
-            seq_id,
+            latest_seq_id,
             subscriptions,
             storage,
             delete_position,
+            latest_cursor_id,
         })
     }
 
@@ -138,19 +148,26 @@ impl<S: Storage> Topic<S> {
     }
 
     /// save message in topic
-    pub async fn add_message(&mut self, message: Message) -> Result<()> {
-        if message.seq_id <= self.seq_id {
+    pub async fn add_message(&mut self, message: Publish) -> Result<()> {
+        if message.sequence_id <= self.latest_seq_id {
             return Err(Error::ReturnCode(ReturnCode::ProduceMessageDuplicated));
         }
-        let message_id = self.storage.add_message(&message).await?;
-        self.seq_id = message.seq_id;
+        self.latest_cursor_id += 1;
+        let topic_message = TopicMessage::new(
+            &self.name,
+            self.latest_cursor_id,
+            message.sequence_id,
+            message.payload,
+        );
+        let message_id = self.storage.add_message(&topic_message).await?;
+        self.latest_seq_id = message.sequence_id;
         for sub in self.subscriptions.values() {
             sub.message_notify(message_id)?;
         }
         Ok(())
     }
 
-    pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
+    pub async fn get_message(&self, message_id: u64) -> Result<Option<TopicMessage>> {
         Ok(self.storage.get_message(message_id).await?)
     }
 
@@ -160,7 +177,10 @@ impl<S: Storage> Topic<S> {
         };
 
         // ack
-        sp.consume_ack(message_id).await?;
+        let Some(cursor_id) = self.storage.get_message_cursor_id(message_id).await? else {
+            return Ok(());
+        };
+        sp.consume_ack(cursor_id).await?;
 
         // remove acked messages
         const DELETE_BATCH: u64 = 100;

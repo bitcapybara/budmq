@@ -7,10 +7,13 @@ use std::{
     string,
 };
 
-use bud_common::storage;
-use bytes::{Buf, Bytes};
+use bud_common::{
+    protocol::{self, get_u64, read_bytes, read_string, write_bytes, write_string},
+    storage,
+};
+use bytes::{BufMut, Bytes, BytesMut};
 
-use crate::topic::{Message, SubscriptionId};
+use crate::topic::{SubscriptionId, TopicMessage};
 
 pub(crate) use cursor::CursorStorage;
 pub(crate) use topic::TopicStorage;
@@ -24,6 +27,7 @@ pub enum Error {
     DecodeSlice(array::TryFromSliceError),
     DecodeString(string::FromUtf8Error),
     Storage(storage::Error),
+    Protocol(protocol::Error),
 }
 
 impl std::error::Error for Error {}
@@ -36,6 +40,7 @@ impl std::fmt::Display for Error {
             Error::DecodeSlice(e) => write!(f, "decode slice error: {e}"),
             Error::DecodeString(e) => write!(f, "decode string error: {e}"),
             Error::Storage(e) => write!(f, "storage error: {e}"),
+            Error::Protocol(e) => write!(f, "decode protocol error: {e}"),
         }
     }
 }
@@ -63,6 +68,13 @@ impl From<string::FromUtf8Error> for Error {
         Self::DecodeString(e)
     }
 }
+
+impl From<protocol::Error> for Error {
+    fn from(e: protocol::Error) -> Self {
+        Self::Protocol(e)
+    }
+}
+
 trait Codec {
     fn to_vec(&self) -> Vec<u8>;
     fn from_bytes(bytes: &[u8]) -> Result<Self>
@@ -70,19 +82,30 @@ trait Codec {
         Self: Sized;
 }
 
-impl Codec for Message {
+impl Codec for TopicMessage {
     fn to_vec(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(8 + self.payload.len());
-        bytes.extend_from_slice(&self.seq_id.to_be_bytes());
-        bytes.extend_from_slice(&self.payload);
-        bytes
+        // topic_name_len + topic_name + cursor_id + seq_id + payload_len + payload
+        let buf_len = 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
+        let mut buf = BytesMut::with_capacity(buf_len);
+        write_string(&mut buf, &self.topic_name);
+        buf.put_u64(self.topic_cursor_id);
+        buf.put_u64(self.seq_id);
+        write_bytes(&mut buf, &self.payload);
+        buf.to_vec()
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let (seq_id_bytes, payload_bytes) = bytes.split_at(8);
-        let seq_id = u64::from_be_bytes(seq_id_bytes.try_into()?);
-        let payload = Bytes::copy_from_slice(payload_bytes);
-        Ok(Self { seq_id, payload })
+        let mut bytes = Bytes::copy_from_slice(bytes);
+        let topic_name = read_string(&mut bytes)?;
+        let topic_cursor_id = get_u64(&mut bytes)?;
+        let seq_id = get_u64(&mut bytes)?;
+        let payload = read_bytes(&mut bytes)?;
+        Ok(Self {
+            seq_id,
+            payload,
+            topic_name,
+            topic_cursor_id,
+        })
     }
 }
 
@@ -102,12 +125,6 @@ impl Codec for SubscriptionId {
         let name = read_string(&mut bytes)?;
         Ok(Self { topic, name })
     }
-}
-
-fn read_string(buf: &mut Bytes) -> Result<String> {
-    let len = buf.get_u16() as usize;
-    let bytes = buf.split_to(len);
-    Ok(String::from_utf8(bytes.to_vec())?)
 }
 
 fn get_range<R>(range: R) -> Result<RangeInclusive<u64>>

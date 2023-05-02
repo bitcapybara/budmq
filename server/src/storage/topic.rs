@@ -5,7 +5,7 @@ use std::{
 
 use bud_common::storage::Storage;
 
-use crate::topic::{Message, SubscriptionId};
+use crate::topic::{SubscriptionId, TopicMessage};
 
 use super::{get_range, Codec, Result};
 
@@ -17,8 +17,9 @@ pub struct TopicStorage<S> {
 
 impl<S: Storage> TopicStorage<S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
-    const SEQUENCE_ID_KEY: &[u8] = "SEQUENCE_ID".as_bytes();
+    const LATEST_SEQUENCE_ID_KEY: &[u8] = "LATEST_SEQUENCE_ID".as_bytes();
     const SUBSCRIPTION_KEY: &[u8] = "SUBSCRIPTION".as_bytes();
+    const LATEST_CURSOR_ID_KEY: &[u8] = "LATEST_CURSOR_ID".as_bytes();
 
     pub fn new(topic_name: &str, storage: S) -> Result<Self> {
         Ok(Self {
@@ -59,21 +60,21 @@ impl<S: Storage> TopicStorage<S> {
         Ok(subs)
     }
 
-    pub async fn add_message(&self, message: &Message) -> Result<u64> {
+    pub async fn add_message(&self, message: &TopicMessage) -> Result<u64> {
         let msg_id = self.counter.fetch_add(1, atomic::Ordering::SeqCst);
         let key = self.key(msg_id.to_be_bytes().as_slice());
         let value = message.to_vec();
         self.storage.put(&key, &value).await?;
-        self.set_sequence_id(message.seq_id).await?;
+        self.set_latest_sequence_id(message.seq_id).await?;
         Ok(msg_id)
     }
 
-    pub async fn get_message(&self, message_id: u64) -> Result<Option<Message>> {
+    pub async fn get_message(&self, message_id: u64) -> Result<Option<TopicMessage>> {
         let key = self.key(message_id.to_be_bytes().as_slice());
         self.storage
             .get(&key)
             .await?
-            .map(|b| Message::from_bytes(&b))
+            .map(|b| TopicMessage::from_bytes(&b))
             .transpose()
     }
 
@@ -89,17 +90,36 @@ impl<S: Storage> TopicStorage<S> {
         Ok(())
     }
 
-    pub async fn get_sequence_id(&self) -> Result<Option<u64>> {
-        let key = self.key(Self::SEQUENCE_ID_KEY);
+    pub async fn get_latest_sequence_id(&self) -> Result<Option<u64>> {
+        let key = self.key(Self::LATEST_SEQUENCE_ID_KEY);
         Ok(self.storage.get_u64(&key).await?)
     }
 
-    pub async fn set_sequence_id(&self, seq_id: u64) -> Result<()> {
-        let key = self.key(Self::SEQUENCE_ID_KEY);
-        self.storage
+    pub async fn set_latest_sequence_id(&self, seq_id: u64) -> Result<()> {
+        let key = self.key(Self::LATEST_SEQUENCE_ID_KEY);
+        Ok(self
+            .storage
             .put(&key, seq_id.to_be_bytes().as_slice())
-            .await?;
-        Ok(())
+            .await?)
+    }
+
+    pub async fn get_latest_cursor_id(&self) -> Result<Option<u64>> {
+        let key = self.key(Self::LATEST_CURSOR_ID_KEY);
+        Ok(self.storage.get_u64(&key).await?)
+    }
+
+    pub async fn set_latest_cursor_id(&self, cursor_id: u64) -> Result<()> {
+        let key = self.key(Self::LATEST_CURSOR_ID_KEY);
+        Ok(self
+            .storage
+            .put(&key, cursor_id.to_be_bytes().as_slice())
+            .await?)
+    }
+
+    pub async fn get_message_cursor_id(&self, message_id: u64) -> Result<Option<u64>> {
+        self.get_message(message_id)
+            .await
+            .map(|m| m.map(|mm| mm.topic_cursor_id))
     }
 
     fn key(&self, bytes: &[u8]) -> Vec<u8> {

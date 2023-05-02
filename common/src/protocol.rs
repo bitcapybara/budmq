@@ -330,42 +330,42 @@ fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
     Ok(())
 }
 
-fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
+pub fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
     let len = get_u16(buf)? as usize;
     assert_len(buf, len)?;
     Ok(buf.split_to(len))
 }
 
-fn read_string(buf: &mut Bytes) -> Result<String> {
+pub fn read_string(buf: &mut Bytes) -> Result<String> {
     let bytes = read_bytes(buf)?;
     Ok(String::from_utf8(bytes.to_vec())?)
 }
 
-fn write_bytes(buf: &mut BytesMut, bytes: &[u8]) {
+pub fn write_bytes(buf: &mut BytesMut, bytes: &[u8]) {
     buf.put_u16(bytes.len() as u16);
     buf.extend_from_slice(bytes);
 }
 
-fn write_string(buf: &mut BytesMut, string: &str) {
+pub fn write_string(buf: &mut BytesMut, string: &str) {
     write_bytes(buf, string.as_bytes());
 }
 
-fn get_u8(buf: &mut Bytes) -> Result<u8> {
+pub fn get_u8(buf: &mut Bytes) -> Result<u8> {
     assert_len(buf, 1)?;
     Ok(buf.get_u8())
 }
 
-fn get_u16(buf: &mut Bytes) -> Result<u16> {
+pub fn get_u16(buf: &mut Bytes) -> Result<u16> {
     assert_len(buf, 2)?;
     Ok(buf.get_u16())
 }
 
-fn get_u32(buf: &mut Bytes) -> Result<u32> {
+pub fn get_u32(buf: &mut Bytes) -> Result<u32> {
     assert_len(buf, 4)?;
     Ok(buf.get_u32())
 }
 
-fn get_u64(buf: &mut Bytes) -> Result<u64> {
+pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
     assert_len(buf, 8)?;
     Ok(buf.get_u64())
 }

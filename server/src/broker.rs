@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     client,
     subscription::{self, SendEvent, Subscription},
-    topic::{self, Message, Topic},
+    topic::{self, Topic},
     WAIT_REPLY_TIMEOUT,
 };
 
@@ -456,11 +456,10 @@ impl<S: Storage> Broker<S> {
                 // add to topic
                 let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
-                let message = Message::from_publish(p);
                 match topics.get_mut(&topic) {
                     Some(topic) => {
                         trace!("broker::process_packets: add message to topic");
-                        topic.add_message(message).await?;
+                        topic.add_message(p).await?;
                     }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
