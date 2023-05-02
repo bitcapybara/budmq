@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use bud_common::storage::Storage;
+use log::trace;
 use tokio::{
+    select,
     sync::{mpsc, oneshot, RwLock},
     time::timeout,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::WAIT_REPLY_TIMEOUT;
 
@@ -175,43 +178,56 @@ impl<S: Storage> Dispatcher<S> {
         self,
         mut notify_rx: mpsc::UnboundedReceiver<Notify>,
         send_tx: mpsc::UnboundedSender<SendEvent>,
+        token: CancellationToken,
     ) -> Result<()> {
-        while let Some(notify) = notify_rx.recv().await {
-            match notify {
-                Notify::NewMessage(msg_id) => {
+        trace!("dispatcher::run: start dispatcher task loop");
+        loop {
+            select! {
+                res = notify_rx.recv() => {
+                    let Some(notify) = res else {
+                        return Ok(());
+                    };
+                    match notify {
+                        Notify::NewMessage(msg_id) => {
+                            trace!("dispatcher::run: receive a NEW_MESSAGE notify");
+                            let mut cursor = self.cursor.write().await;
+                            cursor.new_message(msg_id).await?;
+                        }
+                        Notify::AddPermits {
+                            consumer_id,
+                            add_permits,
+                            client_id,
+                        } => {
+                            trace!("dispatcher::run: receive a ADD_PERMITS notify");
+                            self.increase_consumer_permits(client_id, consumer_id, add_permits)
+                                .await;
+                        }
+                    }
                     let mut cursor = self.cursor.write().await;
-                    cursor.new_message(msg_id).await?;
+                    while let Some(next_message) = cursor.peek_message() {
+                        let Some(consumer) = self.available_consumer().await else {
+                            return Ok(());
+                        };
+                        // serial processing
+                        let (res_tx, res_rx) = oneshot::channel();
+                        send_tx.send(SendEvent {
+                            client_id: consumer.client_id,
+                            topic_name: consumer.topic_name,
+                            message_id: next_message,
+                            consumer_id: consumer.consumer_id,
+                            res_tx,
+                        })?;
+                        if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
+                            cursor.read_advance().await?;
+                            self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
+                                .await;
+                        }
+                    }
                 }
-                Notify::AddPermits {
-                    consumer_id,
-                    add_permits,
-                    client_id,
-                } => {
-                    self.increase_consumer_permits(client_id, consumer_id, add_permits)
-                        .await;
-                }
-            }
-            let mut cursor = self.cursor.write().await;
-            while let Some(next_message) = cursor.peek_message() {
-                let Some(consumer) = self.available_consumer().await else {
+                _ = token.cancelled() => {
                     return Ok(());
-                };
-                // serial processing
-                let (res_tx, res_rx) = oneshot::channel();
-                send_tx.send(SendEvent {
-                    client_id: consumer.client_id,
-                    topic_name: consumer.topic_name,
-                    message_id: next_message,
-                    consumer_id: consumer.consumer_id,
-                    res_tx,
-                })?;
-                if let Ok(Ok(true)) = timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-                    cursor.read_advance().await?;
-                    self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
-                        .await;
                 }
             }
         }
-        Ok(())
     }
 }

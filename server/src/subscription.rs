@@ -4,11 +4,16 @@ mod dispatcher;
 use std::{collections::HashMap, fmt::Display};
 
 use bud_common::{
+    helper::wait_result,
     protocol::Subscribe,
     storage::Storage,
     subscription::{InitialPostion, SubType},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::storage;
 
@@ -171,6 +176,8 @@ pub struct Subscription<S> {
     pub topic: String,
     pub name: String,
     dispatcher: Dispatcher<S>,
+    handle: JoinHandle<Result<()>>,
+    token: CancellationToken,
     notify_tx: mpsc::UnboundedSender<Notify>,
 }
 
@@ -184,12 +191,15 @@ impl<S: Storage> Subscription<S> {
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let dispatcher = Dispatcher::new(sub_name, storage).await?;
-        tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
+        let token = CancellationToken::new();
+        let handle = tokio::spawn(dispatcher.clone().run(notify_rx, send_tx, token.clone()));
         Ok(Self {
             topic: topic.to_string(),
             name: sub_name.to_string(),
             dispatcher,
             notify_tx,
+            handle,
+            token,
         })
     }
 
@@ -204,12 +214,15 @@ impl<S: Storage> Subscription<S> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(client_id, consumer_id, sub);
         let dispatcher = Dispatcher::with_consumer(consumer, storage).await?;
-        tokio::spawn(dispatcher.clone().run(notify_rx, send_tx));
+        let token = CancellationToken::new();
+        let handle = tokio::spawn(dispatcher.clone().run(notify_rx, send_tx, token.clone()));
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
             notify_tx,
             dispatcher,
+            handle,
+            token,
         })
     }
 
@@ -249,5 +262,11 @@ impl<S: Storage> Subscription<S> {
 
     pub async fn delete_position(&self) -> u64 {
         self.dispatcher.delete_position().await
+    }
+
+    /// TODO async drop
+    pub async fn close(self) {
+        self.token.cancel();
+        wait_result(self.handle, "dispatcher task loop").await;
     }
 }
