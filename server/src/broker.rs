@@ -6,7 +6,7 @@ use bud_common::{
     storage::Storage,
 };
 use futures::future;
-use log::{debug, error, trace};
+use log::{error, trace};
 use tokio::{
     select,
     sync::{mpsc, oneshot, RwLock},
