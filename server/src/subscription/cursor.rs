@@ -1,4 +1,4 @@
-use bud_common::storage::Storage;
+use bud_common::{storage::Storage, subscription::InitialPostion};
 use roaring::RoaringTreemap;
 
 use crate::storage::CursorStorage;
@@ -24,12 +24,15 @@ pub struct Cursor<S> {
 }
 
 impl<S: Storage> Cursor<S> {
-    pub async fn new(sub_name: &str, storage: S) -> Result<Self> {
+    pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
         let storage = CursorStorage::new(sub_name, storage)?;
-        let read_position = storage.get_read_position().await?.unwrap_or_default();
         let latest_message_id = storage.get_latest_message_id().await?.unwrap_or_default();
         let bits = storage.get_ack_bits().await?.unwrap_or_default();
         let delete_position = bits.min().unwrap_or_default();
+        let read_position = match init_position {
+            InitialPostion::Latest => storage.get_read_position().await?.unwrap_or_default(),
+            InitialPostion::Earliest => delete_position + 1,
+        };
         Ok(Self {
             read_position,
             latest_message_id,
@@ -98,7 +101,9 @@ mod tests {
 
     #[tokio::test]
     async fn cursor_works() {
-        let mut cursor = Cursor::new("test-sub", MemoryStorage::new()).await.unwrap();
+        let mut cursor = Cursor::new("test-sub", MemoryStorage::new(), InitialPostion::Latest)
+            .await
+            .unwrap();
 
         assert_eq!(cursor.peek_message(), None);
         cursor.new_message(1).await.unwrap();

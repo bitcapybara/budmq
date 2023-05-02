@@ -8,12 +8,12 @@ use std::{
 };
 
 use bud_common::{
-    protocol::{self, get_u64, read_bytes, read_string, write_bytes, write_string},
+    protocol::{self, get_u64, get_u8, read_bytes, read_string, write_bytes, write_string},
     storage,
 };
 use bytes::{BufMut, Bytes, BytesMut};
 
-use crate::topic::{SubscriptionId, TopicMessage};
+use crate::topic::{SubscriptionInfo, TopicMessage};
 
 pub(crate) use cursor::CursorStorage;
 pub(crate) use topic::TopicStorage;
@@ -95,11 +95,11 @@ impl Codec for TopicMessage {
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let mut bytes = Bytes::copy_from_slice(bytes);
-        let topic_name = read_string(&mut bytes)?;
-        let topic_cursor_id = get_u64(&mut bytes)?;
-        let seq_id = get_u64(&mut bytes)?;
-        let payload = read_bytes(&mut bytes)?;
+        let mut buf = Bytes::copy_from_slice(bytes);
+        let topic_name = read_string(&mut buf)?;
+        let topic_cursor_id = get_u64(&mut buf)?;
+        let seq_id = get_u64(&mut buf)?;
+        let payload = read_bytes(&mut buf)?;
         Ok(Self {
             seq_id,
             payload,
@@ -109,21 +109,30 @@ impl Codec for TopicMessage {
     }
 }
 
-impl Codec for SubscriptionId {
+impl Codec for SubscriptionInfo {
     fn to_vec(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(2 + self.topic.len() + 2 + self.name.len());
-        bytes.extend_from_slice(&self.topic.len().to_be_bytes());
-        bytes.extend_from_slice(self.topic.as_bytes());
-        bytes.extend_from_slice(&self.name.len().to_be_bytes());
-        bytes.extend_from_slice(self.name.as_bytes());
-        bytes
+        // topic_len + topic + name_len + name + sub_type + init_position
+        let buf_len = 2 + self.topic.len() + 2 + self.name.len() + 1 + 1;
+        let mut buf = BytesMut::with_capacity(buf_len);
+        write_string(&mut buf, &self.topic);
+        write_string(&mut buf, &self.name);
+        buf.put_u8(self.sub_type as u8);
+        buf.put_u8(self.init_position as u8);
+        buf.to_vec()
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let mut bytes = Bytes::copy_from_slice(bytes);
-        let topic = read_string(&mut bytes)?;
-        let name = read_string(&mut bytes)?;
-        Ok(Self { topic, name })
+        let mut buf = Bytes::copy_from_slice(bytes);
+        let topic = read_string(&mut buf)?;
+        let name = read_string(&mut buf)?;
+        let sub_type = get_u8(&mut buf)?.try_into()?;
+        let init_position = get_u8(&mut buf)?.try_into()?;
+        Ok(Self {
+            topic,
+            name,
+            sub_type,
+            init_position,
+        })
     }
 }
 

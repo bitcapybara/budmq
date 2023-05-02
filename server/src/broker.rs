@@ -397,6 +397,7 @@ impl<S: Storage> Broker<S> {
                                 &sub,
                                 send_tx.clone(),
                                 self.storage.clone(),
+                                sub.initial_position,
                             )
                             .await?;
                             trace!("broker::process_packets: add subscription to topic");
@@ -419,6 +420,7 @@ impl<S: Storage> Broker<S> {
                             &sub,
                             send_tx.clone(),
                             self.storage.clone(),
+                            sub.initial_position,
                         )
                         .await?;
                         trace!("broker::process_packets: add subscription to topic");

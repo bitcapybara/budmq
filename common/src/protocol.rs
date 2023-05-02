@@ -1,8 +1,8 @@
-mod ack;
 mod connect;
 mod consume_ack;
 mod control_flow;
 mod publish;
+mod response;
 mod send;
 mod subscribe;
 mod unsubscribe;
@@ -15,8 +15,8 @@ use tokio_util::codec::{Decoder, Encoder};
 use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
-    ack::ReturnCode, connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow,
-    publish::Publish, send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
+    connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, publish::Publish,
+    response::ReturnCode, send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;

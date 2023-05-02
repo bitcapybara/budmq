@@ -5,7 +5,7 @@ use std::{
 
 use bud_common::storage::Storage;
 
-use crate::topic::{SubscriptionId, TopicMessage};
+use crate::topic::{SubscriptionInfo, TopicMessage};
 
 use super::{get_range, Codec, Result};
 
@@ -18,7 +18,7 @@ pub struct TopicStorage<S> {
 impl<S: Storage> TopicStorage<S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
     const LATEST_SEQUENCE_ID_KEY: &[u8] = "LATEST_SEQUENCE_ID".as_bytes();
-    const SUBSCRIPTION_KEY: &[u8] = "SUBSCRIPTION".as_bytes();
+    const MAX_SUBSCRIPTION_ID_KEY: &[u8] = "SUBSCRIPTION".as_bytes();
     const LATEST_CURSOR_ID_KEY: &[u8] = "LATEST_CURSOR_ID".as_bytes();
 
     pub fn new(topic_name: &str, storage: S) -> Result<Self> {
@@ -29,8 +29,8 @@ impl<S: Storage> TopicStorage<S> {
         })
     }
 
-    pub async fn add_subscription(&self, sub: &SubscriptionId) -> Result<()> {
-        let mut id_key = self.key(Self::SUBSCRIPTION_KEY);
+    pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
+        let mut id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
         let id = self
             .storage
             .get_u64(&id_key)
@@ -42,9 +42,9 @@ impl<S: Storage> TopicStorage<S> {
         Ok(())
     }
 
-    pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionId>> {
-        let id_key = self.key(Self::SUBSCRIPTION_KEY);
-        let Some(max_id )= self.storage.get_u64(&id_key).await? else {
+    pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
+        let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
+        let Some(max_id)= self.storage.get_u64(&id_key).await? else {
             return Ok(vec![]);
         };
 
@@ -55,7 +55,7 @@ impl<S: Storage> TopicStorage<S> {
             let Some(sub) = self.storage.get(&key).await? else {
                 continue;
             };
-            subs.push(SubscriptionId::from_bytes(&sub)?);
+            subs.push(SubscriptionInfo::from_bytes(&sub)?);
         }
         Ok(subs)
     }

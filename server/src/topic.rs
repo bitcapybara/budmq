@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use bud_common::{
     protocol::{Publish, ReturnCode},
     storage::Storage,
+    subscription::{InitialPostion, SubType},
 };
 use bytes::Bytes;
 
@@ -69,9 +70,11 @@ impl TopicMessage {
     }
 }
 
-pub struct SubscriptionId {
+pub struct SubscriptionInfo {
     pub topic: String,
     pub name: String,
+    pub sub_type: SubType,
+    pub init_position: InitialPostion,
 }
 
 /// Save all messages associated with this topic in subscription
@@ -116,6 +119,7 @@ impl<S: Storage> Topic<S> {
                 &sub.name,
                 send_tx.clone(),
                 store.clone(),
+                sub.init_position,
                 token.clone(),
             )
             .await?;
