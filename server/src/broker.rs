@@ -397,8 +397,6 @@ impl<S: Storage> Broker<S> {
                                 self.storage.clone(),
                             )
                             .await?;
-                            trace!("broker::process_packets: add consumer to subscription");
-                            sp.add_consumer(client_id, &sub).await?;
                             trace!("broker::process_packets: add subscription to topic");
                             topic.add_subscription(sp);
                         }

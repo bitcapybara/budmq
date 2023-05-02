@@ -8,14 +8,21 @@ use bud_common::{
     mtls::MtlsProvider,
     subscription::{InitialPostion, SubType},
 };
+use flexi_logger::{colored_detailed_format, Logger};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // logger init
+    Logger::try_with_str("trace")
+        .unwrap()
+        .format(colored_detailed_format)
+        .start()
+        .unwrap();
     let ca_cert = read_file("./certs/ca-cert.pem")?;
     let client_cert = read_file("./certs/client-cert.pem")?;
     let client_key_cert = read_file("./certs/client-key.pem")?;
     let provider = MtlsProvider::new(&ca_cert, &client_cert, &client_key_cert)?;
-    let mut client = ClientBuilder::new("127.0.0.1".parse()?, provider)
+    let mut client = ClientBuilder::new("127.0.0.1:9080".parse()?, provider)
         .keepalive(10000)
         .build()
         .await?;

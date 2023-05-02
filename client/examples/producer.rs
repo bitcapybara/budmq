@@ -2,14 +2,14 @@ use std::{fs, io::Read, path::Path};
 
 use bud_client::{client::ClientBuilder, producer::Producer};
 use bud_common::mtls::MtlsProvider;
-use flexi_logger::{detailed_format, Logger};
+use flexi_logger::{colored_detailed_format, Logger};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // logger init
     Logger::try_with_str("trace")
         .unwrap()
-        .format(detailed_format)
+        .format(colored_detailed_format)
         .start()
         .unwrap();
     let ca_cert = read_file("./certs/ca-cert.pem")?;

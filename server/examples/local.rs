@@ -8,7 +8,7 @@ use std::{
 use bud_common::{mtls::MtlsProvider, storage::memory::MemoryStorage};
 use bud_server::Server;
 use clap::Parser;
-use flexi_logger::{detailed_format, Logger};
+use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     // logger init
     Logger::try_with_str(args.log_level)
         .unwrap()
-        .format(detailed_format)
+        .format(colored_detailed_format)
         .start()
         .unwrap();
 

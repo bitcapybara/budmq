@@ -137,6 +137,7 @@ impl Writer {
                 return;
             }
         };
+        trace!("connector::writer::run: receive reponse from server: {code}");
         if msg.res_tx.send(Ok(code)).is_err() {
             error!("client writer wait channel dropped");
         }
