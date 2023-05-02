@@ -5,6 +5,7 @@ use bud_common::{
     storage::Storage,
 };
 use bytes::Bytes;
+use log::debug;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -94,7 +95,11 @@ impl<S: Storage> Topic<S> {
         let seq_id = storage.get_sequence_id().await?.unwrap_or_default();
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
-        let mut delete_position = u64::MAX;
+        let mut delete_position = if loaded_subscriptions.is_empty() {
+            0
+        } else {
+            u64::MAX
+        };
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
             let subscription = Subscription::new(

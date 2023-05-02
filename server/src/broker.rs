@@ -196,7 +196,7 @@ impl<S: Storage> Broker<S> {
     }
 
     async fn process_send_event(&self, event: SendEvent) -> Result<()> {
-        debug!("broker::process_send_event: send packet to consumer: {event}");
+        trace!("broker::process_send_event: send packet to consumer: {event}");
         let topics = self.topics.read().await;
         let Some(topic) = topics.get(&event.topic_name) else {
             return Err(Error::Internal(format!("topic {} not found", event.topic_name)));

@@ -88,3 +88,22 @@ impl<S: Storage> Cursor<S> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use bud_common::storage::memory::MemoryStorage;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn cursor_works() {
+        let mut cursor = Cursor::new("test-sub", MemoryStorage::new()).await.unwrap();
+
+        assert_eq!(cursor.peek_message(), None);
+        cursor.new_message(1).await.unwrap();
+        assert_eq!(cursor.peek_message(), Some(1));
+        cursor.read_advance().await.unwrap();
+        assert_eq!(cursor.peek_message(), None);
+    }
+}

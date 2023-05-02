@@ -24,7 +24,7 @@ impl<S: Storage> TopicStorage<S> {
         Ok(Self {
             topic_name: topic_name.to_string(),
             storage,
-            counter: AtomicU64::default(),
+            counter: AtomicU64::new(1),
         })
     }
 
