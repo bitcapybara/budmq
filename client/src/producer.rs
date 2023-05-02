@@ -1,6 +1,6 @@
 use bud_common::protocol::{Packet, Publish, ReturnCode};
 use bytes::Bytes;
-use chrono::{Local};
+use chrono::Local;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connector::{self, OutgoingMessage};
