@@ -70,6 +70,7 @@ impl From<oneshot::error::RecvError> for Error {
 
 pub struct ClientBuilder {
     addr: SocketAddr,
+    server_name: String,
     provider: MtlsProvider,
     // default to 10000ms
     keepalive: u16,
@@ -77,11 +78,12 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     const DEFAULT_KEEPALIVE_MS: u16 = 10000;
-    pub fn new(addr: SocketAddr, provider: MtlsProvider) -> Self {
+    pub fn new(addr: SocketAddr, server_name: &str, provider: MtlsProvider) -> Self {
         Self {
             addr,
             provider,
             keepalive: Self::DEFAULT_KEEPALIVE_MS,
+            server_name: server_name.to_string(),
         }
     }
 
@@ -100,6 +102,7 @@ impl ClientBuilder {
         trace!("client::build: start connector task loop");
         let connector_task = Connector::new(
             self.addr,
+            &self.server_name,
             self.keepalive,
             self.provider,
             consumers.clone(),

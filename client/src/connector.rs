@@ -103,6 +103,7 @@ impl From<oneshot::error::RecvError> for Error {
 
 pub struct Connector {
     addr: SocketAddr,
+    server_name: String,
     keepalive: u16,
     provider: MtlsProvider,
     consumers: Consumers,
@@ -112,6 +113,7 @@ pub struct Connector {
 impl Connector {
     pub fn new(
         addr: SocketAddr,
+        server_name: &str,
         keepalive: u16,
         provider: MtlsProvider,
         consumers: Consumers,
@@ -123,6 +125,7 @@ impl Connector {
             consumers,
             server_tx,
             keepalive,
+            server_name: server_name.to_string(),
         }
     }
 
@@ -205,7 +208,8 @@ impl Connector {
             .with_io("0.0.0.0:0")?
             .start()?;
         // TODO server name must be `localhost`?
-        let connector = s2n_quic::client::Connect::new(self.addr).with_server_name("localhost");
+        let connector =
+            s2n_quic::client::Connect::new(self.addr).with_server_name(self.server_name.as_str());
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
         Ok(connection)
