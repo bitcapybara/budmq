@@ -130,6 +130,10 @@ pub struct Client {
 }
 
 impl Client {
+    /// TODO use common/writer to send messages
+    ///
+    /// * ordered: use ordered writer per producer
+    /// * unordered: use a global shared writer for all producers
     pub fn new_producer(&self, topic: &str) -> Producer {
         Producer::new(topic, self.server_tx.clone())
     }
