@@ -3,6 +3,7 @@ use tokio::{
     time,
 };
 
+mod pool;
 mod reader;
 mod writer;
 

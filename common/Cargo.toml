@@ -10,6 +10,7 @@ chrono.workspace = true
 futures.workspace = true
 log.workspace = true
 openssl.workspace = true
+parking_lot = "0.12.1"
 rustls-pemfile.workspace = true
 s2n-quic.workspace = true
 tokio.workspace = true
