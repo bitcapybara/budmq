@@ -4,6 +4,8 @@ use tokio::{
     time,
 };
 
+use crate::protocol::{self, ReturnCode};
+
 mod pool;
 mod reader;
 mod writer;
@@ -11,7 +13,13 @@ mod writer;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    WaitReplyTimeout,
+    ReceivedUnexpectedPacket,
+    Protocol(protocol::Error),
+    StreamClosed,
+    FromServer(ReturnCode),
+}
 
 impl std::error::Error for Error {}
 
@@ -45,6 +53,13 @@ impl From<time::error::Elapsed> for Error {
 impl From<connection::Error> for Error {
     fn from(_e: connection::Error) -> Self {
         // handle open stream error
+        todo!()
+    }
+}
+
+impl From<protocol::Error> for Error {
+    fn from(_e: protocol::Error) -> Self {
+        // framed.send()
         todo!()
     }
 }

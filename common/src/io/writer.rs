@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use futures::{SinkExt, StreamExt};
+use log::error;
 use s2n_quic::connection::Handle;
 use tokio::{
     select,
@@ -8,20 +10,23 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::Result;
-use crate::protocol::Packet;
+use super::{pool::Pool, Error, Result};
+use crate::protocol::{Packet, ReturnCode};
+
+const DEFAULT_WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 
 struct Request {
     packet: Packet,
     res_tx: oneshot::Sender<Result<()>>,
 }
 
-pub struct Writer {
+pub struct WriterBuilder {
     handle: Handle,
-    rx: mpsc::Receiver<Request>,
+    wait_reply_timeout: Option<Duration>,
+    ordered: bool,
 }
 
-impl Writer {
+impl WriterBuilder {
     /// create an unordered writer.
     ///
     /// maintain a QUIC steam pool internally, each time a stream
@@ -30,22 +35,58 @@ impl Writer {
     /// the order of message delivery is not guaranteed, but the
     /// concurrency performance and throughput are better (no
     /// head-of-queue blocking of a single stream)
-    pub fn new(handle: Handle) -> (Self, Sender) {
-        let (tx, rx) = mpsc::channel(1);
-        let sender = Sender::new(tx);
-        (Self { handle, rx }, sender)
+    fn new(handle: Handle) -> Self {
+        Self {
+            handle,
+            wait_reply_timeout: None,
+            ordered: false,
+        }
     }
 
+    /// TODO
     /// create an ordered writer.
     ///
     /// use a single QUIC stream internally
     ///
     /// the order of message delivery is guaranteed, but there
     /// will be stream head blocking problems
-    pub fn new_with_ordered(handle: Handle) -> (Self, Sender) {
+    pub fn ordered(mut self, ordered: bool) -> Self {
+        self.ordered = ordered;
+        self
+    }
+
+    pub fn wait_reply_timeout(mut self, timeout: Duration) -> Self {
+        self.wait_reply_timeout = Some(timeout);
+        self
+    }
+
+    pub fn build(self) -> (Writer, Sender) {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(tx);
-        (Self { handle, rx }, sender)
+        let pool = Pool::new(self.handle);
+        let wait_reply_timeout = self
+            .wait_reply_timeout
+            .unwrap_or(DEFAULT_WAIT_REPLY_TIMEOUT);
+        (
+            Writer {
+                pool,
+                rx,
+                wait_reply_timeout,
+            },
+            sender,
+        )
+    }
+}
+
+pub struct Writer {
+    pool: Pool,
+    rx: mpsc::Receiver<Request>,
+    wait_reply_timeout: Duration,
+}
+
+impl Writer {
+    pub fn builder(handle: Handle) -> WriterBuilder {
+        WriterBuilder::new(handle)
     }
 
     pub async fn run(mut self, token: CancellationToken) {
@@ -56,7 +97,9 @@ impl Writer {
                         token.cancel();
                         return
                     };
-                    self.send(packet).await;
+                    if let Err(e) = self.send(packet).await {
+                        error!("error occurs while sending packet: {e}")
+                    }
                 }
                 _ = token.cancelled() => {
                     return
@@ -65,8 +108,23 @@ impl Writer {
         }
     }
 
-    async fn send(&self, _request: Request) {
-        todo!()
+    async fn send(&mut self, request: Request) -> Result<()> {
+        let mut framed = self.pool.get().await?;
+        let Request { packet, res_tx } = request;
+        framed.send(packet).await?;
+        let duration = self.wait_reply_timeout;
+        tokio::spawn(async move {
+            let reply = match timeout(duration, framed.next()).await {
+                Ok(Some(Ok(Packet::Response(ReturnCode::Success)))) => Ok(()),
+                Ok(Some(Ok(Packet::Response(code)))) => Err(Error::FromServer(code)),
+                Ok(Some(Ok(_))) => Err(Error::ReceivedUnexpectedPacket),
+                Ok(Some(Err(e))) => Err(Error::Protocol(e)),
+                Ok(None) => Err(Error::StreamClosed),
+                Err(_) => Err(Error::WaitReplyTimeout),
+            };
+            res_tx.send(reply).ok()
+        });
+        Ok(())
     }
 }
 

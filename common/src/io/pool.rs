@@ -5,6 +5,9 @@ use std::{
 
 use parking_lot::Mutex;
 use s2n_quic::{connection::Handle, stream::BidirectionalStream};
+use tokio_util::codec::Framed;
+
+use crate::protocol::PacketCodec;
 
 use super::Result;
 
@@ -58,7 +61,7 @@ impl PoolInner {
 
 /// used in pool
 pub struct IdleStream {
-    stream: BidirectionalStream,
+    framed: Framed<BidirectionalStream, PacketCodec>,
     /// statistics
     used_count: u64,
 }
@@ -66,7 +69,7 @@ pub struct IdleStream {
 impl IdleStream {
     fn new(stream: BidirectionalStream) -> Self {
         Self {
-            stream,
+            framed: Framed::new(stream, PacketCodec),
             used_count: 0,
         }
     }
@@ -98,15 +101,15 @@ impl Drop for PooledStream {
 }
 
 impl Deref for PooledStream {
-    type Target = BidirectionalStream;
+    type Target = Framed<BidirectionalStream, PacketCodec>;
 
     fn deref(&self) -> &Self::Target {
-        &self.stream.as_ref().unwrap().stream
+        &self.stream.as_ref().unwrap().framed
     }
 }
 
 impl DerefMut for PooledStream {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.stream.as_mut().unwrap().stream
+        &mut self.stream.as_mut().unwrap().framed
     }
 }
