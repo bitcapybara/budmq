@@ -43,7 +43,8 @@ impl PoolInner {
             Some(stream) => Ok(PooledStream::new_idle(self.clone(), stream)),
             None => {
                 let stream = self.handle.open_bidirectional_stream().await?;
-                Ok(PooledStream::new(self.clone(), stream))
+                let framed = Framed::new(stream, PacketCodec);
+                Ok(PooledStream::new(self.clone(), framed))
             }
         }
     }
@@ -67,9 +68,9 @@ pub struct IdleStream {
 }
 
 impl IdleStream {
-    fn new(stream: BidirectionalStream) -> Self {
+    fn new(framed: Framed<BidirectionalStream, PacketCodec>) -> Self {
         Self {
-            framed: Framed::new(stream, PacketCodec),
+            framed,
             used_count: 0,
         }
     }
@@ -82,8 +83,8 @@ pub struct PooledStream {
 }
 
 impl PooledStream {
-    fn new(pool: PoolInner, stream: BidirectionalStream) -> Self {
-        Self::new_idle(pool, IdleStream::new(stream))
+    fn new(pool: PoolInner, framed: Framed<BidirectionalStream, PacketCodec>) -> Self {
+        Self::new_idle(pool, IdleStream::new(framed))
     }
 
     fn new_idle(pool: PoolInner, stream: IdleStream) -> Self {
