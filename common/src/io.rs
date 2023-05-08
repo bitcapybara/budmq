@@ -1,3 +1,4 @@
+use s2n_quic::connection;
 use tokio::{
     sync::{mpsc, oneshot},
     time,
@@ -37,6 +38,13 @@ impl From<oneshot::error::RecvError> for Error {
 impl From<time::error::Elapsed> for Error {
     fn from(_e: time::error::Elapsed) -> Self {
         // send and wait for reply timeout
+        todo!()
+    }
+}
+
+impl From<connection::Error> for Error {
+    fn from(_e: connection::Error) -> Self {
+        // handle open stream error
         todo!()
     }
 }
