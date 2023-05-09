@@ -3,7 +3,10 @@ use std::time::Duration;
 use s2n_quic::connection::Handle;
 use tokio::sync::oneshot;
 
-use self::{pool::Pool, single::Single};
+use self::{
+    pool::{Pool, PoolSender},
+    single::Single,
+};
 
 use super::Result;
 use crate::protocol::Packet;
@@ -17,7 +20,7 @@ pub struct Request {
 }
 
 pub enum StreamManager {
-    Pool(Pool),
+    Pool(PoolSender),
     Single(Single),
 }
 
@@ -26,13 +29,15 @@ impl StreamManager {
         if ordered {
             Ok(Self::Single(Single::new(handle).await?))
         } else {
-            Ok(Self::Pool(Pool::new(handle)))
+            let (pool, sender) = Pool::new(handle);
+            tokio::spawn(pool.run());
+            Ok(Self::Pool(sender))
         }
     }
 
     pub async fn send_timeout(&mut self, duration: Duration, request: Request) -> Result<()> {
         match self {
-            StreamManager::Pool(pool) => pool.send_timeout(duration, request).await,
+            StreamManager::Pool(sender) => sender.send(request).await,
             StreamManager::Single(single) => single.send_timeout(duration, request).await,
         }
     }
