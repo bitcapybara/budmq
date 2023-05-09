@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::connection::Handle;
 use tokio::{
@@ -11,17 +10,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    pool::{Pool, PooledStream},
-    Error, Result,
+    stream::{Request, StreamManager},
+    Result,
 };
-use crate::protocol::{Packet, ReturnCode};
+use crate::protocol::Packet;
 
 const DEFAULT_WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
-
-struct Request {
-    packet: Packet,
-    res_tx: oneshot::Sender<Result<()>>,
-}
 
 pub struct WriterBuilder {
     handle: Handle,
@@ -63,27 +57,27 @@ impl WriterBuilder {
         self
     }
 
-    pub fn build(self) -> (Writer, Sender) {
+    pub async fn build(self) -> Result<(Writer, Sender)> {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(tx);
-        let pool = Pool::new(self.handle);
+        let stream_manager = StreamManager::new(self.handle, self.ordered).await?;
         let wait_reply_timeout = self
             .wait_reply_timeout
             .unwrap_or(DEFAULT_WAIT_REPLY_TIMEOUT);
-        (
+        Ok((
             Writer {
-                pool,
+                stream_manager,
                 ordered: self.ordered,
                 rx,
                 wait_reply_timeout,
             },
             sender,
-        )
+        ))
     }
 }
 
 pub struct Writer {
-    pool: Pool,
+    stream_manager: StreamManager,
     ordered: bool,
     rx: mpsc::Receiver<Request>,
     wait_reply_timeout: Duration,
@@ -98,15 +92,11 @@ impl Writer {
         loop {
             select! {
                 res = self.rx.recv() => {
-                    let Some(packet) = res else {
+                    let Some(request) = res else {
                         token.cancel();
                         return
                     };
-                    if let Err(e) = if self.ordered {
-                        self.send(packet).await
-                    } else {
-                        self.send_async(packet).await
-                    } {
+                    if let Err(e) = self.stream_manager.send_timeout(self.wait_reply_timeout, request).await {
                         error!("error occurs while sending packet: {e}")
                     }
                 }
@@ -115,37 +105,6 @@ impl Writer {
                 }
             }
         }
-    }
-
-    async fn send_async(&mut self, request: Request) -> Result<()> {
-        let framed = self.pool.get().await?;
-        let duration = self.wait_reply_timeout;
-        tokio::spawn(Self::send_and_wait(framed, duration, request));
-        Ok(())
-    }
-
-    async fn send(&mut self, request: Request) -> Result<()> {
-        let framed = self.pool.get().await?;
-        let duration = self.wait_reply_timeout;
-        Self::send_and_wait(framed, duration, request).await;
-        Ok(())
-    }
-
-    async fn send_and_wait(mut framed: PooledStream, duration: Duration, request: Request) {
-        let Request { packet, res_tx } = request;
-        if let Err(e) = framed.send(packet).await {
-            res_tx.send(Err(e.into())).ok();
-            return;
-        }
-        let reply = match timeout(duration, framed.next()).await {
-            Ok(Some(Ok(Packet::Response(ReturnCode::Success)))) => Ok(()),
-            Ok(Some(Ok(Packet::Response(code)))) => Err(Error::FromServer(code)),
-            Ok(Some(Ok(_))) => Err(Error::ReceivedUnexpectedPacket),
-            Ok(Some(Err(e))) => Err(Error::Protocol(e)),
-            Ok(None) => Err(Error::StreamClosed),
-            Err(_) => Err(Error::WaitReplyTimeout),
-        };
-        res_tx.send(reply).ok();
     }
 }
 

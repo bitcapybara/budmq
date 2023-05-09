@@ -1,15 +1,21 @@
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
+    time::Duration,
 };
 
+use futures::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use s2n_quic::{connection::Handle, stream::BidirectionalStream};
+use tokio::time::timeout;
 use tokio_util::codec::Framed;
 
-use crate::protocol::PacketCodec;
+use crate::{
+    io::{Error, Result},
+    protocol::{Packet, PacketCodec, ReturnCode},
+};
 
-use super::Result;
+use super::Request;
 
 #[derive(Clone)]
 pub struct Pool(PoolInner);
@@ -19,8 +25,27 @@ impl Pool {
         Self(PoolInner::new(handle))
     }
 
-    pub async fn get(&mut self) -> Result<PooledStream> {
-        self.0.get().await
+    pub async fn send_timeout(&mut self, duration: Duration, request: Request) -> Result<()> {
+        let framed = self.0.get().await?;
+        tokio::spawn(Self::send_and_wait(framed, duration, request));
+        Ok(())
+    }
+
+    async fn send_and_wait(mut framed: PooledStream, duration: Duration, request: Request) {
+        let Request { packet, res_tx } = request;
+        if let Err(e) = framed.send(packet).await {
+            res_tx.send(Err(e.into())).ok();
+            return;
+        }
+        let reply = match timeout(duration, framed.next()).await {
+            Ok(Some(Ok(Packet::Response(ReturnCode::Success)))) => Ok(()),
+            Ok(Some(Ok(Packet::Response(code)))) => Err(Error::FromServer(code)),
+            Ok(Some(Ok(_))) => Err(Error::ReceivedUnexpectedPacket),
+            Ok(Some(Err(e))) => Err(Error::Protocol(e)),
+            Ok(None) => Err(Error::StreamClosed),
+            Err(_) => Err(Error::WaitReplyTimeout),
+        };
+        res_tx.send(reply).ok();
     }
 }
 
