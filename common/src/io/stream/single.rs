@@ -1,69 +1,102 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use futures::{SinkExt, StreamExt};
-use s2n_quic::{connection::Handle, stream::BidirectionalStream};
-use tokio::{sync::Mutex, time::timeout};
-use tokio_util::codec::Framed;
+use futures::SinkExt;
+use log::error;
+use parking_lot::Mutex;
+use s2n_quic::connection::Handle;
+use tokio::sync::mpsc;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::{
-    io::{Error, Result},
-    protocol::{Packet, PacketCodec, ReturnCode},
+use crate::{io::Result, protocol::PacketCodec};
+
+use super::{
+    helper::start_recv, IdleStream, PoolRecycle, PoolSender, PooledStream, Request, ResMap,
 };
 
-use super::Request;
-
-pub struct Single(SingleInner);
+pub struct Single {
+    inner: SingleInner,
+    request_rx: mpsc::Receiver<Request>,
+}
 
 impl Single {
-    pub async fn new(handle: Handle) -> Result<Self> {
-        Ok(Self(SingleInner::new(handle).await?))
+    pub fn new(handle: Handle) -> (Self, PoolSender) {
+        let (request_tx, request_rx) = mpsc::channel(1);
+        (
+            Self {
+                inner: SingleInner::new(handle),
+                request_rx,
+            },
+            PoolSender(request_tx),
+        )
     }
 
-    pub async fn send_timeout(&mut self, duration: Duration, request: Request) -> Result<()> {
-        let framed = self.0.get();
-        tokio::spawn(Self::send_and_wait(framed, duration, request));
-        Ok(())
-    }
-
-    async fn send_and_wait(
-        framed: Arc<Mutex<Framed<BidirectionalStream, PacketCodec>>>,
-        duration: Duration,
-        request: Request,
-    ) {
-        let Request { packet, res_tx } = request;
-        let mut framed = framed.lock().await;
-        if let Err(e) = framed.send(packet).await {
-            res_tx.send(Err(e.into())).ok();
-            return;
-        }
-        let reply = match timeout(duration, framed.next()).await {
-            Ok(Some(Ok(Packet::Response(ReturnCode::Success)))) => Ok(()),
-            Ok(Some(Ok(Packet::Response(code)))) => Err(Error::FromServer(code)),
-            Ok(Some(Ok(_))) => Err(Error::ReceivedUnexpectedPacket),
-            Ok(Some(Err(e))) => Err(Error::Protocol(e)),
-            Ok(None) => Err(Error::StreamClosed),
-            Err(_) => Err(Error::WaitReplyTimeout),
-        };
-        res_tx.send(reply).ok();
+    pub async fn run(self) {
+        self.inner.run(self.request_rx).await
     }
 }
 
+#[derive(Clone)]
 pub struct SingleInner {
     handle: Handle,
-    stream: Arc<Mutex<Framed<BidirectionalStream, PacketCodec>>>,
+    stream: Arc<Mutex<Option<IdleStream>>>,
+    res_map: ResMap,
 }
 
 impl SingleInner {
-    async fn new(mut handle: Handle) -> Result<Self> {
-        let stream = handle.open_bidirectional_stream().await?;
-        let framed = Framed::new(stream, PacketCodec);
-        Ok(Self {
+    fn new(handle: Handle) -> Self {
+        Self {
             handle,
-            stream: Arc::new(Mutex::new(framed)),
-        })
+            stream: Arc::new(Mutex::new(None)),
+            res_map: ResMap::default(),
+        }
     }
 
-    fn get(&self) -> Arc<Mutex<Framed<BidirectionalStream, PacketCodec>>> {
-        self.stream.clone()
+    async fn run(mut self, mut request_rx: mpsc::Receiver<Request>) {
+        while let Some(request) = request_rx.recv().await {
+            let Request { packet, res_tx } = request;
+            // TODO get id from packet
+            let id = 0;
+            self.res_map.add_res_tx(id, res_tx).await;
+            let mut framed = match self.get().await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("pool get stream error: {e}");
+                    continue;
+                }
+            };
+            if let Err(e) = framed.send(packet).await {
+                if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
+                    res_tx.send(Err(e.into())).ok();
+                }
+            }
+        }
+    }
+
+    async fn get(&mut self) -> Result<PooledStream<SingleInner>> {
+        match self.get_inner() {
+            Some(stream) => Ok(PooledStream::new_idle(self.clone(), stream)),
+            None => {
+                let stream = self.handle.open_bidirectional_stream().await?;
+                let (recv_stream, send_stream) = stream.split();
+                tokio::spawn(start_recv(
+                    self.res_map.clone(),
+                    FramedRead::new(recv_stream, PacketCodec),
+                ));
+                let framed = FramedWrite::new(send_stream, PacketCodec);
+                Ok(PooledStream::new(self.clone(), framed))
+            }
+        }
+    }
+
+    fn get_inner(&self) -> Option<IdleStream> {
+        let mut stream = self.stream.lock();
+        stream.take()
+    }
+}
+
+impl PoolRecycle for SingleInner {
+    fn put(&self, idle_stream: super::IdleStream) {
+        let mut stream = self.stream.lock();
+        stream.replace(idle_stream);
     }
 }

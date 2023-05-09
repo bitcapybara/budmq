@@ -10,16 +10,13 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{Request, StreamManager},
+    stream::{pool::Pool, single::Single, PoolSender, Request},
     Result,
 };
 use crate::protocol::Packet;
 
-const DEFAULT_WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
-
 pub struct WriterBuilder {
     handle: Handle,
-    wait_reply_timeout: Option<Duration>,
     ordered: bool,
 }
 
@@ -35,7 +32,6 @@ impl WriterBuilder {
     fn new(handle: Handle) -> Self {
         Self {
             handle,
-            wait_reply_timeout: None,
             ordered: false,
         }
     }
@@ -52,24 +48,23 @@ impl WriterBuilder {
         self
     }
 
-    pub fn wait_reply_timeout(mut self, timeout: Duration) -> Self {
-        self.wait_reply_timeout = Some(timeout);
-        self
-    }
-
     pub async fn build(self) -> Result<(Writer, Sender)> {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(tx);
-        let stream_manager = StreamManager::new(self.handle, self.ordered).await?;
-        let wait_reply_timeout = self
-            .wait_reply_timeout
-            .unwrap_or(DEFAULT_WAIT_REPLY_TIMEOUT);
+        let pool_sender = if self.ordered {
+            let (single, sender) = Single::new(self.handle);
+            tokio::spawn(single.run());
+            sender
+        } else {
+            let (single, sender) = Pool::new(self.handle);
+            tokio::spawn(single.run());
+            sender
+        };
         Ok((
             Writer {
-                stream_manager,
+                pool_sender,
                 ordered: self.ordered,
                 rx,
-                wait_reply_timeout,
             },
             sender,
         ))
@@ -77,10 +72,9 @@ impl WriterBuilder {
 }
 
 pub struct Writer {
-    stream_manager: StreamManager,
+    pool_sender: PoolSender,
     ordered: bool,
     rx: mpsc::Receiver<Request>,
-    wait_reply_timeout: Duration,
 }
 
 impl Writer {
@@ -96,7 +90,7 @@ impl Writer {
                         token.cancel();
                         return
                     };
-                    if let Err(e) = self.stream_manager.send_timeout(self.wait_reply_timeout, request).await {
+                    if let Err(e) = self.pool_sender.send(request).await {
                         error!("error occurs while sending packet: {e}")
                     }
                 }
