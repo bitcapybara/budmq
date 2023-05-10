@@ -232,6 +232,22 @@ impl Packet {
             Packet::Disconnect => PacketType::Disconnect,
         }
     }
+
+    pub fn request_id(&self) -> Option<u64> {
+        match self {
+            Packet::Connect(p) => Some(p.request_id),
+            Packet::Subscribe(p) => Some(p.request_id),
+            Packet::Unsubscribe(p) => Some(p.request_id),
+            Packet::Publish(p) => Some(p.request_id),
+            Packet::Send(p) => Some(p.request_id),
+            Packet::ConsumeAck(p) => Some(p.request_id),
+            Packet::ControlFlow(p) => Some(p.request_id),
+            Packet::Response(p) => Some(p.request_id),
+            Packet::Ping => None,
+            Packet::Pong => None,
+            Packet::Disconnect => None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
