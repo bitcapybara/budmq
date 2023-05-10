@@ -1,3 +1,15 @@
+//! Writer:
+//! 1. get() a stream sender from pool
+//! 2. send packet, recycle to pool
+//! 3. wait for response on this stream receiver
+//!
+//! Reader:
+//! 1. accept() a stream
+//! 2. recv a packet from stream
+//! 3. send packet to observer
+//! 4. wait for response (not for PING/DISCONNECT packet)
+//! 5. send response to this stream
+
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
@@ -15,6 +27,7 @@ mod helper;
 pub mod pool;
 pub mod single;
 
+///
 pub struct Request {
     pub packet: Packet,
     pub res_tx: oneshot::Sender<Result<()>>,

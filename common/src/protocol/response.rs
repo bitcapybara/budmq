@@ -2,7 +2,31 @@ use std::fmt::Display;
 
 use bytes::BufMut;
 
-use super::{get_u8, Codec, Error, Header, PacketType, Result};
+use super::{get_u64, get_u8, Codec, Error, Header, PacketType, Result};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub request_id: u64,
+    pub code: ReturnCode,
+}
+
+impl Codec for Response {
+    fn decode(mut buf: bytes::Bytes) -> Result<Self> {
+        let request_id = get_u64(&mut buf)?;
+        let code = get_u8(&mut buf)?.try_into()?;
+        Ok(Self { request_id, code })
+    }
+
+    fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
+        buf.put_u64(self.request_id);
+        buf.put_u8(self.code as u8);
+        Ok(())
+    }
+
+    fn header(&self) -> Header {
+        Header::new(PacketType::Response, 8 + 1)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
@@ -59,20 +83,5 @@ impl TryFrom<u8> for ReturnCode {
             11 => Self::UnexpectedPacket,
             _ => return Err(Error::UnsupportedReturnCode),
         })
-    }
-}
-
-impl Codec for ReturnCode {
-    fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        get_u8(&mut buf)?.try_into()
-    }
-
-    fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
-        buf.put_u8(*self as u8);
-        Ok(())
-    }
-
-    fn header(&self) -> Header {
-        Header::new(PacketType::Response, 1)
     }
 }

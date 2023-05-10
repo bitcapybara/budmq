@@ -1,4 +1,7 @@
-use bud_common::protocol::{Packet, Publish, ReturnCode};
+use bud_common::{
+    id::next_id,
+    protocol::{Packet, Publish, ReturnCode},
+};
 use bytes::Bytes;
 use chrono::Local;
 use tokio::sync::{mpsc, oneshot};
@@ -76,6 +79,7 @@ impl Producer {
                 topic: self.topic.clone(),
                 sequence_id: self.sequence_id,
                 payload: Bytes::copy_from_slice(data),
+                request_id: next_id(),
             }),
             res_tx,
         })?;

@@ -7,6 +7,7 @@ use std::{
 };
 
 use bud_common::{
+    id::next_id,
     protocol::{ConsumeAck, ControlFlow, Packet, ReturnCode, Subscribe},
     subscription::{InitialPostion, SubType},
 };
@@ -153,6 +154,7 @@ impl Consumer {
                 sub_type: sub.sub_type,
                 consumer_id: id,
                 initial_position: sub.initial_postion,
+                request_id: next_id(),
             }),
             res_tx: sub_res_tx,
         })?;
@@ -166,6 +168,7 @@ impl Consumer {
             packet: Packet::ControlFlow(ControlFlow {
                 consumer_id: id,
                 permits: permits.load(Ordering::SeqCst),
+                request_id: next_id(),
             }),
             res_tx: permits_res_tx,
         })?;
@@ -195,6 +198,7 @@ impl Consumer {
             packet: Packet::ConsumeAck(ConsumeAck {
                 consumer_id: self.id,
                 message_id,
+                request_id: next_id(),
             }),
             res_tx,
         })?;

@@ -9,6 +9,7 @@ use std::{
 
 use bud_common::{
     helper::wait,
+    id::next_id,
     mtls::MtlsProvider,
     protocol::{self, Connect, ControlFlow, Packet, PacketCodec, ReturnCode, Subscribe},
 };
@@ -235,13 +236,19 @@ impl Connector {
     ) -> Result<()> {
         // send connect packet
         trace!("connector::handshake: send CONNECT packet to server");
-        if let Err(e) = framed.send(Packet::Connect(Connect { keepalive })).await {
+        if let Err(e) = framed
+            .send(Packet::Connect(Connect {
+                keepalive,
+                request_id: next_id(),
+            }))
+            .await
+        {
             error!("client send handshake packet error: {e}");
             return Err(e)?;
         }
         trace!("connector::handshake: waiting for CONNECT response");
-        let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
-            Ok(Ok(Some(Packet::Response(code)))) => code,
+        let resp = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
+            Ok(Ok(Some(Packet::Response(resp)))) => resp,
             Ok(Ok(Some(p))) => {
                 error!(
                     "client handshake: expected Packet::Response, found {}",
@@ -262,9 +269,9 @@ impl Connector {
                 return Err(Error::Internal("handshake timeout".to_string()));
             }
         };
-        if !matches!(code, ReturnCode::Success) {
-            error!("client handshake: receive code from server: {code}");
-            return Err(Error::FromServer(code));
+        if !matches!(resp.code, ReturnCode::Success) {
+            error!("client handshake: receive code from server: {}", resp.code);
+            return Err(Error::FromServer(resp.code));
         }
 
         Ok(())
@@ -279,6 +286,7 @@ impl Connector {
         trace!("connector::subscribe_one: send SUBSCRIBE message");
         self.server_tx.send(OutgoingMessage {
             packet: Packet::Subscribe(Subscribe {
+                request_id: next_id(),
                 consumer_id,
                 topic: sub.topic.clone(),
                 sub_name: sub.sub_name.clone(),
@@ -297,6 +305,7 @@ impl Connector {
         let permits = session.sender.permits.load(Ordering::SeqCst);
         self.server_tx.send(OutgoingMessage {
             packet: Packet::ControlFlow(ControlFlow {
+                request_id: next_id(),
                 consumer_id,
                 permits,
             }),

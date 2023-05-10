@@ -64,6 +64,7 @@ impl PoolInner {
                     continue;
                 }
             };
+            // framed will recycled after send packet
             if let Err(e) = framed.send(packet).await {
                 if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
                     res_tx.send(Err(e.into())).ok();

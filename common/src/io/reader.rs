@@ -61,6 +61,7 @@ impl Reader {
                     if let Err(e) = tx.send(packet).await {
                         error!("io::reader send packet error: {e}");
                     }
+                    // TODO send response to framed
                 }
                 _ = token.cancelled() => {
                     return
