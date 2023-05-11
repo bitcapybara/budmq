@@ -17,7 +17,7 @@ pub async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, P
                 if matches!(code, ReturnCode::Success) {
                     (request_id, Ok(()))
                 } else {
-                    (request_id, Err(Error::FromServer(code)))
+                    (request_id, Err(Error::FromPeer(code)))
                 }
             }
             Ok(_) => {

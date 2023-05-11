@@ -14,50 +14,55 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    WaitReplyTimeout,
-    StreamClosed,
-    FromServer(ReturnCode),
+    FromPeer(ReturnCode),
+    Send(String),
+    ResDropped(oneshot::error::RecvError),
+    Timeout,
+    Connection(connection::Error),
+    Protocol(protocol::Error),
 }
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::FromPeer(e) => write!(f, "error from peer: {e}"),
+            Error::Send(e) => write!(f, "message send error: {e}"),
+            Error::ResDropped(e) => write!(f, "res tx dropped without send: {e}"),
+            Error::Timeout => write!(f, "wait for message timeout"),
+            Error::Connection(e) => write!(f, "connection error: {e}"),
+            Error::Protocol(e) => write!(f, "protocol error: {e}"),
+        }
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(_e: mpsc::error::SendError<T>) -> Self {
-        // sender send message while writer already dropped
-        todo!()
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        Self::Send(e.to_string())
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(_e: oneshot::error::RecvError) -> Self {
-        // res_tx dropped without send
-        todo!()
+    fn from(e: oneshot::error::RecvError) -> Self {
+        Self::ResDropped(e)
     }
 }
 
 impl From<time::error::Elapsed> for Error {
-    fn from(_e: time::error::Elapsed) -> Self {
-        // send and wait for reply timeout
-        todo!()
+    fn from(_: time::error::Elapsed) -> Self {
+        Self::Timeout
     }
 }
 
 impl From<connection::Error> for Error {
-    fn from(_e: connection::Error) -> Self {
-        // handle open stream error
-        todo!()
+    fn from(e: connection::Error) -> Self {
+        Self::Connection(e)
     }
 }
 
 impl From<protocol::Error> for Error {
-    fn from(_e: protocol::Error) -> Self {
-        // framed.send()
-        todo!()
+    fn from(e: protocol::Error) -> Self {
+        Self::Protocol(e)
     }
 }
