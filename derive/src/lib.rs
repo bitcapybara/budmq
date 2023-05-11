@@ -24,6 +24,12 @@ pub fn codec(input: TokenStream) -> TokenStream {
     let field_read_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
         match get_field_type(field).as_str() {
+            "u16" => quote! {
+                let #field_ident = super::get_u16(&mut buf)?;
+            },
+            "u32" => quote! {
+                let #field_ident = super::get_u32(&mut buf)?;
+            },
             "u64" => quote! {
                 let #field_ident = super::get_u64(&mut buf)?;
             },
@@ -33,12 +39,21 @@ pub fn codec(input: TokenStream) -> TokenStream {
             "Bytes" => quote! {
                 let #field_ident = super::read_bytes(&mut buf)?;
             },
+            "ReturnCode" | "SubType" | "InitialPostion" => quote! {
+                let #field_ident = super::get_u8(&mut buf)?.try_into()?;
+            },
             _ => panic!("unsupported field types"),
         }
     });
     let field_put_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
         match get_field_type(field).as_str() {
+            "u16" => quote! {
+                buf.put_u16(self.#field_ident);
+            },
+            "u32" => quote! {
+                buf.put_u32(self.#field_ident);
+            },
             "u64" => quote! {
                 buf.put_u64(self.#field_ident);
             },
@@ -48,20 +63,29 @@ pub fn codec(input: TokenStream) -> TokenStream {
             "Bytes" => quote! {
                 super::write_bytes(buf, &self.#field_ident);
             },
+            "ReturnCode" | "SubType" | "InitialPostion" => quote! {
+                buf.put_u8(self.#field_ident as u8);
+            },
             _ => panic!("unsupported field types"),
         }
     });
     let field_sizes = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
         match get_field_type(field).as_str() {
+            "u16" => quote! {
+                2
+            },
+            "u32" => quote! {
+                4
+            },
             "u64" => quote! {
                 8
             },
             "String" | "Bytes" => quote! {
                 2 + self.#field_ident.len()
             },
-            "u16" => quote! {
-                2
+            "ReturnCode" | "SubType" | "InitialPostion" => quote! {
+                1
             },
             _ => panic!("unsupported field types"),
         }

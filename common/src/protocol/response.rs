@@ -1,31 +1,7 @@
-use std::fmt::Display;
-
-use bytes::BufMut;
-
-use super::{get_u64, get_u8, Codec, Error, Header, PacketType, Result};
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, codec_derive::Codec)]
 pub struct Response {
     pub request_id: u64,
     pub code: ReturnCode,
-}
-
-impl Codec for Response {
-    fn decode(mut buf: bytes::Bytes) -> Result<Self> {
-        let request_id = get_u64(&mut buf)?;
-        let code = get_u8(&mut buf)?.try_into()?;
-        Ok(Self { request_id, code })
-    }
-
-    fn encode(&self, buf: &mut bytes::BytesMut) -> Result<()> {
-        buf.put_u64(self.request_id);
-        buf.put_u8(self.code as u8);
-        Ok(())
-    }
-
-    fn header(&self) -> Header {
-        Header::new(PacketType::Response, 8 + 1)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,7 +21,7 @@ pub enum ReturnCode {
     UnexpectedPacket = 11,
 }
 
-impl Display for ReturnCode {
+impl std::fmt::Display for ReturnCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ReturnCode::Success => write!(f, "Success"),
@@ -65,9 +41,9 @@ impl Display for ReturnCode {
 }
 
 impl TryFrom<u8> for ReturnCode {
-    type Error = Error;
+    type Error = super::Error;
 
-    fn try_from(value: u8) -> Result<Self> {
+    fn try_from(value: u8) -> super::Result<Self> {
         Ok(match value {
             0 => Self::Success,
             1 => Self::AlreadyConnected,
@@ -81,7 +57,7 @@ impl TryFrom<u8> for ReturnCode {
             9 => Self::ConsumeMessageDuplicated,
             10 => Self::InternalError,
             11 => Self::UnexpectedPacket,
-            _ => return Err(Error::UnsupportedReturnCode),
+            _ => return Err(super::Error::UnsupportedReturnCode),
         })
     }
 }
