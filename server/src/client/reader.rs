@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use bud_common::protocol::{Packet, PacketCodec, ReturnCode};
+use bud_common::{
+    id::next_id,
+    protocol::{Packet, PacketCodec, Response, ReturnCode},
+};
 use futures::{SinkExt, StreamExt};
 use log::{error, trace, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
@@ -77,11 +80,17 @@ impl Reader {
         trace!("client::reader: waiting for framed packet");
         match framed.next().await {
             Some(Ok(packet)) => match packet {
-                Packet::Connect(_) => {
+                Packet::Connect(c) => {
                     warn!("client::reader: receive a CONNECT packet after handshake");
                     // Do not allow duplicate connections
                     let code = ReturnCode::AlreadyConnected;
-                    if let Err(e) = framed.send(Packet::Response(code)).await {
+                    if let Err(e) = framed
+                        .send(Packet::Response(Response {
+                            request_id: c.request_id,
+                            code,
+                        }))
+                        .await
+                    {
                         error!("send packet to client error: {e}");
                     }
                 }
@@ -143,7 +152,13 @@ impl Reader {
             match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
                 Ok(Ok(code)) => {
                     trace!("client::reader[spawn]: response from broker: {code}");
-                    if let Err(e) = framed.send(Packet::Response(code)).await {
+                    if let Err(e) = framed
+                        .send(Packet::Response(Response {
+                            request_id: next_id(),
+                            code,
+                        }))
+                        .await
+                    {
                         error!("send reply to client {local} error: {e}",)
                     }
                 }

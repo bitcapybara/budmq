@@ -115,8 +115,8 @@ impl Writer {
         }
         // wait for ack
         trace!("connector::writer::run: waiting for server response");
-        let code = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
-            Ok(Ok(Some(Packet::Response(code)))) => code,
+        let resp = match timeout(WAIT_REPLY_TIMEOUT, framed.try_next()).await {
+            Ok(Ok(Some(Packet::Response(resp)))) => resp,
             Ok(Ok(Some(p))) => {
                 error!(
                     "client writer: expected Packet::ReturnCode, found {:?}",
@@ -137,8 +137,11 @@ impl Writer {
                 return;
             }
         };
-        trace!("connector::writer::run: receive reponse from server: {code}");
-        if msg.res_tx.send(Ok(code)).is_err() {
+        trace!(
+            "connector::writer::run: receive reponse from server: {}",
+            resp.code
+        );
+        if msg.res_tx.send(Ok(resp.code)).is_err() {
             error!("client writer wait channel dropped");
         }
     }

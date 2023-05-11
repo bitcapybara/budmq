@@ -83,10 +83,10 @@ impl Writer {
             }
             trace!("client::writer[spawn]: waiting for response from client");
             match timeout(WAIT_REPLY_TIMEOUT, framed.next()).await {
-                Ok(Some(Ok(Packet::Response(code)))) => {
-                    let res = match code {
+                Ok(Some(Ok(Packet::Response(resp)))) => {
+                    let res = match resp.code {
                         ReturnCode::Success => Ok(()),
-                        _ => Err(Error::Client(code)),
+                        _ => Err(Error::Client(resp.code)),
                     };
                     if let Err(e) = res_tx.send(res) {
                         error!("send SEND reply to broker error: {e:?}")

@@ -5,7 +5,7 @@ use std::{fmt::Display, time::Duration};
 
 use bud_common::{
     helper::wait,
-    protocol::{self, Packet, PacketCodec, ReturnCode},
+    protocol::{self, Packet, PacketCodec, Response, ReturnCode},
 };
 use futures::{future, SinkExt, StreamExt};
 use log::trace;
@@ -138,7 +138,12 @@ impl Client {
                 trace!("client::handshake: waiting for response from broker");
                 let code = res_rx.await?;
                 trace!("client::handshake: send response to client");
-                framed.send(Packet::Response(code)).await?;
+                framed
+                    .send(Packet::Response(Response {
+                        request_id: connect.request_id,
+                        code,
+                    }))
+                    .await?;
                 if !matches!(code, ReturnCode::Success) {
                     return Err(Error::Server(code));
                 }

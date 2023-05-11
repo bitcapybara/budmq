@@ -10,7 +10,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{pool::Pool, single::Single, PoolSender, Request},
+    stream::{pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
     Result,
 };
 use crate::protocol::Packet;
@@ -52,11 +52,11 @@ impl WriterBuilder {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(tx);
         let pool_sender = if self.ordered {
-            let (single, sender) = Single::new(self.handle);
+            let (single, sender) = StreamPool::<SingleInner>::new(self.handle);
             tokio::spawn(single.run());
             sender
         } else {
-            let (single, sender) = Pool::new(self.handle);
+            let (single, sender) = StreamPool::<PoolInner>::new(self.handle);
             tokio::spawn(single.run());
             sender
         };

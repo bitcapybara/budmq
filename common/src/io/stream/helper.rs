@@ -1,27 +1,36 @@
 use futures::StreamExt;
+use log::error;
 use s2n_quic::stream::ReceiveStream;
 use tokio_util::codec::FramedRead;
 
 use crate::{
     io::Error,
-    protocol::{Packet, PacketCodec, ReturnCode},
+    protocol::{Packet, PacketCodec, Response, ReturnCode},
 };
 
 use super::ResMap;
 
 pub async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, PacketCodec>) {
     while let Some(packet_res) = framed.next().await {
-        // TODO get id from packet
-        let id = 0;
-        let Some(res_tx) = res_map.remove_res_tx(id).await else {
+        let (id, resp) = match packet_res {
+            Ok(Packet::Response(Response { request_id, code })) => {
+                if matches!(code, ReturnCode::Success) {
+                    (request_id, Ok(()))
+                } else {
+                    (request_id, Err(Error::FromServer(code)))
+                }
+            }
+            Ok(_) => {
+                error!("io::writer received unexpected packet, execpted RESPONSE");
                 continue;
-            };
-        let resp = match packet_res {
-            Ok(Packet::Response(ReturnCode::Success)) => Ok(()),
-            Ok(Packet::Response(code)) => Err(Error::FromServer(code)),
-            Ok(_) => Err(Error::ReceivedUnexpectedPacket),
-            Err(e) => Err(Error::Protocol(e)),
+            }
+            Err(e) => {
+                error!("io::writer decode protocol error: {e}");
+                continue;
+            }
         };
-        res_tx.send(resp).ok();
+        if let Some(res_tx) = res_map.remove_res_tx(id).await {
+            res_tx.send(resp).ok();
+        }
     }
 }

@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use bud_common::{
     helper::wait,
+    id::next_id,
     protocol::{self, Packet, PacketType, ReturnCode, Send, Unsubscribe},
     storage::Storage,
 };
@@ -219,6 +220,7 @@ impl<S: Storage> Broker<S> {
                 message_id: event.message_id,
                 consumer_id: event.consumer_id,
                 payload: message.payload,
+                request_id: next_id(),
             }),
             res_tx,
         })?;
@@ -432,7 +434,10 @@ impl<S: Storage> Broker<S> {
                 trace!("broker::process_packets: add consumer to session");
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
             }
-            Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
+            Packet::Unsubscribe(Unsubscribe {
+                consumer_id,
+                request_id: _,
+            }) => {
                 trace!("broker::process_packets: receive UNSUBSCRIBE packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {

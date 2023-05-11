@@ -1,12 +1,28 @@
+//! Writer:
+//! 1. get() a stream sender from pool
+//! 2. send packet, recycle to pool
+//! 3. wait for response on this stream receiver
+//!
+//! Reader:
+//! 1. accept() a stream
+//! 2. recv a packet from stream
+//! 3. send packet to observer
+//! 4. wait for response (not for PING/DISCONNECT packet)
+//! 5. send response to this stream
+
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
 
-use s2n_quic::stream::SendStream;
+use futures::SinkExt;
+use log::error;
+use s2n_quic::{connection::Handle, stream::SendStream};
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::codec::FramedWrite;
+use tokio_util::codec::{FramedRead, FramedWrite};
+
+use self::helper::start_recv;
 
 use super::Result;
 use crate::protocol::{Packet, PacketCodec};
@@ -15,6 +31,7 @@ mod helper;
 pub mod pool;
 pub mod single;
 
+///
 pub struct Request {
     pub packet: Packet,
     pub res_tx: oneshot::Sender<Result<()>>,
@@ -50,8 +67,76 @@ impl Default for ResMap {
     }
 }
 
-pub trait PoolRecycle {
+pub trait PoolRecycle: Default + Clone {
+    fn get(&self) -> Option<IdleStream>;
     fn put(&self, stream: IdleStream);
+}
+
+pub struct StreamPool<T: PoolRecycle> {
+    handle: Handle,
+    res_map: ResMap,
+    inner: T,
+    request_rx: mpsc::Receiver<Request>,
+}
+
+impl<T: PoolRecycle> StreamPool<T> {
+    pub fn new(handle: Handle) -> (Self, PoolSender) {
+        let (request_tx, request_rx) = mpsc::channel(1);
+        (
+            Self {
+                inner: T::default(),
+                request_rx,
+                handle,
+                res_map: ResMap::default(),
+            },
+            PoolSender(request_tx),
+        )
+    }
+
+    pub async fn run(mut self) {
+        while let Some(request) = self.request_rx.recv().await {
+            // framed will recycled after send packet
+            let mut framed = match self.create().await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("pool get stream error: {e}");
+                    continue;
+                }
+            };
+            let Request { packet, res_tx } = request;
+            match packet.request_id() {
+                Some(id) => {
+                    self.res_map.add_res_tx(id, res_tx).await;
+                    if let Err(e) = framed.send(packet).await {
+                        if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
+                            res_tx.send(Err(e.into())).ok();
+                        }
+                    }
+                }
+                None => {
+                    if let Err(e) = framed.send(packet).await {
+                        error!("io::writer send packet error: {e}")
+                    }
+                }
+            }
+        }
+    }
+
+    async fn create(&mut self) -> Result<PooledStream<T>> {
+        match self.inner.get() {
+            Some(stream) => Ok(PooledStream::new_idle(self.inner.clone(), stream)),
+            None => {
+                let stream = self.handle.open_bidirectional_stream().await?;
+                let (recv_stream, send_stream) = stream.split();
+                let framed = FramedWrite::new(send_stream, PacketCodec);
+                tokio::spawn(start_recv(
+                    self.res_map.clone(),
+                    FramedRead::new(recv_stream, PacketCodec),
+                ));
+                Ok(PooledStream::new(self.inner.clone(), framed))
+            }
+        }
+    }
 }
 
 /// used in pool

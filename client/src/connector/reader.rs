@@ -3,7 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use bud_common::protocol::{ControlFlow, Packet, PacketCodec, ReturnCode};
+use bud_common::{
+    id::next_id,
+    protocol::{ControlFlow, Packet, PacketCodec, Response, ReturnCode},
+};
 use futures::{SinkExt, TryStreamExt};
 use log::{error, trace, warn};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
@@ -34,15 +37,15 @@ impl Reader {
                         Ok(Some(stream)) => {
                             trace!("connector::reader: accept a new stream");
                             let mut framed = Framed::new(stream, PacketCodec);
-                            let code = match self.read(&mut framed, self.consumers.clone(), token.clone()).await {
-                                Ok(_) => ReturnCode::Success,
-                                Err(Error::ReturnCode(code)) => code,
+                            let (id, code) = match self.read(&mut framed, self.consumers.clone(), token.clone()).await {
+                                Ok(id) => (Some(id), ReturnCode::Success),
+                                Err(Error::ReturnCode(code)) => (None, code),
                                 Err(e) => {
                                     error!("client process SEND packet error: {e}");
                                     continue;
                                 }
                             };
-                            if let Err(e) = framed.send(Packet::Response(code)).await {
+                            if let Err(e) = framed.send(Packet::Response(Response { request_id: id.unwrap_or_else(next_id), code })).await {
                                 error!("client connector reader send reponse error: {e}");
                             }
                         },
@@ -70,11 +73,11 @@ impl Reader {
         framed: &mut Framed<BidirectionalStream, PacketCodec>,
         consumers: Consumers,
         token: CancellationToken,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         select! {
             biased;
             _ = token.cancelled() => {
-                Ok(())
+                Ok(0)
             }
             res = framed.try_next() => {
                 match res {
@@ -93,7 +96,7 @@ impl Reader {
                             error!("send message to consumer error: {e}");
                             return Err(Error::ReturnCode(ReturnCode::InternalError))
                         }
-                        Ok(())
+                        Ok(s.request_id)
                     }
                     Ok(Some(Packet::Disconnect)) => {
                         error!("receive DISCONNECT packet from server");
@@ -149,6 +152,7 @@ impl ConsumerSender {
         let (res_tx, res_rx) = oneshot::channel();
         self.server_tx.send(OutgoingMessage {
             packet: Packet::ControlFlow(ControlFlow {
+                request_id: next_id(),
                 consumer_id: self.consumer_id,
                 permits: self.permits.load(Ordering::SeqCst),
             }),

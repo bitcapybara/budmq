@@ -16,7 +16,8 @@ use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
     connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, publish::Publish,
-    response::ReturnCode, send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
+    response::Response, response::ReturnCode, send::Send, subscribe::Subscribe,
+    unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
@@ -82,7 +83,7 @@ impl Decoder for PacketCodec {
             PacketType::Send => Packet::Send(Send::decode(bytes)?),
             PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
-            PacketType::Response => Packet::Response(ReturnCode::decode(bytes)?),
+            PacketType::Response => Packet::Response(Response::decode(bytes)?),
             PacketType::Ping => Packet::Ping,
             PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
@@ -177,7 +178,7 @@ pub enum Packet {
     Send(Send),
     ConsumeAck(ConsumeAck),
     ControlFlow(ControlFlow),
-    Response(ReturnCode),
+    Response(Response),
     Ping,
     Pong,
     Disconnect,
@@ -229,6 +230,22 @@ impl Packet {
             Packet::Ping => PacketType::Ping,
             Packet::Pong => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
+        }
+    }
+
+    pub fn request_id(&self) -> Option<u64> {
+        match self {
+            Packet::Connect(p) => Some(p.request_id),
+            Packet::Subscribe(p) => Some(p.request_id),
+            Packet::Unsubscribe(p) => Some(p.request_id),
+            Packet::Publish(p) => Some(p.request_id),
+            Packet::Send(p) => Some(p.request_id),
+            Packet::ConsumeAck(p) => Some(p.request_id),
+            Packet::ControlFlow(p) => Some(p.request_id),
+            Packet::Response(p) => Some(p.request_id),
+            Packet::Ping => None,
+            Packet::Pong => None,
+            Packet::Disconnect => None,
         }
     }
 }
@@ -418,12 +435,16 @@ mod tests {
 
     #[test]
     fn codec_connect() {
-        codec_works(Packet::Connect(Connect { keepalive: 10000 }))
+        codec_works(Packet::Connect(Connect {
+            request_id: 1,
+            keepalive: 10000,
+        }))
     }
 
     #[test]
     fn codec_subscribe() {
         codec_works(Packet::Subscribe(Subscribe {
+            request_id: 1,
             consumer_id: 1,
             topic: "test-topic".to_string(),
             sub_name: "test-subname".to_string(),
@@ -434,12 +455,16 @@ mod tests {
 
     #[test]
     fn codec_unsubscribe() {
-        codec_works(Packet::Unsubscribe(Unsubscribe { consumer_id: 1 }))
+        codec_works(Packet::Unsubscribe(Unsubscribe {
+            request_id: 1,
+            consumer_id: 1,
+        }))
     }
 
     #[test]
     fn codec_publish() {
         codec_works(Packet::Publish(Publish {
+            request_id: 1,
             topic: "test-topic".to_string(),
             sequence_id: 200,
             payload: Bytes::from_static(b"hello, world"),
@@ -449,6 +474,7 @@ mod tests {
     #[test]
     fn codec_send() {
         codec_works(Packet::Send(Send {
+            request_id: 1,
             message_id: 1234,
             consumer_id: 3456,
             payload: Bytes::from_static(b"hello, world"),
@@ -458,6 +484,7 @@ mod tests {
     #[test]
     fn codec_consume_ack() {
         codec_works(Packet::ConsumeAck(ConsumeAck {
+            request_id: 1,
             consumer_id: 12345,
             message_id: 23456,
         }))
@@ -466,6 +493,7 @@ mod tests {
     #[test]
     fn codec_control_flow() {
         codec_works(Packet::ControlFlow(ControlFlow {
+            request_id: 1,
             consumer_id: 123,
             permits: 500,
         }))
@@ -473,7 +501,10 @@ mod tests {
 
     #[test]
     fn codec_response() {
-        codec_works(Packet::Response(ReturnCode::Success))
+        codec_works(Packet::Response(Response {
+            request_id: 1,
+            code: ReturnCode::Success,
+        }))
     }
 
     #[test]
