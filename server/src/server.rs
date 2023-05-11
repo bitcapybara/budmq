@@ -1,4 +1,4 @@
-use std::{fmt::Display, io, net::SocketAddr};
+use std::{io, net::SocketAddr};
 
 use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
 use futures::future;
@@ -23,7 +23,7 @@ pub enum Error {
 
 impl std::error::Error for Error {}
 
-impl Display for Error {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Io(e) => write!(f, "I/O error: {e}"),
