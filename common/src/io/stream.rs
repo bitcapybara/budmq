@@ -16,18 +16,18 @@ use std::{
     sync::Arc,
 };
 
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use log::error;
-use s2n_quic::{connection::Handle, stream::SendStream};
+use s2n_quic::{
+    connection::Handle,
+    stream::{ReceiveStream, SendStream},
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use self::helper::start_recv;
+use super::{Error, Result};
+use crate::protocol::{Packet, PacketCodec, Response, ReturnCode};
 
-use super::Result;
-use crate::protocol::{Packet, PacketCodec};
-
-mod helper;
 pub mod pool;
 pub mod single;
 
@@ -135,6 +135,31 @@ impl<T: PoolRecycle> StreamPool<T> {
                 ));
                 Ok(PooledStream::new(self.inner.clone(), framed))
             }
+        }
+    }
+}
+
+async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, PacketCodec>) {
+    while let Some(packet_res) = framed.next().await {
+        let (id, resp) = match packet_res {
+            Ok(Packet::Response(Response { request_id, code })) => {
+                if matches!(code, ReturnCode::Success) {
+                    (request_id, Ok(()))
+                } else {
+                    (request_id, Err(Error::FromPeer(code)))
+                }
+            }
+            Ok(_) => {
+                error!("io::writer received unexpected packet, execpted RESPONSE");
+                continue;
+            }
+            Err(e) => {
+                error!("io::writer decode protocol error: {e}");
+                continue;
+            }
+        };
+        if let Some(res_tx) = res_map.remove_res_tx(id).await {
+            res_tx.send(resp).ok();
         }
     }
 }
