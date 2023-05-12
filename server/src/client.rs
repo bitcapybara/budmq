@@ -144,7 +144,7 @@ impl Client {
                         code,
                     }))
                     .await?;
-                if !matches!(code, ReturnCode::Success) {
+                if code != ReturnCode::Success {
                     return Err(Error::Server(code));
                 }
                 trace!("client::handshake: build new Client");

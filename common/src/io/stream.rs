@@ -143,7 +143,7 @@ async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, Packe
     while let Some(packet_res) = framed.next().await {
         let (id, resp) = match packet_res {
             Ok(Packet::Response(Response { request_id, code })) => {
-                if matches!(code, ReturnCode::Success) {
+                if code == ReturnCode::Success {
                     (request_id, Ok(()))
                 } else {
                     (request_id, Err(Error::FromPeer(code)))

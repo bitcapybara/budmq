@@ -269,7 +269,7 @@ impl Connector {
                 return Err(Error::Internal("handshake timeout".to_string()));
             }
         };
-        if !matches!(resp.code, ReturnCode::Success) {
+        if resp.code != ReturnCode::Success {
             error!("client handshake: receive code from server: {}", resp.code);
             return Err(Error::FromServer(resp.code));
         }
@@ -296,7 +296,7 @@ impl Connector {
             res_tx: sub_res_tx,
         })?;
         let code = sub_res_rx.await??;
-        if !matches!(code, ReturnCode::Success) {
+        if code != ReturnCode::Success {
             return Err(Error::FromServer(code));
         }
         // send premits

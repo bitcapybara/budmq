@@ -159,7 +159,7 @@ impl Consumer {
             res_tx: sub_res_tx,
         })?;
         let code = sub_res_rx.await??;
-        if !matches!(code, ReturnCode::Success) {
+        if code != ReturnCode::Success {
             return Err(Error::FromServer(code));
         }
         // send permits packet on init
@@ -173,7 +173,7 @@ impl Consumer {
             res_tx: permits_res_tx,
         })?;
         let code = permits_res_rx.await??;
-        if !matches!(code, ReturnCode::Success) {
+        if code != ReturnCode::Success {
             return Err(Error::FromServer(code));
         }
         Ok(Self {
