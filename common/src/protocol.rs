@@ -349,9 +349,11 @@ impl Header {
             6 => PacketType::ConsumeAck,
             7 => PacketType::ControlFlow,
             8 => PacketType::Response,
-            9 => PacketType::Ping,
-            10 => PacketType::Pong,
-            11 => PacketType::Disconnect,
+            9 => PacketType::Producer,
+            10 => PacketType::ProducerReceipt,
+            11 => PacketType::Ping,
+            12 => PacketType::Pong,
+            13 => PacketType::Disconnect,
             _ => return Err(Error::MalformedPacket),
         })
     }
