@@ -1,6 +1,6 @@
 #[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
-pub struct Unsubscribe {
+pub struct Producer {
     pub request_id: u64,
-    /// consumer id
-    pub consumer_id: u64,
+    pub producer_name: String,
+    pub topic_name: String,
 }

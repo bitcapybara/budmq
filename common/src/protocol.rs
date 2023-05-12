@@ -1,6 +1,8 @@
 mod connect;
 mod consume_ack;
 mod control_flow;
+mod producer;
+mod producer_receipt;
 mod publish;
 mod response;
 mod send;
@@ -15,9 +17,9 @@ use tokio_util::codec::{Decoder, Encoder};
 use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
-    connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, publish::Publish,
-    response::Response, response::ReturnCode, send::Send, subscribe::Subscribe,
-    unsubscribe::Unsubscribe,
+    connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, producer::Producer,
+    producer_receipt::ProducerReceipt, publish::Publish, response::Response, response::ReturnCode,
+    send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
@@ -84,6 +86,8 @@ impl Decoder for PacketCodec {
             PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
             PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
             PacketType::Response => Packet::Response(Response::decode(bytes)?),
+            PacketType::Producer => Packet::Producer(Producer::decode(bytes)?),
+            PacketType::ProducerReceipt => Packet::ProducerReceipt(ProducerReceipt::decode(bytes)?),
             PacketType::Ping => Packet::Ping,
             PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
@@ -145,6 +149,8 @@ pub enum PacketType {
     ConsumeAck,
     ControlFlow,
     Response,
+    Producer,
+    ProducerReceipt,
     Ping,
     Pong,
     Disconnect,
@@ -161,6 +167,8 @@ impl std::fmt::Display for PacketType {
             PacketType::ConsumeAck => "CONSUMEACK",
             PacketType::ControlFlow => "CONTROLFLOW",
             PacketType::Response => "RESPONSE",
+            PacketType::Producer => "PRODUCER",
+            PacketType::ProducerReceipt => "PRODUCER_RECEIPT",
             PacketType::Ping => "PING",
             PacketType::Pong => "PONG",
             PacketType::Disconnect => "DISCONNECT",
@@ -179,6 +187,8 @@ pub enum Packet {
     ConsumeAck(ConsumeAck),
     ControlFlow(ControlFlow),
     Response(Response),
+    Producer(Producer),
+    ProducerReceipt(ProducerReceipt),
     Ping,
     Pong,
     Disconnect,
@@ -187,14 +197,16 @@ pub enum Packet {
 impl Packet {
     fn header(&self) -> Header {
         match self {
-            Packet::Connect(c) => c.header(),
-            Packet::Subscribe(s) => s.header(),
-            Packet::Unsubscribe(u) => u.header(),
+            Packet::Connect(p) => p.header(),
+            Packet::Subscribe(p) => p.header(),
+            Packet::Unsubscribe(p) => p.header(),
             Packet::Publish(p) => p.header(),
-            Packet::Send(s) => s.header(),
-            Packet::ConsumeAck(c) => c.header(),
-            Packet::ControlFlow(c) => c.header(),
-            Packet::Response(r) => r.header(),
+            Packet::Send(p) => p.header(),
+            Packet::ConsumeAck(p) => p.header(),
+            Packet::ControlFlow(p) => p.header(),
+            Packet::Response(p) => p.header(),
+            Packet::Producer(p) => p.header(),
+            Packet::ProducerReceipt(p) => p.header(),
             Packet::Ping => Header::new(PacketType::Ping, 0),
             Packet::Pong => Header::new(PacketType::Pong, 0),
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
@@ -203,14 +215,16 @@ impl Packet {
 
     fn write(&self, buf: &mut BytesMut) -> Result<()> {
         match self {
-            Packet::Connect(c) => c.encode(buf),
-            Packet::Subscribe(s) => s.encode(buf),
-            Packet::Unsubscribe(u) => u.encode(buf),
+            Packet::Connect(p) => p.encode(buf),
+            Packet::Subscribe(p) => p.encode(buf),
+            Packet::Unsubscribe(p) => p.encode(buf),
             Packet::Publish(p) => p.encode(buf),
-            Packet::Send(s) => s.encode(buf),
-            Packet::ConsumeAck(a) => a.encode(buf),
-            Packet::ControlFlow(c) => c.encode(buf),
-            Packet::Response(r) => r.encode(buf),
+            Packet::Send(p) => p.encode(buf),
+            Packet::ConsumeAck(p) => p.encode(buf),
+            Packet::ControlFlow(p) => p.encode(buf),
+            Packet::Response(p) => p.encode(buf),
+            Packet::Producer(p) => p.encode(buf),
+            Packet::ProducerReceipt(p) => p.encode(buf),
             Packet::Ping => Ok(()),
             Packet::Pong => Ok(()),
             Packet::Disconnect => Ok(()),
@@ -227,6 +241,8 @@ impl Packet {
             Packet::ConsumeAck(_) => PacketType::ConsumeAck,
             Packet::ControlFlow(_) => PacketType::ControlFlow,
             Packet::Response(_) => PacketType::Response,
+            Packet::Producer(_) => PacketType::Producer,
+            Packet::ProducerReceipt(_) => PacketType::ProducerReceipt,
             Packet::Ping => PacketType::Ping,
             Packet::Pong => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
@@ -243,6 +259,8 @@ impl Packet {
             Packet::ConsumeAck(p) => Some(p.request_id),
             Packet::ControlFlow(p) => Some(p.request_id),
             Packet::Response(p) => Some(p.request_id),
+            Packet::Producer(p) => Some(p.request_id),
+            Packet::ProducerReceipt(p) => Some(p.request_id),
             Packet::Ping => None,
             Packet::Pong => None,
             Packet::Disconnect => None,

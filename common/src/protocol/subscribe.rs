@@ -1,7 +1,7 @@
 use crate::subscription::{InitialPostion, SubType};
 
 /// Each consumer corresponds to a subscription
-#[derive(Debug, PartialEq, Clone, codec_derive::Codec)]
+#[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
 pub struct Subscribe {
     pub request_id: u64,
     /// consumer_id, unique within one connection

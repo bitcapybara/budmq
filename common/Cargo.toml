@@ -15,4 +15,4 @@ rustls-pemfile.workspace = true
 s2n-quic.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-codec-derive = { version = "0.1.0", path = "../derive" }
+bud-derive = { version = "0.1.0", path = "../derive" }

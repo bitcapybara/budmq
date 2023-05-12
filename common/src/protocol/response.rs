@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, codec_derive::Codec)]
+#[derive(Debug, Clone, PartialEq, bud_derive::Codec)]
 pub struct Response {
     pub request_id: u64,
     pub code: ReturnCode,
