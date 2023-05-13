@@ -5,12 +5,13 @@ use s2n_quic::connection::Handle;
 use tokio::{
     select,
     sync::{mpsc, oneshot},
+    task::JoinSet,
     time::{timeout, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
+    stream::{pool::PoolInner, single::SingleInner, PoolCloser, PoolSender, Request, StreamPool},
     Result,
 };
 use crate::protocol::Packet;
@@ -18,55 +19,45 @@ use crate::protocol::Packet;
 pub struct WriterBuilder {
     handle: Handle,
     ordered: bool,
+    token: CancellationToken,
 }
 
 impl WriterBuilder {
-    /// create an unordered writer.
-    ///
-    /// maintain a QUIC steam pool internally, each time a stream
-    /// is acquired from the stream pool to send a message
-    ///
-    /// the order of message delivery is not guaranteed, but the
-    /// concurrency performance and throughput are better (no
-    /// head-of-queue blocking of a single stream)
-    fn new(handle: Handle) -> Self {
+    fn new(handle: Handle, token: CancellationToken) -> Self {
         Self {
             handle,
             ordered: false,
+            token,
         }
     }
 
-    /// TODO
-    /// create an ordered writer.
-    ///
-    /// use a single QUIC stream internally
-    ///
-    /// the order of message delivery is guaranteed, but there
-    /// will be stream head blocking problems
     pub fn ordered(mut self, ordered: bool) -> Self {
         self.ordered = ordered;
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, Sender)> {
+    pub async fn build(self) -> Result<(Writer, WriterHandler)> {
         let (tx, rx) = mpsc::channel(1);
-        let sender = Sender::new(tx);
-        let pool_sender = if self.ordered {
-            let (single, sender) = StreamPool::<SingleInner>::new(self.handle);
-            tokio::spawn(single.run());
-            sender
+        let mut tasks = JoinSet::new();
+        let (pool_sender, pool_closer) = if self.ordered {
+            let (single, sender, closer) =
+                StreamPool::<SingleInner>::new(self.handle, self.token.child_token());
+            tasks.spawn(single.run());
+            (sender, closer)
         } else {
-            let (single, sender) = StreamPool::<PoolInner>::new(self.handle);
-            tokio::spawn(single.run());
-            sender
+            let (single, sender, closer) =
+                StreamPool::<PoolInner>::new(self.handle, self.token.child_token());
+            tasks.spawn(single.run());
+            (sender, closer)
         };
+        let writer_handler = WriterHandler::new(tx, tasks, pool_closer, self.token.clone());
         Ok((
             Writer {
                 pool_sender,
                 ordered: self.ordered,
                 rx,
             },
-            sender,
+            writer_handler,
         ))
     }
 }
@@ -78,8 +69,8 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn builder(handle: Handle) -> WriterBuilder {
-        WriterBuilder::new(handle)
+    pub fn builder(handle: Handle, token: CancellationToken) -> WriterBuilder {
+        WriterBuilder::new(handle, token)
     }
 
     pub async fn run(mut self, token: CancellationToken) {
@@ -102,13 +93,26 @@ impl Writer {
     }
 }
 
-pub struct Sender {
+pub struct WriterHandler {
     tx: mpsc::Sender<Request>,
+    tasks: JoinSet<()>,
+    pool_closer: PoolCloser,
+    token: CancellationToken,
 }
 
-impl Sender {
-    fn new(tx: mpsc::Sender<Request>) -> Self {
-        Self { tx }
+impl WriterHandler {
+    fn new(
+        tx: mpsc::Sender<Request>,
+        tasks: JoinSet<()>,
+        pool_closer: PoolCloser,
+        token: CancellationToken,
+    ) -> Self {
+        Self {
+            tx,
+            token,
+            tasks,
+            pool_closer,
+        }
     }
 
     pub async fn send(&self, packet: Packet) -> Result<()> {
@@ -123,5 +127,11 @@ impl Sender {
         timeout(duration, self.tx.send(Request { packet, res_tx })).await??;
         let send_duration = start.elapsed();
         timeout(duration - send_duration, res_rx).await??
+    }
+
+    pub async fn close(mut self) {
+        self.token.cancel();
+        self.pool_closer.close().await;
+        while self.tasks.join_next().await.is_some() {}
     }
 }
