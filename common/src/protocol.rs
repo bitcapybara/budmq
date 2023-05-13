@@ -2,7 +2,6 @@ mod connect;
 mod consume_ack;
 mod control_flow;
 mod producer;
-mod producer_receipt;
 mod publish;
 mod response;
 mod send;
@@ -18,7 +17,7 @@ use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
     connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, producer::Producer,
-    producer_receipt::ProducerReceipt, publish::Publish, response::Response, response::ReturnCode,
+    producer::ProducerReceipt, publish::Publish, response::Response, response::ReturnCode,
     send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
 };
 

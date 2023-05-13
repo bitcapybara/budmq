@@ -91,7 +91,6 @@ pub fn codec(input: TokenStream) -> TokenStream {
         }
     });
     quote! {
-        use bytes::{BufMut, Bytes};
         impl super::Codec for #struct_ident {
             fn decode(mut buf: bytes::Bytes) -> super::Result<Self> {
                 #(#field_read_methods)*
@@ -101,6 +100,7 @@ pub fn codec(input: TokenStream) -> TokenStream {
             }
 
             fn encode(&self, buf: &mut bytes::BytesMut) -> super::Result<()> {
+                use bytes::BufMut;
                 #(#field_put_methods)*
                 Ok(())
             }
