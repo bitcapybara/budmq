@@ -6,6 +6,7 @@ use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
+    task::JoinSet,
 };
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
@@ -19,36 +20,76 @@ pub struct PacketRequest {
     res_tx: oneshot::Sender<Option<Packet>>,
 }
 
+pub struct ReaderHandler {
+    tasks: Arc<Mutex<JoinSet<()>>>,
+    receiver: mpsc::Receiver<PacketRequest>,
+    token: CancellationToken,
+}
+
+impl ReaderHandler {
+    fn new(
+        tasks: Arc<Mutex<JoinSet<()>>>,
+        receiver: mpsc::Receiver<PacketRequest>,
+        token: CancellationToken,
+    ) -> Self {
+        Self {
+            tasks,
+            receiver,
+            token,
+        }
+    }
+    pub async fn recv(&mut self) -> Option<PacketRequest> {
+        self.receiver.recv().await
+    }
+    pub async fn close(self) {
+        self.token.cancel();
+        let mut tasks = self.tasks.lock().await;
+        while (tasks.join_next().await).is_some() {}
+    }
+}
+
 pub struct Reader {
     acceptor: StreamAcceptor,
     tx: mpsc::Sender<PacketRequest>,
+    tasks: Arc<Mutex<JoinSet<()>>>,
+    token: CancellationToken,
 }
 
 impl Reader {
-    pub fn new(acceptor: StreamAcceptor) -> (Self, mpsc::Receiver<PacketRequest>) {
+    pub fn new(acceptor: StreamAcceptor, token: CancellationToken) -> (Self, ReaderHandler) {
         let (tx, rx) = mpsc::channel(1);
-        (Self { acceptor, tx }, rx)
+        let tasks = Arc::new(Mutex::new(JoinSet::new()));
+        (
+            Self {
+                acceptor,
+                tx,
+                tasks: tasks.clone(),
+                token: token.clone(),
+            },
+            ReaderHandler::new(tasks, rx, token),
+        )
     }
 
-    pub async fn run(mut self, token: CancellationToken) {
+    pub async fn run(mut self) {
         loop {
             select! {
                 res = self.acceptor.accept_bidirectional_stream() => {
                     let stream = match res {
                         Ok(Some(stream)) => stream,
                         Ok(None) => {
-                            token.cancel();
+                            self.token.cancel();
                             return
                         }
                         Err(e) => {
                             error!("no stream could be accepted due to an error: {e}");
-                            token.cancel();
+                            self.token.cancel();
                             return
                         }
                     };
-                    tokio::spawn(listen_on_stream(stream, self.tx.clone(), token.child_token()));
+                    let mut tasks = self.tasks.lock().await;
+                    tasks.spawn(listen_on_stream(stream, self.tx.clone(), self.token.child_token()));
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     return
                 }
             }
