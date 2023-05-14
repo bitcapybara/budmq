@@ -1,20 +1,12 @@
-use std::time::Duration;
-
 use log::error;
 use s2n_quic::connection::Handle;
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-    task::JoinSet,
-    time::{timeout, Instant},
-};
+use tokio::{select, sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
     stream::{pool::PoolInner, single::SingleInner, PoolCloser, PoolSender, Request, StreamPool},
     Result,
 };
-use crate::protocol::Packet;
 
 pub struct WriterBuilder {
     handle: Handle,
@@ -36,7 +28,7 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, WriterHandler)> {
+    pub async fn build(self) -> Result<(Writer, WriterHandle)> {
         let (tx, rx) = mpsc::channel(1);
         let mut tasks = JoinSet::new();
         let (pool_sender, pool_closer) = if self.ordered {
@@ -50,12 +42,13 @@ impl WriterBuilder {
             tasks.spawn(single.run());
             (sender, closer)
         };
-        let writer_handler = WriterHandler::new(tx, tasks, pool_closer, self.token.clone());
+        let writer_handler = WriterHandle::new(tx, tasks, pool_closer, self.token.clone());
         Ok((
             Writer {
                 pool_sender,
                 ordered: self.ordered,
                 rx,
+                token: self.token,
             },
             writer_handler,
         ))
@@ -66,6 +59,7 @@ pub struct Writer {
     pool_sender: PoolSender,
     ordered: bool,
     rx: mpsc::Receiver<Request>,
+    token: CancellationToken,
 }
 
 impl Writer {
@@ -73,19 +67,19 @@ impl Writer {
         WriterBuilder::new(handle, token)
     }
 
-    pub async fn run(mut self, token: CancellationToken) {
+    pub async fn run(mut self) {
         loop {
             select! {
                 res = self.rx.recv() => {
                     let Some(request) = res else {
-                        token.cancel();
+                        self.token.cancel();
                         return
                     };
                     if let Err(e) = self.pool_sender.send(request).await {
                         error!("error occurs while sending packet: {e}")
                     }
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     return
                 }
             }
@@ -93,14 +87,14 @@ impl Writer {
     }
 }
 
-pub struct WriterHandler {
-    tx: mpsc::Sender<Request>,
+pub struct WriterHandle {
+    pub tx: mpsc::Sender<Request>,
     tasks: JoinSet<()>,
     pool_closer: PoolCloser,
     token: CancellationToken,
 }
 
-impl WriterHandler {
+impl WriterHandle {
     fn new(
         tx: mpsc::Sender<Request>,
         tasks: JoinSet<()>,
@@ -113,20 +107,6 @@ impl WriterHandler {
             tasks,
             pool_closer,
         }
-    }
-
-    pub async fn send(&self, packet: Packet) -> Result<()> {
-        let (res_tx, res_rx) = oneshot::channel();
-        self.tx.send(Request { packet, res_tx }).await?;
-        res_rx.await?
-    }
-
-    pub async fn send_timeout(&self, packet: Packet, duration: Duration) -> Result<()> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let start = Instant::now();
-        timeout(duration, self.tx.send(Request { packet, res_tx })).await??;
-        let send_duration = start.elapsed();
-        timeout(duration - send_duration, res_rx).await??
     }
 
     pub async fn close(mut self) {

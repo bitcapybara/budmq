@@ -93,6 +93,12 @@ impl From<tokio::time::error::Elapsed> for Error {
     }
 }
 
+impl From<bud_common::io::Error> for Error {
+    fn from(_e: bud_common::io::Error) -> Self {
+        todo!()
+    }
+}
+
 pub struct Client {
     id: u64,
     conn: Connection,
@@ -180,16 +186,17 @@ impl Client {
 
         // write
         trace!("client::start: start write task");
-        let write_task = Writer::new(&local).run(self.client_rx, handle, token.clone());
-        let write_handle = tokio::spawn(write_task);
+        let (write_task, write_handle) = Writer::new(&local, handle, token.clone()).await?;
+        let write_runner = tokio::spawn(write_task.run(self.client_rx));
 
         // reader or writer may self-exit
         future::join(
             wait(read_runner, "client read runner"),
-            wait(write_handle, "client write runner"),
+            wait(write_runner, "client write runner"),
         )
         .await;
         read_handle.close().await;
+        write_handle.close().await;
         trace!("client::start: exit");
         Ok(())
     }
