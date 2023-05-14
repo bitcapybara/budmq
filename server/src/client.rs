@@ -168,12 +168,15 @@ impl Client {
 
         // read
         trace!("client::start: start read task");
-        let read_task = Reader::new(self.id, &local, self.broker_tx).run(
+        let (read_task, read_handle) = Reader::new(
+            self.id,
+            &local,
+            self.broker_tx,
             acceptor,
             self.keepalive,
             token.clone(),
         );
-        let read_handle = tokio::spawn(read_task);
+        let read_runner = tokio::spawn(read_task.run());
 
         // write
         trace!("client::start: start write task");
@@ -182,10 +185,11 @@ impl Client {
 
         // reader or writer may self-exit
         future::join(
-            wait(read_handle, "client read"),
-            wait(write_handle, "client write"),
+            wait(read_runner, "client read runner"),
+            wait(write_handle, "client write runner"),
         )
         .await;
+        read_handle.close().await;
         trace!("client::start: exit");
         Ok(())
     }

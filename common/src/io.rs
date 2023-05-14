@@ -6,9 +6,9 @@ use tokio::{
 
 use crate::protocol::{self, ReturnCode};
 
-mod reader;
-mod stream;
-mod writer;
+pub mod reader;
+pub mod stream;
+pub mod writer;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

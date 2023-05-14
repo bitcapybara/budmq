@@ -16,20 +16,20 @@ use tokio_util::{
 use crate::protocol::{Packet, PacketCodec};
 
 pub struct PacketRequest {
-    packet: Packet,
-    res_tx: oneshot::Sender<Option<Packet>>,
+    pub packet: Packet,
+    pub res_tx: oneshot::Sender<Option<Packet>>,
 }
 
-pub struct ReaderHandler {
+pub struct ReadHandler {
+    pub receiver: mpsc::Receiver<PacketRequest>,
     tasks: Arc<Mutex<JoinSet<()>>>,
-    receiver: mpsc::Receiver<PacketRequest>,
     token: CancellationToken,
 }
 
-impl ReaderHandler {
+impl ReadHandler {
     fn new(
-        tasks: Arc<Mutex<JoinSet<()>>>,
         receiver: mpsc::Receiver<PacketRequest>,
+        tasks: Arc<Mutex<JoinSet<()>>>,
         token: CancellationToken,
     ) -> Self {
         Self {
@@ -38,9 +38,7 @@ impl ReaderHandler {
             token,
         }
     }
-    pub async fn recv(&mut self) -> Option<PacketRequest> {
-        self.receiver.recv().await
-    }
+
     pub async fn close(self) {
         self.token.cancel();
         let mut tasks = self.tasks.lock().await;
@@ -56,7 +54,7 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn new(acceptor: StreamAcceptor, token: CancellationToken) -> (Self, ReaderHandler) {
+    pub fn new(acceptor: StreamAcceptor, token: CancellationToken) -> (Self, ReadHandler) {
         let (tx, rx) = mpsc::channel(1);
         let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
@@ -66,7 +64,7 @@ impl Reader {
                 tasks: tasks.clone(),
                 token: token.clone(),
             },
-            ReaderHandler::new(tasks, rx, token),
+            ReadHandler::new(rx, tasks, token),
         )
     }
 
@@ -122,6 +120,7 @@ async fn listen_on_stream(
                 // async wait for response
                 let send_framed = send_framed.clone();
                 tokio::spawn(async move {
+                    // TODO timeout
                     match res_rx.await {
                         Ok(Some(packet)) => {
                             let mut framed = send_framed.lock().await;

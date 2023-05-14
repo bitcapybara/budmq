@@ -1,26 +1,49 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use bud_common::{
-    id::next_id,
-    protocol::{Packet, PacketCodec, Response, ReturnCode},
+    io::reader::{self, PacketRequest},
+    protocol::{Packet, Response, ReturnCode},
 };
-use futures::{SinkExt, StreamExt};
 use log::{error, trace, warn};
-use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
+use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex},
+    task::JoinSet,
     time::timeout,
 };
-use tokio_util::{codec::Framed, sync::CancellationToken};
+use tokio_util::sync::CancellationToken;
 
 use super::Result;
 use crate::{broker, WAIT_REPLY_TIMEOUT};
+
+pub struct ReadHandler {
+    tasks: Arc<Mutex<JoinSet<()>>>,
+}
+
+impl ReadHandler {
+    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>) -> Self {
+        Self { tasks }
+    }
+
+    pub async fn close(self) {
+        let mut tasks = self.tasks.lock().await;
+        while let Some(res) = tasks.join_next().await {
+            if let Err(e) = res {
+                error!("reader task panics: {e}")
+            }
+        }
+    }
+}
 
 pub struct Reader {
     client_id: u64,
     local_addr: String,
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
+    read_handler: reader::ReadHandler,
+    keepalive: u16,
+    tasks: Arc<Mutex<JoinSet<()>>>,
+    token: CancellationToken,
 }
 
 impl Reader {
@@ -28,29 +51,41 @@ impl Reader {
         client_id: u64,
         local_addr: &str,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-    ) -> Self {
-        Self {
-            client_id,
-            local_addr: local_addr.to_string(),
-            broker_tx,
-        }
+        acceptor: StreamAcceptor,
+        keepalive: u16,
+        token: CancellationToken,
+    ) -> (Self, ReadHandler) {
+        let (reader, read_handler) = reader::Reader::new(acceptor, token.clone());
+        let mut tasks = JoinSet::new();
+        tasks.spawn(reader.run());
+        let tasks = Arc::new(Mutex::new(tasks));
+        (
+            Self {
+                client_id,
+                local_addr: local_addr.to_string(),
+                broker_tx,
+                read_handler,
+                keepalive,
+                tasks: tasks.clone(),
+                token,
+            },
+            ReadHandler::new(tasks),
+        )
     }
 
     /// accept new stream to read a packet
-    pub async fn run(self, mut acceptor: StreamAcceptor, keepalive: u16, token: CancellationToken) {
+    pub async fn run(mut self) {
         // 1.5 times keepalive value
-        let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
+        let keepalive = Duration::from_millis((self.keepalive + self.keepalive / 2) as u64);
         loop {
             select! {
-                res = timeout(keepalive, acceptor.accept_bidirectional_stream()) => {
+                res = timeout(keepalive, self.read_handler.receiver.recv()) => {
                     match res {
-                        Ok(Ok(Some(stream))) => self.process_stream(stream).await,
-                        Ok(Ok(None)) => {
+                        Ok(Some(stream)) => self.process_stream(stream).await,
+                        Ok(None) => {
                             error!("server connection closed");
-                            token.cancel();
                             return;
                         }
-                        Ok(Err(e)) => error!("accept stream error: {e}"),
                         Err(_) => {
                             trace!("client::reader::run: waiting for PING packet timeout");
                             // receive ping timeout
@@ -62,110 +97,94 @@ impl Reader {
                             }) {
                                 error!("wait for PING timeout, send DISCONNECT packet to broker error: {e}")
                             }
-                            // quit the loop
-                            token.cancel();
                             return
                         }
                     }
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     return
                 }
             }
         }
     }
 
-    async fn process_stream(&self, stream: BidirectionalStream) {
-        let mut framed = Framed::new(stream, PacketCodec);
+    async fn process_stream(&self, request: PacketRequest) {
         trace!("client::reader: waiting for framed packet");
-        match framed.next().await {
-            Some(Ok(packet)) => match packet {
-                Packet::Connect(c) => {
-                    warn!("client::reader: receive a CONNECT packet after handshake");
-                    // Do not allow duplicate connections
-                    let code = ReturnCode::AlreadyConnected;
-                    if let Err(e) = framed
-                        .send(Packet::Response(Response {
-                            request_id: c.request_id,
-                            code,
-                        }))
-                        .await
-                    {
-                        error!("send packet to client error: {e}");
-                    }
+        let PacketRequest { packet, res_tx } = request;
+        match packet {
+            Packet::Connect(c) => {
+                warn!("client::reader: receive a CONNECT packet after handshake");
+                // Do not allow duplicate connections
+                let code = ReturnCode::AlreadyConnected;
+                let request_id = c.request_id;
+                let resp = Packet::Response(Response { request_id, code });
+                res_tx.send(Some(resp)).ok();
+            }
+            p @ (Packet::Subscribe(_)
+            | Packet::Unsubscribe(_)
+            | Packet::Publish(_)
+            | Packet::ConsumeAck(_)
+            | Packet::ControlFlow(_)) => {
+                trace!("client::reader: receive {} packet", p.packet_type());
+                if let Err(e) = self.send(p, res_tx).await {
+                    error!("send packet to broker error: {e}")
                 }
-                p @ (Packet::Subscribe(_)
-                | Packet::Unsubscribe(_)
-                | Packet::Publish(_)
-                | Packet::ConsumeAck(_)
-                | Packet::ControlFlow(_)) => {
-                    trace!("client::reader: receive {} packet", p.packet_type());
-                    if let Err(e) = self.send(p, framed).await {
-                        error!("send packet to broker error: {e}")
-                    }
+            }
+            Packet::Ping => {
+                // return pong packet directly
+                trace!("client::reader: receive PING packet");
+                res_tx.send(Some(Packet::Pong)).ok();
+            }
+            Packet::Disconnect => {
+                res_tx.send(None).ok();
+                if let Err(e) = self.broker_tx.send(broker::ClientMessage {
+                    client_id: self.client_id,
+                    packet: Packet::Disconnect,
+                    res_tx: None,
+                    client_tx: None,
+                }) {
+                    error!("send DISCONNECT to broker error: {e}");
                 }
-                Packet::Ping => {
-                    // return pong packet directly
-                    trace!("client::reader: receive PING packet");
-                    tokio::spawn(async move {
-                        if let Err(e) = framed.send(Packet::Pong).await {
-                            error!("send pong packet error: {e}")
-                        }
-                    });
-                }
-                Packet::Disconnect => {
-                    if let Err(e) = self.broker_tx.send(broker::ClientMessage {
-                        client_id: self.client_id,
-                        packet: Packet::Disconnect,
-                        res_tx: None,
-                        client_tx: None,
-                    }) {
-                        error!("send DISCONNECT to broker error: {e}");
-                    }
-                }
-                p => error!("received unsupported packet: {}", p.packet_type()),
-            },
-            Some(Err(e)) => error!("read from stream error: {e}"),
-            None => error!("framed stream closed"),
+            }
+            p => error!("received unsupported packet: {}", p.packet_type()),
         }
     }
 
-    async fn send(
-        &self,
-        packet: Packet,
-        mut framed: Framed<BidirectionalStream, PacketCodec>,
-    ) -> Result<()> {
-        let (res_tx, res_rx) = oneshot::channel();
+    async fn send(&self, packet: Packet, res_tx: oneshot::Sender<Option<Packet>>) -> Result<()> {
+        let Some(request_id) = packet.request_id() else {
+            return Ok(())
+        };
+        let (broker_res_tx, broker_res_rx) = oneshot::channel();
         // send to broker
         trace!("client::reader: send packet to broker");
         self.broker_tx.send(broker::ClientMessage {
             client_id: self.client_id,
             packet,
-            res_tx: Some(res_tx),
+            res_tx: Some(broker_res_tx),
             client_tx: None,
         })?;
         // wait for response in coroutine
         let local = self.local_addr.clone();
-        tokio::spawn(async move {
+        let mut tasks = self.tasks.lock().await;
+        let token = self.token.child_token();
+        tasks.spawn(async move {
             // wait for reply from broker
             trace!("client::reader[spawn]: waiting for response from broker");
-            match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-                Ok(Ok(code)) => {
-                    trace!("client::reader[spawn]: response from broker: {code}");
-                    if let Err(e) = framed
-                        .send(Packet::Response(Response {
-                            request_id: next_id(),
-                            code,
-                        }))
-                        .await
-                    {
-                        error!("send reply to client {local} error: {e}",)
+            select! {
+                res = timeout(WAIT_REPLY_TIMEOUT, broker_res_rx) => {
+                    match res {
+                        Ok(Ok(code)) => {
+                            trace!("client::reader[spawn]: response from broker: {code}");
+                            let resp = Packet::Response(Response { request_id, code });
+                            res_tx.send(Some(resp)).ok();
+                        }
+                        Ok(Err(e)) => {
+                            error!("recv client {local} reply error: {e}")
+                        }
+                        Err(_) => error!("process client {local} timeout"),
                     }
                 }
-                Ok(Err(e)) => {
-                    error!("recv client {local} reply error: {e}")
-                }
-                Err(_) => error!("process client {local} timeout"),
+                _ = token.cancelled() => {}
             }
         });
         Ok(())
