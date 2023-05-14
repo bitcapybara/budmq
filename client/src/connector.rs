@@ -180,8 +180,9 @@ impl Connector {
 
         // reader task loop
         trace!("connector::run_task: start reader task loop");
-        let reader_task = Reader::new(self.consumers.clone()).run(acceptor, task_token.clone());
-        let reader_handle = tokio::spawn(reader_task);
+        let (reader, reader_closer) =
+            Reader::new(self.consumers.clone(), acceptor, task_token.clone());
+        let reader_runner = tokio::spawn(reader.run());
 
         // resub
         trace!("connector::run_task: consumers subscribe");
@@ -191,10 +192,11 @@ impl Connector {
         trace!("connector::run_task: waiting for tasks exit");
         future::join(
             wait(writer_handle, "client writer"),
-            wait(reader_handle, "client reader"),
+            wait(reader_runner, "client reader"),
         )
         .await;
         token.cancel();
+        reader_closer.close().await;
 
         trace!("connector::run_task: exit");
         Ok(())

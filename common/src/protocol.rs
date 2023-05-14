@@ -265,6 +265,13 @@ impl Packet {
             Packet::Disconnect => None,
         }
     }
+
+    pub fn ok_response(request_id: u64) -> Self {
+        Self::Response(Response {
+            request_id,
+            code: ReturnCode::Success,
+        })
+    }
 }
 
 #[derive(Debug, PartialEq)]

@@ -17,13 +17,17 @@ use tokio_util::sync::CancellationToken;
 use super::Result;
 use crate::{broker, WAIT_REPLY_TIMEOUT};
 
-pub struct ReadHandler {
+pub struct ReadCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
+    inner_closer: reader::ReadCloser,
 }
 
-impl ReadHandler {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>) -> Self {
-        Self { tasks }
+impl ReadCloser {
+    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: reader::ReadCloser) -> Self {
+        Self {
+            tasks,
+            inner_closer,
+        }
     }
 
     pub async fn close(self) {
@@ -40,7 +44,7 @@ pub struct Reader {
     client_id: u64,
     local_addr: String,
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-    read_handler: reader::ReadHandler,
+    read_receiver: mpsc::Receiver<PacketRequest>,
     keepalive: u16,
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
@@ -54,8 +58,8 @@ impl Reader {
         acceptor: StreamAcceptor,
         keepalive: u16,
         token: CancellationToken,
-    ) -> (Self, ReadHandler) {
-        let (reader, read_handler) = reader::Reader::new(acceptor, token.clone());
+    ) -> (Self, ReadCloser) {
+        let (reader, receiver, inner_closer) = reader::Reader::new(acceptor, token.clone());
         let mut tasks = JoinSet::new();
         tasks.spawn(reader.run());
         let tasks = Arc::new(Mutex::new(tasks));
@@ -64,12 +68,12 @@ impl Reader {
                 client_id,
                 local_addr: local_addr.to_string(),
                 broker_tx,
-                read_handler,
+                read_receiver: receiver,
                 keepalive,
                 tasks: tasks.clone(),
                 token,
             },
-            ReadHandler::new(tasks),
+            ReadCloser::new(tasks, inner_closer),
         )
     }
 
@@ -79,7 +83,7 @@ impl Reader {
         let keepalive = Duration::from_millis((self.keepalive + self.keepalive / 2) as u64);
         loop {
             select! {
-                res = timeout(keepalive, self.read_handler.receiver.recv()) => {
+                res = timeout(keepalive, self.read_receiver.recv()) => {
                     match res {
                         Ok(Some(stream)) => self.process_stream(stream).await,
                         Ok(None) => {

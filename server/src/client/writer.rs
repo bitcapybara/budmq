@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use bud_common::{
-    io::{stream, writer},
+    io::{
+        stream::{self, Request},
+        writer,
+    },
     protocol::Packet,
 };
 use log::{error, trace};
@@ -17,16 +20,21 @@ use tokio_util::sync::CancellationToken;
 use super::Result;
 use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
-pub struct WriteHandle {
+pub struct WriteCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
+    inner_closer: writer::WriteCloser,
 }
 
-impl WriteHandle {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>) -> Self {
-        Self { tasks }
+impl WriteCloser {
+    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::WriteCloser) -> Self {
+        Self {
+            tasks,
+            inner_closer,
+        }
     }
 
     pub async fn close(self) {
+        self.inner_closer.close().await;
         let mut tasks = self.tasks.lock().await;
         while let Some(res) = tasks.join_next().await {
             if let Err(e) = res {
@@ -38,7 +46,7 @@ impl WriteHandle {
 
 pub struct Writer {
     local_addr: String,
-    writer_handle: writer::WriterHandle,
+    sender: mpsc::Sender<Request>,
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
@@ -48,8 +56,8 @@ impl Writer {
         local_addr: &str,
         handle: connection::Handle,
         token: CancellationToken,
-    ) -> Result<(Self, WriteHandle)> {
-        let (writer, writer_handle) = writer::Writer::builder(handle, token.child_token())
+    ) -> Result<(Self, WriteCloser)> {
+        let (writer, sender, write_closer) = writer::Writer::builder(handle, token.child_token())
             .build()
             .await?;
         let mut tasks = JoinSet::new();
@@ -58,11 +66,11 @@ impl Writer {
         Ok((
             Self {
                 local_addr: local_addr.to_string(),
-                writer_handle,
+                sender,
                 tasks: tasks.clone(),
                 token,
             },
-            WriteHandle::new(tasks),
+            WriteCloser::new(tasks, write_closer),
         ))
     }
 
@@ -99,7 +107,7 @@ impl Writer {
     }
 
     async fn send(&self, client_res_tx: oneshot::Sender<Result<()>>, packet: Packet) -> Result<()> {
-        let sender = self.writer_handle.tx.clone();
+        let sender = self.sender.clone();
         let token = self.token.child_token();
         let mut tasks = self.tasks.lock().await;
         tasks.spawn(async move {

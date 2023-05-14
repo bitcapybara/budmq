@@ -5,116 +5,131 @@ use std::sync::{
 
 use bud_common::{
     id::next_id,
-    protocol::{ControlFlow, Packet, PacketCodec, Response, ReturnCode},
+    io::reader::{self, PacketRequest},
+    protocol::{ControlFlow, Packet, Response, ReturnCode},
 };
-use futures::{SinkExt, TryStreamExt};
 use log::{error, trace, warn};
-use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
+use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex},
+    task::JoinSet,
 };
-use tokio_util::{codec::Framed, sync::CancellationToken};
+use tokio_util::sync::CancellationToken;
 
 use crate::consumer::{ConsumeMessage, Consumers, CONSUME_CHANNEL_CAPACITY};
 
 use super::{Error, OutgoingMessage, Result};
 
+pub struct ReadCloser {
+    tasks: Arc<Mutex<JoinSet<()>>>,
+    inner: reader::ReadCloser,
+}
+
+impl ReadCloser {
+    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner: reader::ReadCloser) -> Self {
+        Self { tasks, inner }
+    }
+
+    pub async fn close(self) {
+        self.inner.close().await;
+        let mut tasks = self.tasks.lock().await;
+        while let Some(res) = tasks.join_next().await {
+            if let Err(e) = res {
+                error!("client reader task panics: {e}")
+            }
+        }
+    }
+}
+
 pub struct Reader {
     consumers: Consumers,
+    receiver: mpsc::Receiver<PacketRequest>,
+    token: CancellationToken,
 }
 
 impl Reader {
-    pub fn new(consumers: Consumers) -> Self {
-        Self { consumers }
+    pub fn new(
+        consumers: Consumers,
+        acceptor: StreamAcceptor,
+        token: CancellationToken,
+    ) -> (Self, ReadCloser) {
+        let (reader, receiver, inner_closer) = reader::Reader::new(acceptor, token.clone());
+        let mut tasks = JoinSet::new();
+        tasks.spawn(reader.run());
+        let tasks = Arc::new(Mutex::new(tasks));
+        (
+            Self {
+                consumers,
+                receiver,
+                token,
+            },
+            ReadCloser::new(tasks, inner_closer),
+        )
     }
 
-    pub async fn run(self, mut acceptor: StreamAcceptor, token: CancellationToken) {
+    pub async fn run(mut self) {
         loop {
             select! {
-                res = acceptor.accept_bidirectional_stream() => {
+                res = self.receiver.recv() => {
                     match res {
-                        Ok(Some(stream)) => {
+                        Some(request) => {
                             trace!("connector::reader: accept a new stream");
-                            let mut framed = Framed::new(stream, PacketCodec);
-                            let (id, code) = match self.read(&mut framed, self.consumers.clone(), token.clone()).await {
-                                Ok(id) => (Some(id), ReturnCode::Success),
-                                Err(Error::ReturnCode(code)) => (None, code),
-                                Err(e) => {
-                                    error!("client process SEND packet error: {e}");
-                                    continue;
-                                }
-                            };
-                            if let Err(e) = framed.send(Packet::Response(Response { request_id: id.unwrap_or_else(next_id), code })).await {
-                                error!("client connector reader send reponse error: {e}");
+                            if let Err(Error::Disconnect) = self.read(request).await {
+                                return
                             }
                         },
-                        Ok(None) => {
+                        None=> {
                             trace!("connector::reader: accept none, exit");
-                            token.cancel();
                             return
                         },
-                        Err(e) => {
-                            error!("connector reader accept stream error: {e}");
-                            token.cancel();
-                            return
-                        }
                     }
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     return
                 }
             }
         }
     }
 
-    async fn read(
-        &self,
-        framed: &mut Framed<BidirectionalStream, PacketCodec>,
-        consumers: Consumers,
-        token: CancellationToken,
-    ) -> Result<u64> {
-        select! {
-            biased;
-            _ = token.cancelled() => {
-                Ok(0)
-            }
-            res = framed.try_next() => {
-                match res {
-                    Ok(Some(Packet::Send(s))) => {
-                        let Some(sender) = consumers.get_consumer_sender(s.consumer_id).await else {
-                            warn!("recv a message but consumer not found");
-                            return Err(Error::ReturnCode(ReturnCode::ConsumerNotFound));
-                        };
-                        if let Err(e) = sender
-                            .send(ConsumeMessage {
-                                payload: s.payload,
-                                id: s.message_id,
-                            })
-                            .await
-                        {
-                            error!("send message to consumer error: {e}");
-                            return Err(Error::ReturnCode(ReturnCode::InternalError))
-                        }
-                        Ok(s.request_id)
-                    }
-                    Ok(Some(Packet::Disconnect)) => {
-                        error!("receive DISCONNECT packet from server");
-                        Err(Error::Disconnect)
-                    }
-                    Ok(Some(p)) => {
-                        error!("client received unexpected packet: {:?}", p.packet_type());
-                        Err(Error::ReturnCode(ReturnCode::UnexpectedPacket))
-                    }
-                    Ok(None) => {
-                        error!("client reader stream closed");
-                        Err(Error::StreamClosed)
+    async fn read(&self, request: PacketRequest) -> Result<()> {
+        let PacketRequest { packet, res_tx } = request;
+        match packet {
+            Packet::Send(s) => {
+                let Some(sender) = self.consumers.get_consumer_sender(s.consumer_id).await else {
+                    warn!("recv a message but consumer not found");
+                    let packet = Packet::Response(Response { request_id: s.request_id, code: ReturnCode::ConsumerNotFound });
+                    res_tx.send(Some(packet)).ok();
+                    return Ok(());
+                };
+                let message = ConsumeMessage {
+                    id: s.message_id,
+                    payload: s.payload,
+                };
+                match sender.send(message).await {
+                    Ok(_) => {
+                        res_tx.send(Some(Packet::ok_response(s.request_id))).ok();
                     }
                     Err(e) => {
-                        error!("client reader error: {e}");
-                        Err(Error::FromQuic(e.to_string()))
+                        error!("send message to consumer error: {e}");
+                        let packet = Packet::Response(Response {
+                            request_id: s.request_id,
+                            code: ReturnCode::ConsumerNotFound,
+                        });
+                        res_tx.send(Some(packet)).ok();
                     }
                 }
+                Ok(())
+            }
+            Packet::Disconnect => {
+                error!("receive DISCONNECT packet from server");
+                res_tx.send(None).ok();
+                Err(Error::Disconnect)
+            }
+            p => {
+                error!("client received unexpected packet: {:?}", p.packet_type());
+                res_tx.send(None).ok();
+                Ok(())
             }
         }
     }

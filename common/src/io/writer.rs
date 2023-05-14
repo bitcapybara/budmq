@@ -28,7 +28,7 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, WriterHandle)> {
+    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>, WriteCloser)> {
         let (tx, rx) = mpsc::channel(1);
         let mut tasks = JoinSet::new();
         let (pool_sender, pool_closer) = if self.ordered {
@@ -42,7 +42,7 @@ impl WriterBuilder {
             tasks.spawn(single.run());
             (sender, closer)
         };
-        let writer_handler = WriterHandle::new(tx, tasks, pool_closer, self.token.clone());
+        let inner_closer = WriteCloser::new(tasks, pool_closer, self.token.clone());
         Ok((
             Writer {
                 pool_sender,
@@ -50,7 +50,8 @@ impl WriterBuilder {
                 rx,
                 token: self.token,
             },
-            writer_handler,
+            tx,
+            inner_closer,
         ))
     }
 }
@@ -87,22 +88,15 @@ impl Writer {
     }
 }
 
-pub struct WriterHandle {
-    pub tx: mpsc::Sender<Request>,
+pub struct WriteCloser {
     tasks: JoinSet<()>,
     pool_closer: PoolCloser,
     token: CancellationToken,
 }
 
-impl WriterHandle {
-    fn new(
-        tx: mpsc::Sender<Request>,
-        tasks: JoinSet<()>,
-        pool_closer: PoolCloser,
-        token: CancellationToken,
-    ) -> Self {
+impl WriteCloser {
+    fn new(tasks: JoinSet<()>, pool_closer: PoolCloser, token: CancellationToken) -> Self {
         Self {
-            tx,
             token,
             tasks,
             pool_closer,

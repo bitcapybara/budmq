@@ -20,23 +20,14 @@ pub struct PacketRequest {
     pub res_tx: oneshot::Sender<Option<Packet>>,
 }
 
-pub struct ReadHandler {
-    pub receiver: mpsc::Receiver<PacketRequest>,
+pub struct ReadCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
-impl ReadHandler {
-    fn new(
-        receiver: mpsc::Receiver<PacketRequest>,
-        tasks: Arc<Mutex<JoinSet<()>>>,
-        token: CancellationToken,
-    ) -> Self {
-        Self {
-            tasks,
-            receiver,
-            token,
-        }
+impl ReadCloser {
+    fn new(tasks: Arc<Mutex<JoinSet<()>>>, token: CancellationToken) -> Self {
+        Self { tasks, token }
     }
 
     pub async fn close(self) {
@@ -54,7 +45,10 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn new(acceptor: StreamAcceptor, token: CancellationToken) -> (Self, ReadHandler) {
+    pub fn new(
+        acceptor: StreamAcceptor,
+        token: CancellationToken,
+    ) -> (Self, mpsc::Receiver<PacketRequest>, ReadCloser) {
         let (tx, rx) = mpsc::channel(1);
         let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
@@ -64,7 +58,8 @@ impl Reader {
                 tasks: tasks.clone(),
                 token: token.clone(),
             },
-            ReadHandler::new(rx, tasks, token),
+            rx,
+            ReadCloser::new(tasks, token),
         )
     }
 
