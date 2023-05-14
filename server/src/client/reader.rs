@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use bud_common::{
     io::reader::{self, PacketRequest},
-    protocol::{Packet, Response, ReturnCode},
+    protocol::{Packet, Pong, Response, ReturnCode},
 };
 use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
@@ -134,10 +134,13 @@ impl Reader {
                     error!("send packet to broker error: {e}")
                 }
             }
-            Packet::Ping => {
+            Packet::Ping(p) => {
                 // return pong packet directly
                 trace!("client::reader: receive PING packet");
-                res_tx.send(Some(Packet::Pong)).ok();
+                let packet = Packet::Pong(Pong {
+                    request_id: p.request_id,
+                });
+                res_tx.send(Some(packet)).ok();
             }
             Packet::Disconnect => {
                 res_tx.send(None).ok();

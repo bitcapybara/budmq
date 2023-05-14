@@ -46,6 +46,7 @@ pub enum Error {
     Internal(String),
     Disconnect,
     ReturnCode(ReturnCode),
+    CommonIo(bud_common::io::Error),
 }
 
 impl std::error::Error for Error {}
@@ -62,6 +63,7 @@ impl std::fmt::Display for Error {
             Error::Internal(e) => write!(f, "internal error: {e}"),
             Error::Disconnect => write!(f, "receive DISCONNECT packet from Server"),
             Error::ReturnCode(code) => write!(f, "return code {code} to server"),
+            Error::CommonIo(e) => write!(f, "common io error: {e}"),
         }
     }
 }
@@ -99,6 +101,12 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
 impl From<oneshot::error::RecvError> for Error {
     fn from(e: oneshot::error::RecvError) -> Self {
         Self::Internal(e.to_string())
+    }
+}
+
+impl From<bud_common::io::Error> for Error {
+    fn from(e: bud_common::io::Error) -> Self {
+        Self::CommonIo(e)
     }
 }
 
@@ -175,8 +183,8 @@ impl Connector {
 
         // writer task loop
         trace!("connector::run_task: start writer task loop");
-        let writer_task = Writer::new(handle).run(server_rx, keepalive, task_token.clone());
-        let writer_handle = tokio::spawn(writer_task);
+        let (writer, writer_closer) = Writer::new(handle, task_token.clone()).await?;
+        let writer_runner = tokio::spawn(writer.run(server_rx, keepalive));
 
         // reader task loop
         trace!("connector::run_task: start reader task loop");
@@ -191,12 +199,13 @@ impl Connector {
         // wait for completing
         trace!("connector::run_task: waiting for tasks exit");
         future::join(
-            wait(writer_handle, "client writer"),
+            wait(writer_runner, "client writer"),
             wait(reader_runner, "client reader"),
         )
         .await;
         token.cancel();
         reader_closer.close().await;
+        writer_closer.close().await;
 
         trace!("connector::run_task: exit");
         Ok(())

@@ -31,15 +31,15 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use super::{Error, Result};
-use crate::protocol::{Packet, PacketCodec, Response, ReturnCode};
+use super::Result;
+use crate::protocol::{Packet, PacketCodec};
 
 pub mod pool;
 pub mod single;
 
 pub struct Request {
     pub packet: Packet,
-    pub res_tx: oneshot::Sender<Result<()>>,
+    pub res_tx: oneshot::Sender<Result<Packet>>,
 }
 
 pub struct PoolSender(mpsc::Sender<Request>);
@@ -68,16 +68,16 @@ impl PoolCloser {
 }
 
 #[derive(Clone)]
-pub struct ResMap(Arc<tokio::sync::Mutex<HashMap<u64, oneshot::Sender<Result<()>>>>>);
+pub struct ResMap(Arc<tokio::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Packet>>>>>);
 
 impl ResMap {
-    async fn add_res_tx(&self, id: u64, res_tx: oneshot::Sender<Result<()>>) {
+    async fn add_res_tx(&self, id: u64, res_tx: oneshot::Sender<Result<Packet>>) {
         let mut map = self.0.lock().await;
         map.retain(|_, s| !s.is_closed());
         map.insert(id, res_tx);
     }
 
-    async fn remove_res_tx(&self, id: u64) -> Option<oneshot::Sender<Result<()>>> {
+    async fn remove_res_tx(&self, id: u64) -> Option<oneshot::Sender<Result<Packet>>> {
         let mut map = self.0.lock().await;
         map.retain(|_, s| !s.is_closed());
         map.remove(&id)
@@ -171,25 +171,18 @@ impl<T: PoolRecycle> StreamPool<T> {
 
 async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, PacketCodec>) {
     while let Some(packet_res) = framed.next().await {
-        let (id, resp) = match packet_res {
-            Ok(Packet::Response(Response { request_id, code })) => {
-                if code == ReturnCode::Success {
-                    (request_id, Ok(()))
-                } else {
-                    (request_id, Err(Error::FromPeer(code)))
-                }
-            }
-            Ok(_) => {
-                error!("io::writer received unexpected packet, execpted RESPONSE");
-                continue;
-            }
+        let packet = match packet_res {
+            Ok(packet) => packet,
             Err(e) => {
                 error!("io::writer decode protocol error: {e}");
                 continue;
             }
         };
-        if let Some(res_tx) = res_map.remove_res_tx(id).await {
-            res_tx.send(resp).ok();
+        let Some(request_id) = packet.request_id() else {
+            continue;
+        };
+        if let Some(res_tx) = res_map.remove_res_tx(request_id).await {
+            res_tx.send(Ok(packet)).ok();
         }
     }
 }

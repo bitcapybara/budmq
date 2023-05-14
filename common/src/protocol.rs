@@ -1,6 +1,7 @@
 mod connect;
 mod consume_ack;
 mod control_flow;
+mod ping_pong;
 mod producer;
 mod publish;
 mod response;
@@ -16,9 +17,18 @@ use tokio_util::codec::{Decoder, Encoder};
 use crate::subscription::{InitialPostion, SubType};
 
 pub use self::{
-    connect::Connect, consume_ack::ConsumeAck, control_flow::ControlFlow, producer::Producer,
-    producer::ProducerReceipt, publish::Publish, response::Response, response::ReturnCode,
-    send::Send, subscribe::Subscribe, unsubscribe::Unsubscribe,
+    connect::Connect,
+    consume_ack::ConsumeAck,
+    control_flow::ControlFlow,
+    ping_pong::{Ping, Pong},
+    producer::Producer,
+    producer::ProducerReceipt,
+    publish::Publish,
+    response::Response,
+    response::ReturnCode,
+    send::Send,
+    subscribe::Subscribe,
+    unsubscribe::Unsubscribe,
 };
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
@@ -87,8 +97,8 @@ impl Decoder for PacketCodec {
             PacketType::Response => Packet::Response(Response::decode(bytes)?),
             PacketType::Producer => Packet::Producer(Producer::decode(bytes)?),
             PacketType::ProducerReceipt => Packet::ProducerReceipt(ProducerReceipt::decode(bytes)?),
-            PacketType::Ping => Packet::Ping,
-            PacketType::Pong => Packet::Pong,
+            PacketType::Ping => Packet::Ping(Ping::decode(bytes)?),
+            PacketType::Pong => Packet::Pong(Pong::decode(bytes)?),
             PacketType::Disconnect => Packet::Disconnect,
         }))
     }
@@ -188,8 +198,8 @@ pub enum Packet {
     Response(Response),
     Producer(Producer),
     ProducerReceipt(ProducerReceipt),
-    Ping,
-    Pong,
+    Ping(Ping),
+    Pong(Pong),
     Disconnect,
 }
 
@@ -206,8 +216,8 @@ impl Packet {
             Packet::Response(p) => p.header(),
             Packet::Producer(p) => p.header(),
             Packet::ProducerReceipt(p) => p.header(),
-            Packet::Ping => Header::new(PacketType::Ping, 0),
-            Packet::Pong => Header::new(PacketType::Pong, 0),
+            Packet::Ping(p) => p.header(),
+            Packet::Pong(p) => p.header(),
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
         }
     }
@@ -224,8 +234,8 @@ impl Packet {
             Packet::Response(p) => p.encode(buf),
             Packet::Producer(p) => p.encode(buf),
             Packet::ProducerReceipt(p) => p.encode(buf),
-            Packet::Ping => Ok(()),
-            Packet::Pong => Ok(()),
+            Packet::Ping(p) => p.encode(buf),
+            Packet::Pong(p) => p.encode(buf),
             Packet::Disconnect => Ok(()),
         }
     }
@@ -242,8 +252,8 @@ impl Packet {
             Packet::Response(_) => PacketType::Response,
             Packet::Producer(_) => PacketType::Producer,
             Packet::ProducerReceipt(_) => PacketType::ProducerReceipt,
-            Packet::Ping => PacketType::Ping,
-            Packet::Pong => PacketType::Pong,
+            Packet::Ping(_) => PacketType::Ping,
+            Packet::Pong(_) => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
         }
     }
@@ -260,8 +270,8 @@ impl Packet {
             Packet::Response(p) => Some(p.request_id),
             Packet::Producer(p) => Some(p.request_id),
             Packet::ProducerReceipt(p) => Some(p.request_id),
-            Packet::Ping => None,
-            Packet::Pong => None,
+            Packet::Ping(p) => Some(p.request_id),
+            Packet::Pong(p) => Some(p.request_id),
             Packet::Disconnect => None,
         }
     }
@@ -535,8 +545,8 @@ mod tests {
 
     #[test]
     fn codec_ping_pong() {
-        codec_works(Packet::Ping);
-        codec_works(Packet::Pong);
+        codec_works(Packet::Ping(Ping { request_id: 1 }));
+        codec_works(Packet::Pong(Pong { request_id: 1 }));
     }
 
     #[test]
