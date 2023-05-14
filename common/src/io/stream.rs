@@ -73,11 +73,13 @@ pub struct ResMap(Arc<tokio::sync::Mutex<HashMap<u64, oneshot::Sender<Result<()>
 impl ResMap {
     async fn add_res_tx(&self, id: u64, res_tx: oneshot::Sender<Result<()>>) {
         let mut map = self.0.lock().await;
+        map.retain(|_, s| !s.is_closed());
         map.insert(id, res_tx);
     }
 
     async fn remove_res_tx(&self, id: u64) -> Option<oneshot::Sender<Result<()>>> {
         let mut map = self.0.lock().await;
+        map.retain(|_, s| !s.is_closed());
         map.remove(&id)
     }
 }
