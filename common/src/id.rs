@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicU64, Ordering},
     Arc,
 };
 
@@ -10,11 +10,11 @@ pub fn next_id() -> u64 {
 }
 
 #[derive(Clone)]
-pub struct SerialId(Arc<AtomicUsize>);
+pub struct SerialId(Arc<AtomicU64>);
 
 impl Default for SerialId {
     fn default() -> Self {
-        SerialId(Arc::new(AtomicUsize::new(0)))
+        SerialId(Arc::new(AtomicU64::new(0)))
     }
 }
 
@@ -24,6 +24,6 @@ impl SerialId {
     }
 
     pub fn get(&self) -> u64 {
-        self.0.fetch_add(1, Ordering::Relaxed) as u64
+        self.0.fetch_add(1, Ordering::Relaxed)
     }
 }
