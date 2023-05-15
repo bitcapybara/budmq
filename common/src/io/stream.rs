@@ -63,7 +63,11 @@ impl Closer {
 
     pub async fn close(self) {
         let mut tasks = self.tasks.lock().await;
-        while tasks.join_next().await.is_some() {}
+        while let Some(res) = tasks.join_next().await {
+            if let Err(e) = res {
+                error!("stream pool task panics: {e}")
+            }
+        }
     }
 }
 

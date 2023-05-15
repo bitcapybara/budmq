@@ -106,6 +106,10 @@ impl Closer {
     pub async fn close(mut self) {
         self.token.cancel();
         self.pool_closer.close().await;
-        while self.tasks.join_next().await.is_some() {}
+        while let Some(res) = self.tasks.join_next().await {
+            if let Err(e) = res {
+                error!("writer task panics: {e}")
+            }
+        }
     }
 }
