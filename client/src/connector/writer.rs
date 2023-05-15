@@ -26,11 +26,11 @@ pub struct OutgoingMessage {
 
 pub struct WriterCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: writer::WriteCloser,
+    inner_closer: writer::Closer,
 }
 
 impl WriterCloser {
-    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::WriteCloser) -> Self {
+    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::Closer) -> Self {
         Self {
             tasks,
             inner_closer,

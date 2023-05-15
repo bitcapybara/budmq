@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use bud_common::{
-    io::reader::{self, PacketRequest},
+    io::reader::{self, Request},
     protocol::{Packet, Pong, Response, ReturnCode},
 };
 use log::{error, trace, warn};
@@ -19,11 +19,11 @@ use crate::{broker, WAIT_REPLY_TIMEOUT};
 
 pub struct ReadCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: reader::ReadCloser,
+    inner_closer: reader::Closer,
 }
 
 impl ReadCloser {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: reader::ReadCloser) -> Self {
+    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: reader::Closer) -> Self {
         Self {
             tasks,
             inner_closer,
@@ -44,7 +44,7 @@ pub struct Reader {
     client_id: u64,
     local_addr: String,
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
-    read_receiver: mpsc::Receiver<PacketRequest>,
+    read_receiver: mpsc::Receiver<Request>,
     keepalive: u16,
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
@@ -112,9 +112,9 @@ impl Reader {
         }
     }
 
-    async fn process_stream(&self, request: PacketRequest) {
+    async fn process_stream(&self, request: Request) {
         trace!("client::reader: waiting for framed packet");
-        let PacketRequest { packet, res_tx } = request;
+        let Request { packet, res_tx } = request;
         match packet {
             Packet::Connect(c) => {
                 warn!("client::reader: receive a CONNECT packet after handshake");

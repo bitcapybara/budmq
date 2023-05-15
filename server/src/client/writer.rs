@@ -22,11 +22,11 @@ use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct WriteCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: writer::WriteCloser,
+    inner_closer: writer::Closer,
 }
 
 impl WriteCloser {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::WriteCloser) -> Self {
+    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::Closer) -> Self {
         Self {
             tasks,
             inner_closer,

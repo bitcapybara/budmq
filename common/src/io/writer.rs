@@ -4,7 +4,7 @@ use tokio::{select, sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{pool::PoolInner, single::SingleInner, PoolCloser, PoolSender, Request, StreamPool},
+    stream::{pool::PoolInner, single::SingleInner, Closer, PoolSender, Request, StreamPool},
     Result,
 };
 
@@ -28,7 +28,7 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>, WriteCloser)> {
+    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>, Closer)> {
         let (tx, rx) = mpsc::channel(1);
         let mut tasks = JoinSet::new();
         let (pool_sender, pool_closer) = if self.ordered {
@@ -42,7 +42,7 @@ impl WriterBuilder {
             tasks.spawn(single.run());
             (sender, closer)
         };
-        let inner_closer = WriteCloser::new(tasks, pool_closer, self.token.clone());
+        let inner_closer = Closer::new(tasks, pool_closer, self.token.clone());
         Ok((
             Writer {
                 pool_sender,
@@ -88,14 +88,14 @@ impl Writer {
     }
 }
 
-pub struct WriteCloser {
+pub struct Closer {
     tasks: JoinSet<()>,
-    pool_closer: PoolCloser,
+    pool_closer: Closer,
     token: CancellationToken,
 }
 
-impl WriteCloser {
-    fn new(tasks: JoinSet<()>, pool_closer: PoolCloser, token: CancellationToken) -> Self {
+impl Closer {
+    fn new(tasks: JoinSet<()>, pool_closer: Closer, token: CancellationToken) -> Self {
         Self {
             token,
             tasks,

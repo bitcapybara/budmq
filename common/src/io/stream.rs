@@ -51,12 +51,12 @@ impl PoolSender {
     }
 }
 
-pub struct PoolCloser {
+pub struct Closer {
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
-impl PoolCloser {
+impl Closer {
     pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, token: CancellationToken) -> Self {
         Self { tasks, token }
     }
@@ -105,7 +105,7 @@ pub struct StreamPool<T: PoolRecycle> {
 }
 
 impl<T: PoolRecycle> StreamPool<T> {
-    pub fn new(handle: Handle, token: CancellationToken) -> (Self, PoolSender, PoolCloser) {
+    pub fn new(handle: Handle, token: CancellationToken) -> (Self, PoolSender, Closer) {
         let (request_tx, request_rx) = mpsc::channel(1);
         let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
@@ -118,7 +118,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                 token: token.clone(),
             },
             PoolSender(request_tx),
-            PoolCloser::new(tasks, token.child_token()),
+            Closer::new(tasks, token.child_token()),
         )
     }
 

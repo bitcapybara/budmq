@@ -5,7 +5,7 @@ use std::sync::{
 
 use bud_common::{
     id::next_id,
-    io::reader::{self, PacketRequest},
+    io::reader::{self, Request},
     protocol::{ControlFlow, Packet, Response, ReturnCode},
 };
 use log::{error, trace, warn};
@@ -23,11 +23,11 @@ use super::{Error, OutgoingMessage, Result};
 
 pub struct ReadCloser {
     tasks: Arc<Mutex<JoinSet<()>>>,
-    inner: reader::ReadCloser,
+    inner: reader::Closer,
 }
 
 impl ReadCloser {
-    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner: reader::ReadCloser) -> Self {
+    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner: reader::Closer) -> Self {
         Self { tasks, inner }
     }
 
@@ -44,7 +44,7 @@ impl ReadCloser {
 
 pub struct Reader {
     consumers: Consumers,
-    receiver: mpsc::Receiver<PacketRequest>,
+    receiver: mpsc::Receiver<Request>,
     token: CancellationToken,
 }
 
@@ -92,8 +92,8 @@ impl Reader {
         }
     }
 
-    async fn read(&self, request: PacketRequest) -> Result<()> {
-        let PacketRequest { packet, res_tx } = request;
+    async fn read(&self, request: Request) -> Result<()> {
+        let Request { packet, res_tx } = request;
         match packet {
             Packet::Send(s) => {
                 let Some(sender) = self.consumers.get_consumer_sender(s.consumer_id).await else {

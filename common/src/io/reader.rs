@@ -15,17 +15,17 @@ use tokio_util::{
 
 use crate::protocol::{Packet, PacketCodec};
 
-pub struct PacketRequest {
+pub struct Request {
     pub packet: Packet,
     pub res_tx: oneshot::Sender<Option<Packet>>,
 }
 
-pub struct ReadCloser {
+pub struct Closer {
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
-impl ReadCloser {
+impl Closer {
     fn new(tasks: Arc<Mutex<JoinSet<()>>>, token: CancellationToken) -> Self {
         Self { tasks, token }
     }
@@ -39,7 +39,7 @@ impl ReadCloser {
 
 pub struct Reader {
     acceptor: StreamAcceptor,
-    tx: mpsc::Sender<PacketRequest>,
+    tx: mpsc::Sender<Request>,
     tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
@@ -48,7 +48,7 @@ impl Reader {
     pub fn new(
         acceptor: StreamAcceptor,
         token: CancellationToken,
-    ) -> (Self, mpsc::Receiver<PacketRequest>, ReadCloser) {
+    ) -> (Self, mpsc::Receiver<Request>, Closer) {
         let (tx, rx) = mpsc::channel(1);
         let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
@@ -59,7 +59,7 @@ impl Reader {
                 token: token.clone(),
             },
             rx,
-            ReadCloser::new(tasks, token),
+            Closer::new(tasks, token),
         )
     }
 
@@ -92,7 +92,7 @@ impl Reader {
 
 async fn listen_on_stream(
     stream: BidirectionalStream,
-    tx: mpsc::Sender<PacketRequest>,
+    tx: mpsc::Sender<Request>,
     token: CancellationToken,
 ) {
     let (recv, send) = stream.split();
@@ -129,7 +129,7 @@ async fn listen_on_stream(
                         Ok(None) => {/* no need to send response */}
                     }
                 });
-                if let Err(e) = tx.send(PacketRequest { packet, res_tx }).await {
+                if let Err(e) = tx.send(Request { packet, res_tx }).await {
                     error!("io::reader send packet error: {e}");
                 }
             }
