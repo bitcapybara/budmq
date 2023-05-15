@@ -4,7 +4,7 @@ use tokio::{select, sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{pool::PoolInner, single::SingleInner, Closer, PoolSender, Request, StreamPool},
+    stream::{self, pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
     Result,
 };
 
@@ -90,12 +90,12 @@ impl Writer {
 
 pub struct Closer {
     tasks: JoinSet<()>,
-    pool_closer: Closer,
+    pool_closer: stream::Closer,
     token: CancellationToken,
 }
 
 impl Closer {
-    fn new(tasks: JoinSet<()>, pool_closer: Closer, token: CancellationToken) -> Self {
+    fn new(tasks: JoinSet<()>, pool_closer: stream::Closer, token: CancellationToken) -> Self {
         Self {
             token,
             tasks,
