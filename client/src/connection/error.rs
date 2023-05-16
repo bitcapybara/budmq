@@ -3,9 +3,8 @@ use std::sync::{
     Arc,
 };
 
+use bud_common::io::Error;
 use tokio::sync::Mutex;
-
-use crate::io::Error;
 
 #[derive(Clone)]
 pub(crate) struct SharedError {

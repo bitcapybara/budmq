@@ -1,4 +1,5 @@
 mod error;
+mod sender;
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -14,7 +15,9 @@ pub enum ConnectionState {
 
 /// held by producer/consumer
 pub struct Connection {
-    conn: s2n_quic::Connection,
+    /// use sender to send all packets
+    sender: sender::Sender,
+    /// error to indicate weather producer/consumer need to get a new connection
     error: SharedError,
     /// self-managed token
     token: CancellationToken,
@@ -28,11 +31,13 @@ pub struct ConnectionHandle {
 
 impl ConnectionHandle {
     pub fn new(_addr: &SocketAddr) -> Self {
+        // create reader from s2n_quic::Acceptor
         todo!()
     }
 
     /// get the connection in manager, setup a new writer
     pub async fn get_connection(&self, _ordered: bool) -> Arc<Connection> {
+        // create writer from s2n_quic::Handle
         todo!()
     }
 }

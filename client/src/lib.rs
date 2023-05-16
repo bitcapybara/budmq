@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod client;
+mod connection;
 mod connector;
 pub mod consumer;
 pub mod producer;

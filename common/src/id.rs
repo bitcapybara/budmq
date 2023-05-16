@@ -23,7 +23,7 @@ impl SerialId {
         Self::default()
     }
 
-    pub fn get(&self) -> u64 {
+    pub fn next(&self) -> u64 {
         self.0.fetch_add(1, Ordering::Relaxed)
     }
 }
