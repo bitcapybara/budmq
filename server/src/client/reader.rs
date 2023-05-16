@@ -34,7 +34,8 @@ impl Reader {
         keepalive: u16,
         token: CancellationToken,
     ) -> Self {
-        let (reader, receiver) = reader::Reader::new(acceptor, token.clone());
+        let (sender, receiver) = mpsc::channel(1);
+        let reader = reader::Reader::new(sender, acceptor, token.clone());
         tokio::spawn(reader.run());
         Self {
             client_id,

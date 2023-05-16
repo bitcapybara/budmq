@@ -13,7 +13,6 @@ use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
     sync::{mpsc, oneshot},
-    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -29,9 +28,9 @@ pub struct Reader {
 
 impl Reader {
     pub fn new(consumers: Consumers, acceptor: StreamAcceptor, token: CancellationToken) -> Self {
-        let (reader, receiver) = reader::Reader::new(acceptor, token.clone());
-        let mut tasks = JoinSet::new();
-        tasks.spawn(reader.run());
+        let (sender, receiver) = mpsc::channel(1);
+        let reader = reader::Reader::new(sender, acceptor, token.clone());
+        tokio::spawn(reader.run());
         Self {
             consumers,
             receiver,

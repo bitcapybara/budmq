@@ -27,18 +27,15 @@ pub struct Reader {
 
 impl Reader {
     pub fn new(
+        tx: mpsc::Sender<Request>,
         acceptor: StreamAcceptor,
         token: CancellationToken,
-    ) -> (Self, mpsc::Receiver<Request>) {
-        let (tx, rx) = mpsc::channel(1);
-        (
-            Self {
-                acceptor,
-                tx,
-                token,
-            },
-            rx,
-        )
+    ) -> Self {
+        Self {
+            acceptor,
+            tx,
+            token,
+        }
     }
 
     pub async fn run(mut self) {

@@ -29,7 +29,8 @@ impl Writer {
         handle: connection::Handle,
         token: CancellationToken,
     ) -> Result<Self> {
-        let (writer, sender) = writer::Writer::builder(handle, token.child_token())
+        let (sender, receiver) = mpsc::channel(1);
+        let writer = writer::Writer::builder(receiver, handle, token.child_token())
             .build()
             .await?;
         tokio::spawn(writer.run());

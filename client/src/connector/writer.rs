@@ -30,7 +30,8 @@ pub struct Writer {
 
 impl Writer {
     pub async fn new(handle: Handle, token: CancellationToken) -> Result<Self> {
-        let (writer, sender) = writer::Writer::builder(handle, token.clone())
+        let (sender, receiver) = mpsc::channel(1);
+        let writer = writer::Writer::builder(receiver, handle, token.clone())
             .build()
             .await?;
         tokio::spawn(writer.run());

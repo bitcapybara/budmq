@@ -9,14 +9,16 @@ use super::{
 };
 
 pub struct WriterBuilder {
+    rx: mpsc::Receiver<Request>,
     handle: Handle,
     ordered: bool,
     token: CancellationToken,
 }
 
 impl WriterBuilder {
-    fn new(handle: Handle, token: CancellationToken) -> Self {
+    fn new(rx: mpsc::Receiver<Request>, handle: Handle, token: CancellationToken) -> Self {
         Self {
+            rx,
             handle,
             ordered: false,
             token,
@@ -28,8 +30,7 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>)> {
-        let (tx, rx) = mpsc::channel(1);
+    pub async fn build(self) -> Result<Writer> {
         let pool_sender = if self.ordered {
             let (single, sender) =
                 StreamPool::<SingleInner>::new(self.handle, self.token.child_token());
@@ -41,15 +42,12 @@ impl WriterBuilder {
             tokio::spawn(single.run());
             sender
         };
-        Ok((
-            Writer {
-                pool_sender,
-                ordered: self.ordered,
-                rx,
-                token: self.token,
-            },
-            tx,
-        ))
+        Ok(Writer {
+            pool_sender,
+            ordered: self.ordered,
+            rx: self.rx,
+            token: self.token,
+        })
     }
 }
 
@@ -61,8 +59,12 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn builder(handle: Handle, token: CancellationToken) -> WriterBuilder {
-        WriterBuilder::new(handle, token)
+    pub fn builder(
+        rx: mpsc::Receiver<Request>,
+        handle: Handle,
+        token: CancellationToken,
+    ) -> WriterBuilder {
+        WriterBuilder::new(rx, handle, token)
     }
 
     pub async fn run(mut self) {
