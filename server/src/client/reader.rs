@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use bud_common::{
     io::reader::{self, Request},
@@ -8,8 +8,7 @@ use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, Mutex},
-    task::JoinSet,
+    sync::{mpsc, oneshot},
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
@@ -17,36 +16,12 @@ use tokio_util::sync::CancellationToken;
 use super::Result;
 use crate::{broker, WAIT_REPLY_TIMEOUT};
 
-pub struct ReadCloser {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: reader::Closer,
-}
-
-impl ReadCloser {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: reader::Closer) -> Self {
-        Self {
-            tasks,
-            inner_closer,
-        }
-    }
-
-    pub async fn close(self) {
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("reader task panics: {e}")
-            }
-        }
-    }
-}
-
 pub struct Reader {
     client_id: u64,
     local_addr: String,
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     read_receiver: mpsc::Receiver<Request>,
     keepalive: u16,
-    tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
@@ -58,23 +33,17 @@ impl Reader {
         acceptor: StreamAcceptor,
         keepalive: u16,
         token: CancellationToken,
-    ) -> (Self, ReadCloser) {
-        let (reader, receiver, inner_closer) = reader::Reader::new(acceptor, token.clone());
-        let mut tasks = JoinSet::new();
-        tasks.spawn(reader.run());
-        let tasks = Arc::new(Mutex::new(tasks));
-        (
-            Self {
-                client_id,
-                local_addr: local_addr.to_string(),
-                broker_tx,
-                read_receiver: receiver,
-                keepalive,
-                tasks: tasks.clone(),
-                token,
-            },
-            ReadCloser::new(tasks, inner_closer),
-        )
+    ) -> Self {
+        let (reader, receiver) = reader::Reader::new(acceptor, token.clone());
+        tokio::spawn(reader.run());
+        Self {
+            client_id,
+            local_addr: local_addr.to_string(),
+            broker_tx,
+            read_receiver: receiver,
+            keepalive,
+            token,
+        }
     }
 
     /// accept new stream to read a packet
@@ -172,9 +141,8 @@ impl Reader {
         })?;
         // wait for response in coroutine
         let local = self.local_addr.clone();
-        let mut tasks = self.tasks.lock().await;
         let token = self.token.child_token();
-        tasks.spawn(async move {
+        tokio::spawn(async move {
             // wait for reply from broker
             trace!("client::reader[spawn]: waiting for response from broker");
             select! {

@@ -6,7 +6,6 @@ use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
-    task::JoinSet,
 };
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
@@ -20,31 +19,9 @@ pub struct Request {
     pub res_tx: oneshot::Sender<Option<Packet>>,
 }
 
-pub struct Closer {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    token: CancellationToken,
-}
-
-impl Closer {
-    fn new(tasks: Arc<Mutex<JoinSet<()>>>, token: CancellationToken) -> Self {
-        Self { tasks, token }
-    }
-
-    pub async fn close(self) {
-        self.token.cancel();
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("reader task panics: {e}")
-            }
-        }
-    }
-}
-
 pub struct Reader {
     acceptor: StreamAcceptor,
     tx: mpsc::Sender<Request>,
-    tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
@@ -52,18 +29,15 @@ impl Reader {
     pub fn new(
         acceptor: StreamAcceptor,
         token: CancellationToken,
-    ) -> (Self, mpsc::Receiver<Request>, Closer) {
+    ) -> (Self, mpsc::Receiver<Request>) {
         let (tx, rx) = mpsc::channel(1);
-        let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
             Self {
                 acceptor,
                 tx,
-                tasks: tasks.clone(),
-                token: token.clone(),
+                token,
             },
             rx,
-            Closer::new(tasks, token),
         )
     }
 
@@ -83,8 +57,7 @@ impl Reader {
                             return
                         }
                     };
-                    let mut tasks = self.tasks.lock().await;
-                    tasks.spawn(listen_on_stream(stream, self.tx.clone(), self.token.child_token()));
+                    tokio::spawn(listen_on_stream(stream, self.tx.clone(), self.token.child_token()));
                 }
                 _ = self.token.cancelled() => {
                     return

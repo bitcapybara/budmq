@@ -22,10 +22,7 @@ use s2n_quic::{
     connection::Handle,
     stream::{ReceiveStream, SendStream},
 };
-use tokio::{
-    sync::{mpsc, oneshot, Mutex},
-    task::JoinSet,
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::CancellationToken,
@@ -48,26 +45,6 @@ impl PoolSender {
     pub async fn send(&self, request: Request) -> Result<()> {
         self.0.send(request).await?;
         Ok(())
-    }
-}
-
-pub struct Closer {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    token: CancellationToken,
-}
-
-impl Closer {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, token: CancellationToken) -> Self {
-        Self { tasks, token }
-    }
-
-    pub async fn close(self) {
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("stream pool task panics: {e}")
-            }
-        }
     }
 }
 
@@ -104,25 +81,21 @@ pub struct StreamPool<T: PoolRecycle> {
     res_map: ResMap,
     inner: T,
     request_rx: mpsc::Receiver<Request>,
-    tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
 impl<T: PoolRecycle> StreamPool<T> {
-    pub fn new(handle: Handle, token: CancellationToken) -> (Self, PoolSender, Closer) {
+    pub fn new(handle: Handle, token: CancellationToken) -> (Self, PoolSender) {
         let (request_tx, request_rx) = mpsc::channel(1);
-        let tasks = Arc::new(Mutex::new(JoinSet::new()));
         (
             Self {
                 inner: T::default(),
                 request_rx,
                 handle,
                 res_map: ResMap::default(),
-                tasks: tasks.clone(),
-                token: token.clone(),
+                token,
             },
             PoolSender(request_tx),
-            Closer::new(tasks, token.child_token()),
         )
     }
 
@@ -162,8 +135,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                 let stream = self.handle.open_bidirectional_stream().await?;
                 let (recv_stream, send_stream) = stream.split();
                 let framed = FramedWrite::new(send_stream, PacketCodec);
-                let mut tasks = self.tasks.lock().await;
-                tasks.spawn(start_recv(
+                tokio::spawn(start_recv(
                     self.res_map.clone(),
                     FramedRead::new(recv_stream, PacketCodec),
                 ));

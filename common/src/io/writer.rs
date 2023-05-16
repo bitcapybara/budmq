@@ -1,10 +1,10 @@
 use log::error;
 use s2n_quic::connection::Handle;
-use tokio::{select, sync::mpsc, task::JoinSet};
+use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    stream::{self, pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
+    stream::{pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
     Result,
 };
 
@@ -28,21 +28,19 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>, Closer)> {
+    pub async fn build(self) -> Result<(Writer, mpsc::Sender<Request>)> {
         let (tx, rx) = mpsc::channel(1);
-        let mut tasks = JoinSet::new();
-        let (pool_sender, pool_closer) = if self.ordered {
-            let (single, sender, closer) =
+        let pool_sender = if self.ordered {
+            let (single, sender) =
                 StreamPool::<SingleInner>::new(self.handle, self.token.child_token());
-            tasks.spawn(single.run());
-            (sender, closer)
+            tokio::spawn(single.run());
+            sender
         } else {
-            let (single, sender, closer) =
+            let (single, sender) =
                 StreamPool::<PoolInner>::new(self.handle, self.token.child_token());
-            tasks.spawn(single.run());
-            (sender, closer)
+            tokio::spawn(single.run());
+            sender
         };
-        let inner_closer = Closer::new(tasks, pool_closer, self.token.clone());
         Ok((
             Writer {
                 pool_sender,
@@ -51,7 +49,6 @@ impl WriterBuilder {
                 token: self.token,
             },
             tx,
-            inner_closer,
         ))
     }
 }
@@ -83,32 +80,6 @@ impl Writer {
                 _ = self.token.cancelled() => {
                     return
                 }
-            }
-        }
-    }
-}
-
-pub struct Closer {
-    tasks: JoinSet<()>,
-    pool_closer: stream::Closer,
-    token: CancellationToken,
-}
-
-impl Closer {
-    fn new(tasks: JoinSet<()>, pool_closer: stream::Closer, token: CancellationToken) -> Self {
-        Self {
-            token,
-            tasks,
-            pool_closer,
-        }
-    }
-
-    pub async fn close(mut self) {
-        self.token.cancel();
-        self.pool_closer.close().await;
-        while let Some(res) = self.tasks.join_next().await {
-            if let Err(e) = res {
-                error!("writer task panics: {e}")
             }
         }
     }

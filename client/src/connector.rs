@@ -183,13 +183,12 @@ impl Connector {
 
         // writer task loop
         trace!("connector::run_task: start writer task loop");
-        let (writer, writer_closer) = Writer::new(handle, task_token.clone()).await?;
+        let writer = Writer::new(handle, task_token.clone()).await?;
         let writer_runner = tokio::spawn(writer.run(server_rx, keepalive));
 
         // reader task loop
         trace!("connector::run_task: start reader task loop");
-        let (reader, reader_closer) =
-            Reader::new(self.consumers.clone(), acceptor, task_token.clone());
+        let reader = Reader::new(self.consumers.clone(), acceptor, task_token.clone());
         let reader_runner = tokio::spawn(reader.run());
 
         // resub
@@ -204,8 +203,6 @@ impl Connector {
         )
         .await;
         token.cancel();
-        reader_closer.close().await;
-        writer_closer.close().await;
 
         trace!("connector::run_task: exit");
         Ok(())

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use bud_common::{
     io::{
         stream::{self, Request},
@@ -11,8 +9,7 @@ use log::{error, trace};
 use s2n_quic::connection;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, Mutex},
-    task::JoinSet,
+    sync::{mpsc, oneshot},
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
@@ -20,34 +17,9 @@ use tokio_util::sync::CancellationToken;
 use super::Result;
 use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
-pub struct WriteCloser {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: writer::Closer,
-}
-
-impl WriteCloser {
-    pub fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::Closer) -> Self {
-        Self {
-            tasks,
-            inner_closer,
-        }
-    }
-
-    pub async fn close(self) {
-        self.inner_closer.close().await;
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("write handle task panics: {e}")
-            }
-        }
-    }
-}
-
 pub struct Writer {
     local_addr: String,
     sender: mpsc::Sender<Request>,
-    tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
@@ -56,22 +28,16 @@ impl Writer {
         local_addr: &str,
         handle: connection::Handle,
         token: CancellationToken,
-    ) -> Result<(Self, WriteCloser)> {
-        let (writer, sender, write_closer) = writer::Writer::builder(handle, token.child_token())
+    ) -> Result<Self> {
+        let (writer, sender) = writer::Writer::builder(handle, token.child_token())
             .build()
             .await?;
-        let mut tasks = JoinSet::new();
-        tasks.spawn(writer.run());
-        let tasks = Arc::new(Mutex::new(tasks));
-        Ok((
-            Self {
-                local_addr: local_addr.to_string(),
-                sender,
-                tasks: tasks.clone(),
-                token,
-            },
-            WriteCloser::new(tasks, write_closer),
-        ))
+        tokio::spawn(writer.run());
+        Ok(Self {
+            local_addr: local_addr.to_string(),
+            sender,
+            token,
+        })
     }
 
     /// messages sent from server to client
@@ -109,8 +75,7 @@ impl Writer {
     async fn send(&self, client_res_tx: oneshot::Sender<Result<()>>, packet: Packet) -> Result<()> {
         let sender = self.sender.clone();
         let token = self.token.child_token();
-        let mut tasks = self.tasks.lock().await;
-        tasks.spawn(async move {
+        tokio::spawn(async move {
             let timeout_token = token.clone();
             tokio::spawn(async move {
                 if timeout(WAIT_REPLY_TIMEOUT, timeout_token.cancelled())

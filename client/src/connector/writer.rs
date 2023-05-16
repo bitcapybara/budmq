@@ -10,7 +10,6 @@ use s2n_quic::connection::Handle;
 use tokio::{
     select,
     sync::{mpsc, oneshot, Mutex},
-    task::JoinSet,
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
@@ -24,52 +23,18 @@ pub struct OutgoingMessage {
     pub res_tx: oneshot::Sender<Result<ReturnCode>>,
 }
 
-pub struct WriterCloser {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    inner_closer: writer::Closer,
-}
-
-impl WriterCloser {
-    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner_closer: writer::Closer) -> Self {
-        Self {
-            tasks,
-            inner_closer,
-        }
-    }
-
-    pub async fn close(self) {
-        self.inner_closer.close().await;
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("client writer task panics: {e}")
-            }
-        }
-    }
-}
-
 pub struct Writer {
     sender: mpsc::Sender<Request>,
-    tasks: Arc<Mutex<JoinSet<()>>>,
     token: CancellationToken,
 }
 
 impl Writer {
-    pub async fn new(handle: Handle, token: CancellationToken) -> Result<(Self, WriterCloser)> {
-        let (writer, sender, write_closer) = writer::Writer::builder(handle, token.clone())
+    pub async fn new(handle: Handle, token: CancellationToken) -> Result<Self> {
+        let (writer, sender) = writer::Writer::builder(handle, token.clone())
             .build()
             .await?;
-        let mut tasks = JoinSet::new();
-        tasks.spawn(writer.run());
-        let tasks = Arc::new(Mutex::new(tasks));
-        Ok((
-            Self {
-                sender,
-                tasks: tasks.clone(),
-                token,
-            },
-            WriterCloser::new(tasks, write_closer),
-        ))
+        tokio::spawn(writer.run());
+        Ok(Self { sender, token })
     }
     pub async fn run(
         mut self,

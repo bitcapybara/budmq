@@ -12,7 +12,7 @@ use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
@@ -21,27 +21,6 @@ use crate::consumer::{ConsumeMessage, Consumers, CONSUME_CHANNEL_CAPACITY};
 
 use super::{Error, OutgoingMessage, Result};
 
-pub struct ReadCloser {
-    tasks: Arc<Mutex<JoinSet<()>>>,
-    inner: reader::Closer,
-}
-
-impl ReadCloser {
-    fn new(tasks: Arc<Mutex<JoinSet<()>>>, inner: reader::Closer) -> Self {
-        Self { tasks, inner }
-    }
-
-    pub async fn close(self) {
-        self.inner.close().await;
-        let mut tasks = self.tasks.lock().await;
-        while let Some(res) = tasks.join_next().await {
-            if let Err(e) = res {
-                error!("client reader task panics: {e}")
-            }
-        }
-    }
-}
-
 pub struct Reader {
     consumers: Consumers,
     receiver: mpsc::Receiver<Request>,
@@ -49,23 +28,15 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn new(
-        consumers: Consumers,
-        acceptor: StreamAcceptor,
-        token: CancellationToken,
-    ) -> (Self, ReadCloser) {
-        let (reader, receiver, inner_closer) = reader::Reader::new(acceptor, token.clone());
+    pub fn new(consumers: Consumers, acceptor: StreamAcceptor, token: CancellationToken) -> Self {
+        let (reader, receiver) = reader::Reader::new(acceptor, token.clone());
         let mut tasks = JoinSet::new();
         tasks.spawn(reader.run());
-        let tasks = Arc::new(Mutex::new(tasks));
-        (
-            Self {
-                consumers,
-                receiver,
-                token,
-            },
-            ReadCloser::new(tasks, inner_closer),
-        )
+        Self {
+            consumers,
+            receiver,
+            token,
+        }
     }
 
     pub async fn run(mut self) {

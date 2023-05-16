@@ -174,7 +174,7 @@ impl Client {
 
         // read
         trace!("client::start: start read task");
-        let (read_task, read_handle) = Reader::new(
+        let read_task = Reader::new(
             self.id,
             &local,
             self.broker_tx,
@@ -186,7 +186,7 @@ impl Client {
 
         // write
         trace!("client::start: start write task");
-        let (write_task, write_handle) = Writer::new(&local, handle, token.clone()).await?;
+        let write_task = Writer::new(&local, handle, token.clone()).await?;
         let write_runner = tokio::spawn(write_task.run(self.client_rx));
 
         // reader or writer may self-exit
@@ -195,8 +195,6 @@ impl Client {
             wait(write_runner, "client write runner"),
         )
         .await;
-        read_handle.close().await;
-        write_handle.close().await;
         trace!("client::start: exit");
         Ok(())
     }
