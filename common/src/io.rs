@@ -6,7 +6,7 @@ use tokio::{
 
 use crate::protocol::{self, ReturnCode};
 
-mod conn;
+pub mod conn;
 pub mod reader;
 pub mod stream;
 pub mod writer;
