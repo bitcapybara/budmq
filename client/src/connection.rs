@@ -206,12 +206,17 @@ pub struct ConnectionHandle {
     addr: SocketAddr,
     server_name: String,
     provider: MtlsProvider,
-    conn: Arc<Mutex<ConnectionState>>,
+    conn: Arc<Mutex<Option<ConnectionState>>>,
 }
 
 impl ConnectionHandle {
-    pub fn new(_addr: &SocketAddr) -> Self {
-        todo!()
+    pub fn new(addr: &SocketAddr, server_name: &str, provider: MtlsProvider) -> Self {
+        Self {
+            addr: addr.to_owned(),
+            server_name: server_name.to_string(),
+            provider,
+            conn: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// get the connection in manager, setup a new writer
@@ -224,7 +229,7 @@ impl ConnectionHandle {
         let rx = {
             let mut conn = self.conn.lock().await;
             match conn.deref_mut() {
-                ConnectionState::Connected(c) => {
+                Some(ConnectionState::Connected(c)) => {
                     if c.is_valid() {
                         let cloned = c.clone_one(request_rx, ordered);
                         return Ok(Arc::new(cloned));
@@ -232,11 +237,12 @@ impl ConnectionHandle {
                         None
                     }
                 }
-                ConnectionState::Connecting(waiters) => {
+                Some(ConnectionState::Connecting(waiters)) => {
                     let (tx, rx) = oneshot::channel();
                     waiters.push(tx);
                     Some(rx)
                 }
+                None => None,
             }
         };
 
@@ -259,7 +265,7 @@ impl ConnectionHandle {
             Ok(c) => c,
             Err(e) => {
                 let mut conn = self.conn.lock().await;
-                if let ConnectionState::Connecting(waiters) = conn.deref_mut() {
+                if let Some(ConnectionState::Connecting(waiters)) = conn.deref_mut() {
                     for tx in waiters.drain(..) {
                         tx.send(Err(Error::Canceled)).ok();
                     }
@@ -269,12 +275,13 @@ impl ConnectionHandle {
         };
         let mut conn = self.conn.lock().await;
         match conn.deref_mut() {
-            ConnectionState::Connected(c) => *c = new_conn.clone(),
-            ConnectionState::Connecting(waiters) => {
+            Some(ConnectionState::Connected(c)) => *c = new_conn.clone(),
+            Some(ConnectionState::Connecting(waiters)) => {
                 for tx in waiters.drain(..) {
                     tx.send(Ok(new_conn.clone())).ok();
                 }
             }
+            None => *conn = Some(ConnectionState::Connected(new_conn.clone())),
         }
         Ok(new_conn)
     }
