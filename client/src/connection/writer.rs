@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use bud_common::{
     id::next_id,
@@ -9,7 +9,7 @@ use log::{error, trace, warn};
 use s2n_quic::connection::Handle;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
@@ -32,31 +32,29 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub async fn new(
+    pub fn new(
         handle: Handle,
         ordered: bool,
         error: SharedError,
         token: CancellationToken,
-    ) -> Result<Self> {
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
         let writer = writer::Writer::builder(receiver, handle, token.clone())
             .ordered(ordered)
-            .build()
-            .await?;
+            .build();
         tokio::spawn(writer.run());
-        Ok(Self {
+        Self {
             sender,
             error,
             token,
-        })
+        }
     }
     pub async fn run(
         mut self,
-        server_rx: Arc<Mutex<mpsc::UnboundedReceiver<OutgoingMessage>>>,
+        mut server_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         keepalive: u16,
     ) {
         let keepalive = Duration::from_millis(keepalive as u64);
-        let mut server_rx = server_rx.lock().await;
         let mut ping_err_count = 0;
         loop {
             select! {

@@ -3,10 +3,7 @@ use s2n_quic::connection::Handle;
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::{
-    stream::{pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool},
-    Result,
-};
+use super::stream::{pool::PoolInner, single::SingleInner, PoolSender, Request, StreamPool};
 
 pub struct WriterBuilder {
     rx: mpsc::Receiver<Request>,
@@ -30,7 +27,7 @@ impl WriterBuilder {
         self
     }
 
-    pub async fn build(self) -> Result<Writer> {
+    pub fn build(self) -> Writer {
         let pool_sender = if self.ordered {
             let (single, sender) =
                 StreamPool::<SingleInner>::new(self.handle, self.token.child_token());
@@ -42,12 +39,12 @@ impl WriterBuilder {
             tokio::spawn(single.run());
             sender
         };
-        Ok(Writer {
+        Writer {
             pool_sender,
             ordered: self.ordered,
             rx: self.rx,
             token: self.token,
-        })
+        }
     }
 }
 

@@ -30,9 +30,7 @@ impl Writer {
         token: CancellationToken,
     ) -> Result<Self> {
         let (sender, receiver) = mpsc::channel(1);
-        let writer = writer::Writer::builder(receiver, handle, token.child_token())
-            .build()
-            .await?;
+        let writer = writer::Writer::builder(receiver, handle, token.child_token()).build();
         tokio::spawn(writer.run());
         Ok(Self {
             local_addr: local_addr.to_string(),

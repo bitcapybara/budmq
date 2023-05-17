@@ -13,11 +13,19 @@ use std::{
 
 use bud_common::{id::SerialId, mtls::MtlsProvider};
 use log::trace;
-use s2n_quic::client;
+use s2n_quic::{
+    client,
+    connection::{self, Handle},
+};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::consumer::ConsumeMessage;
+
+use self::{
+    reader::Reader,
+    writer::{OutgoingMessage, Writer},
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -125,25 +133,67 @@ pub enum ConnectionState {
 
 /// held by producer/consumer
 pub struct Connection {
-    /// use sender to send all packets
     request_id: SerialId,
-    event_tx: mpsc::UnboundedSender<Event>,
+    /// send add/del consumer events
+    register_tx: mpsc::Sender<Event>,
     /// error to indicate weather producer/consumer need to get a new connection
     error: SharedError,
+    /// connection handle
+    handle: Handle,
     /// self-managed token
     token: CancellationToken,
+    /// keepalive
+    keepalive: u16,
 }
 
 impl Connection {
-    fn new() -> Self {
+    fn new(
+        conn: connection::Connection,
+        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        ordered: bool,
+        keepalive: u16,
+    ) -> Self {
+        let (handle, acceptor) = conn.split();
+        let token = CancellationToken::new();
+        let error = SharedError::new();
+        let (register_tx, register_rx) = mpsc::channel(1);
         // create reader from s2n_quic::Acceptor
+        let reader = Reader::new(register_rx, acceptor, token.child_token());
+        tokio::spawn(reader.run());
         // create writer from s2n_quic::Handle
-        todo!()
+        let writer = Writer::new(handle.clone(), ordered, error.clone(), token.child_token());
+        tokio::spawn(writer.run(request_rx, keepalive));
+        Self {
+            request_id: SerialId::new(),
+            register_tx,
+            error,
+            token,
+            handle,
+            keepalive,
+        }
     }
 
-    fn clone_one(&self, _ordered: bool) -> Self {
+    fn clone_one(
+        &self,
+        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        ordered: bool,
+    ) -> Self {
         // create writer from s2n_quic::Handle
-        todo!()
+        let writer = Writer::new(
+            self.handle.clone(),
+            ordered,
+            self.error.clone(),
+            self.token.child_token(),
+        );
+        tokio::spawn(writer.run(request_rx, self.keepalive));
+        Self {
+            request_id: self.request_id.clone(),
+            register_tx: self.register_tx.clone(),
+            error: self.error.clone(),
+            handle: self.handle.clone(),
+            token: self.token.clone(),
+            keepalive: self.keepalive,
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -165,13 +215,19 @@ impl ConnectionHandle {
     }
 
     /// get the connection in manager, setup a new writer
-    pub async fn get_connection(&self, _ordered: bool) -> Result<Arc<Connection>> {
+    pub async fn get_connection(
+        &self,
+        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        ordered: bool,
+        keepalive: u16,
+    ) -> Result<Arc<Connection>> {
         let rx = {
             let mut conn = self.conn.lock().await;
             match conn.deref_mut() {
                 ConnectionState::Connected(c) => {
                     if c.is_valid() {
-                        return Ok(c.clone());
+                        let cloned = c.clone_one(request_rx, ordered);
+                        return Ok(Arc::new(cloned));
                     } else {
                         None
                     }
@@ -189,12 +245,17 @@ impl ConnectionHandle {
                 Ok(conn) => conn,
                 Err(_) => Err(Error::Canceled),
             },
-            None => self.connect().await,
+            None => self.connect(request_rx, ordered, keepalive).await,
         }
     }
 
-    async fn connect(&self) -> Result<Arc<Connection>> {
-        let new_conn = match self.connect_inner().await {
+    async fn connect(
+        &self,
+        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        ordered: bool,
+        keepalive: u16,
+    ) -> Result<Arc<Connection>> {
+        let new_conn = match self.connect_inner(request_rx, ordered, keepalive).await {
             Ok(c) => c,
             Err(e) => {
                 let mut conn = self.conn.lock().await;
@@ -218,7 +279,12 @@ impl ConnectionHandle {
         Ok(new_conn)
     }
 
-    async fn connect_inner(&self) -> Result<Arc<Connection>> {
+    async fn connect_inner(
+        &self,
+        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
+        ordered: bool,
+        keepalive: u16,
+    ) -> Result<Arc<Connection>> {
         // TODO loop retry backoff
         // unwrap safe: with_tls error is infallible
         trace!("connector::connect: create client and connect");
@@ -231,7 +297,9 @@ impl ConnectionHandle {
             s2n_quic::client::Connect::new(self.addr).with_server_name(self.server_name.as_str());
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
-        Ok(Arc::new(Connection::new()))
+        Ok(Arc::new(Connection::new(
+            connection, request_rx, ordered, keepalive,
+        )))
     }
 }
 
