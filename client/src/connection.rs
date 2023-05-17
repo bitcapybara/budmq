@@ -9,15 +9,18 @@ use std::{
     },
 };
 
-use bud_common::{id::SerialId, protocol::Packet};
+use bud_common::id::SerialId;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
+
+use crate::consumer::ConsumeMessage;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
     CommonIo(bud_common::io::Error),
+    Disconnect,
 }
 
 impl std::error::Error for Error {}
@@ -87,7 +90,7 @@ pub enum Event {
         consumer_id: u64,
         /// sender held by client reader
         /// receiver held by client consumer
-        sender: mpsc::UnboundedSender<Packet>,
+        sender: mpsc::UnboundedSender<ConsumeMessage>,
     },
     /// unregister consumer from client reader
     DelConsumer { consumer_id: u64 },
