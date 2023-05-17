@@ -30,6 +30,7 @@ pub use self::{
     subscribe::Subscribe,
     unsubscribe::Unsubscribe,
 };
+use self::{producer::CloseProducer, subscribe::CloseConsumer};
 
 pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
 
@@ -100,6 +101,8 @@ impl Decoder for PacketCodec {
             PacketType::Ping => Packet::Ping(Ping::decode(bytes)?),
             PacketType::Pong => Packet::Pong(Pong::decode(bytes)?),
             PacketType::Disconnect => Packet::Disconnect,
+            PacketType::CloseProducer => Packet::CloseProducer(CloseProducer::decode(bytes)?),
+            PacketType::CloseConsumer => Packet::CloseConsumer(CloseConsumer::decode(bytes)?),
         }))
     }
 }
@@ -163,6 +166,8 @@ pub enum PacketType {
     Ping,
     Pong,
     Disconnect,
+    CloseProducer,
+    CloseConsumer,
 }
 
 impl std::fmt::Display for PacketType {
@@ -181,6 +186,8 @@ impl std::fmt::Display for PacketType {
             PacketType::Ping => "PING",
             PacketType::Pong => "PONG",
             PacketType::Disconnect => "DISCONNECT",
+            PacketType::CloseProducer => "CLOSE_PRODUCER",
+            PacketType::CloseConsumer => "CLOSE_CONSUMER",
         };
         write!(f, "{s}")
     }
@@ -201,6 +208,8 @@ pub enum Packet {
     Ping(Ping),
     Pong(Pong),
     Disconnect,
+    CloseProducer(CloseProducer),
+    CloseConsumer(CloseConsumer),
 }
 
 impl Packet {
@@ -219,6 +228,8 @@ impl Packet {
             Packet::Ping(p) => p.header(),
             Packet::Pong(p) => p.header(),
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
+            Packet::CloseProducer(p) => p.header(),
+            Packet::CloseConsumer(p) => p.header(),
         }
     }
 
@@ -237,6 +248,8 @@ impl Packet {
             Packet::Ping(p) => p.encode(buf),
             Packet::Pong(p) => p.encode(buf),
             Packet::Disconnect => Ok(()),
+            Packet::CloseProducer(p) => p.encode(buf),
+            Packet::CloseConsumer(p) => p.encode(buf),
         }
     }
 
@@ -255,6 +268,8 @@ impl Packet {
             Packet::Ping(_) => PacketType::Ping,
             Packet::Pong(_) => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
+            Packet::CloseProducer(_) => PacketType::CloseProducer,
+            Packet::CloseConsumer(_) => PacketType::CloseConsumer,
         }
     }
 
@@ -273,6 +288,8 @@ impl Packet {
             Packet::Ping(p) => Some(p.request_id),
             Packet::Pong(p) => Some(p.request_id),
             Packet::Disconnect => None,
+            Packet::CloseProducer(_) => None,
+            Packet::CloseConsumer(_) => None,
         }
     }
 

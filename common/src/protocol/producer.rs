@@ -11,3 +11,8 @@ pub struct ProducerReceipt {
     pub producer_id: u64,
     pub sequence_id: u64,
 }
+
+#[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
+pub struct CloseProducer {
+    pub producer_id: u64,
+}

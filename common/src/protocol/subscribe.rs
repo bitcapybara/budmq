@@ -15,3 +15,8 @@ pub struct Subscribe {
     /// consume init position
     pub initial_position: InitialPostion,
 }
+
+#[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
+pub struct CloseConsumer {
+    pub consumer_id: u64,
+}
