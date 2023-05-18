@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 async-trait.workspace = true
 bytes.workspace = true
-chrono.workspace = true
 futures.workspace = true
 log.workspace = true
 openssl.workspace = true

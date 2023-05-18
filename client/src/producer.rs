@@ -3,7 +3,6 @@ use bud_common::{
     protocol::{Packet, Publish, ReturnCode},
 };
 use bytes::Bytes;
-use chrono::Local;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connector::{self, OutgoingMessage};
@@ -63,7 +62,7 @@ pub struct Producer {
 impl Producer {
     pub fn new(topic: &str, tx: mpsc::UnboundedSender<OutgoingMessage>) -> Self {
         // TODO use distributed id generator?
-        let sequence_id = Local::now().timestamp_millis() as u64;
+        let sequence_id = 0;
         Self {
             topic: topic.to_string(),
             sequence_id,
