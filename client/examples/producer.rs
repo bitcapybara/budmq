@@ -21,11 +21,12 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let producer = client.new_producer("test-topic");
+    let producer = client
+        .new_producer("test-topic", "test-producer", true)
+        .await?;
     if let Err(e) = produce(producer).await {
         println!("produce error: {e}")
     }
-    client.close().await.ok();
     Ok(())
 }
 

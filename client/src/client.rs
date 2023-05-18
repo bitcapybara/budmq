@@ -3,22 +3,14 @@ use std::{
     sync::{atomic::AtomicU32, Arc},
 };
 
-use bud_common::{
-    helper::wait_result,
-    mtls::MtlsProvider,
-    protocol::{Packet, ReturnCode},
-};
-use log::trace;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-};
-use tokio_util::sync::CancellationToken;
+use bud_common::{mtls::MtlsProvider, protocol::ReturnCode};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    connector::{self, Connector, ConsumerSender, OutgoingMessage},
+    connection::ConnectionHandle,
+    connector::{self, ConsumerSender, OutgoingMessage},
     consumer::{self, Consumer, Consumers, SubscribeMessage, CONSUME_CHANNEL_CAPACITY},
-    producer::Producer,
+    producer::{self, Producer},
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -28,6 +20,7 @@ pub enum Error {
     FromServer(ReturnCode),
     Internal(String),
     Connector(connector::Error),
+    Producer(producer::Error),
     Consumer(consumer::Error),
 }
 
@@ -40,7 +33,14 @@ impl std::fmt::Display for Error {
             Error::Internal(e) => write!(f, "internal error: {e}"),
             Error::Connector(e) => write!(f, "connector error: {e}"),
             Error::Consumer(e) => write!(f, "consumer error: {e}"),
+            Error::Producer(e) => write!(f, "producer error: {e}"),
         }
+    }
+}
+
+impl From<producer::Error> for Error {
+    fn from(e: producer::Error) -> Self {
+        Self::Producer(e)
     }
 }
 
@@ -94,29 +94,17 @@ impl ClientBuilder {
 
     pub async fn build(self) -> Result<Client> {
         // Channel for sending messages to the server
-        let (server_tx, server_rx) = mpsc::unbounded_channel();
+        let (server_tx, _server_rx) = mpsc::unbounded_channel();
         let consumers = Consumers::new();
-        let token = CancellationToken::new();
 
-        // connector task loop
-        trace!("client::build: start connector task loop");
-        let connector_task = Connector::new(
-            self.addr,
-            &self.server_name,
-            self.keepalive,
-            self.provider,
-            consumers.clone(),
-            server_tx.clone(),
-        )
-        .run(server_rx, token.clone());
-        let connector_handle = tokio::spawn(connector_task);
+        let conn_handle =
+            ConnectionHandle::new(&self.addr, &self.server_name, self.provider, self.keepalive);
 
         Ok(Client {
             server_tx,
             consumers,
             consumer_id_gen: 0,
-            connector_handle,
-            token,
+            conn_handle,
         })
     }
 }
@@ -125,8 +113,7 @@ pub struct Client {
     consumer_id_gen: u64,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumers: Consumers,
-    token: CancellationToken,
-    connector_handle: JoinHandle<connector::Result<()>>,
+    conn_handle: ConnectionHandle,
 }
 
 impl Client {
@@ -134,8 +121,8 @@ impl Client {
     ///
     /// * ordered: use ordered writer per producer
     /// * unordered: use a global shared writer for all producers
-    pub fn new_producer(&self, topic: &str) -> Producer {
-        Producer::new(topic, self.server_tx.clone())
+    pub async fn new_producer(&self, topic: &str, name: &str, ordered: bool) -> Result<Producer> {
+        Ok(Producer::new(topic, name, ordered, self.conn_handle.clone()).await?)
     }
 
     pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {
@@ -155,27 +142,5 @@ impl Client {
             .add_consumer(consumer.id, subscribe, sender)
             .await;
         Ok(consumer)
-    }
-
-    // TODO Drop?
-    pub async fn close(self) -> Result<()> {
-        trace!("client::close: close the client");
-
-        // send disconnect message to server
-        trace!("client::close: send DISCONNECT packet to server");
-        let (disconn_res_tx, disconn_res_rx) = oneshot::channel();
-        self.server_tx.send(OutgoingMessage {
-            packet: Packet::Disconnect,
-            res_tx: disconn_res_tx,
-        })?;
-        disconn_res_rx.await.ok();
-        // cancel token
-        self.token.cancel();
-
-        // wait for connection handler exit
-        trace!("client::close: waiting for connecotor task exit");
-        wait_result(self.connector_handle, "connector task loop").await;
-
-        Ok(())
     }
 }

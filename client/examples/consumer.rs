@@ -38,7 +38,6 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = consume(consumer).await {
         println!("consume error: {e}")
     }
-    client.close().await?;
     Ok(())
 }
 

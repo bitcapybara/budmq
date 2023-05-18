@@ -1,5 +1,5 @@
-mod reader;
-mod writer;
+pub mod reader;
+pub mod writer;
 
 use std::{
     io,
@@ -202,20 +202,28 @@ impl Connection {
 }
 
 /// connection manager held client
+#[derive(Clone)]
 pub struct ConnectionHandle {
     addr: SocketAddr,
     server_name: String,
     provider: MtlsProvider,
     conn: Arc<Mutex<Option<ConnectionState>>>,
+    keepalive: u16,
 }
 
 impl ConnectionHandle {
-    pub fn new(addr: &SocketAddr, server_name: &str, provider: MtlsProvider) -> Self {
+    pub fn new(
+        addr: &SocketAddr,
+        server_name: &str,
+        provider: MtlsProvider,
+        keepalive: u16,
+    ) -> Self {
         Self {
             addr: addr.to_owned(),
             server_name: server_name.to_string(),
             provider,
             conn: Arc::new(Mutex::new(None)),
+            keepalive,
         }
     }
 
@@ -224,7 +232,6 @@ impl ConnectionHandle {
         &self,
         request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         ordered: bool,
-        keepalive: u16,
     ) -> Result<Arc<Connection>> {
         let rx = {
             let mut conn = self.conn.lock().await;
@@ -251,7 +258,7 @@ impl ConnectionHandle {
                 Ok(conn) => conn,
                 Err(_) => Err(Error::Canceled),
             },
-            None => self.connect(request_rx, ordered, keepalive).await,
+            None => self.connect(request_rx, ordered).await,
         }
     }
 
@@ -259,9 +266,8 @@ impl ConnectionHandle {
         &self,
         request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         ordered: bool,
-        keepalive: u16,
     ) -> Result<Arc<Connection>> {
-        let new_conn = match self.connect_inner(request_rx, ordered, keepalive).await {
+        let new_conn = match self.connect_inner(request_rx, ordered).await {
             Ok(c) => c,
             Err(e) => {
                 let mut conn = self.conn.lock().await;
@@ -290,7 +296,6 @@ impl ConnectionHandle {
         &self,
         request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
         ordered: bool,
-        keepalive: u16,
     ) -> Result<Arc<Connection>> {
         // TODO loop retry backoff
         // unwrap safe: with_tls error is infallible
@@ -305,7 +310,10 @@ impl ConnectionHandle {
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
         Ok(Arc::new(Connection::new(
-            connection, request_rx, ordered, keepalive,
+            connection,
+            request_rx,
+            ordered,
+            self.keepalive,
         )))
     }
 }

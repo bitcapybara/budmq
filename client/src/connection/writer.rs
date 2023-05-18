@@ -3,7 +3,7 @@ use std::time::Duration;
 use bud_common::{
     id::next_id,
     io::{stream::Request, writer},
-    protocol::{Packet, Ping, Response, ReturnCode},
+    protocol::{Packet, Ping},
 };
 use log::{error, trace, warn};
 use s2n_quic::connection::Handle;
@@ -20,7 +20,7 @@ use super::{Result, SharedError};
 
 pub struct OutgoingMessage {
     pub packet: Packet,
-    pub res_tx: oneshot::Sender<Option<ReturnCode>>,
+    pub res_tx: oneshot::Sender<Option<Packet>>,
 }
 
 pub struct Writer {
@@ -146,7 +146,7 @@ impl Writer {
         tokio::spawn(async move {
             match Self::wait(res_rx).await {
                 Ok(Some(resp)) => {
-                    if client_res_tx.send(Some(resp.code)).is_err() {
+                    if client_res_tx.send(Some(resp)).is_err() {
                         warn!("client writer wait channel dropped");
                     }
                 }
@@ -162,13 +162,9 @@ impl Writer {
 
     async fn wait(
         res_rx: oneshot::Receiver<bud_common::io::Result<Packet>>,
-    ) -> Result<Option<Response>> {
+    ) -> Result<Option<Packet>> {
         let resp = match timeout(WAIT_REPLY_TIMEOUT, res_rx).await {
-            Ok(Ok(Ok(Packet::Response(resp)))) => resp,
-            Ok(Ok(Ok(_))) => {
-                error!("client writer: expected Packet::Response");
-                return Ok(None);
-            }
+            Ok(Ok(Ok(p))) => p,
             Ok(Ok(Err(e))) => {
                 error!("client writer decode frame error: {e}");
                 return Err(e.into());
@@ -182,10 +178,6 @@ impl Writer {
                 return Ok(None);
             }
         };
-        trace!(
-            "connector::writer::run: receive reponse from server: {}",
-            resp.code
-        );
         Ok(Some(resp))
     }
 }
