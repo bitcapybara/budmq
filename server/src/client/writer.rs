@@ -1,8 +1,5 @@
 use bud_common::{
-    io::{
-        stream::{self, Request},
-        writer,
-    },
+    io::{writer, SharedError},
     protocol::Packet,
 };
 use log::{error, trace};
@@ -19,7 +16,7 @@ use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct Writer {
     local_addr: String,
-    sender: mpsc::Sender<Request>,
+    sender: writer::Writer,
     token: CancellationToken,
 }
 
@@ -29,9 +26,7 @@ impl Writer {
         handle: connection::Handle,
         token: CancellationToken,
     ) -> Result<Self> {
-        let (sender, receiver) = mpsc::channel(1);
-        let writer = writer::Writer::builder(receiver, handle, token.child_token()).build();
-        tokio::spawn(writer.run());
+        let sender = writer::Writer::new(handle, true, SharedError::new(), token.child_token());
         Ok(Self {
             local_addr: local_addr.to_string(),
             sender,
@@ -84,23 +79,12 @@ impl Writer {
                     timeout_token.cancel();
                 }
             });
-            let (res_tx, res_rx) = oneshot::channel();
             select! {
-                res = sender.send(stream::Request { packet, res_tx }) => {
+                res = sender.send(packet) => {
                     if let Err(e) = res {
                         error!("server writer send packet error: {e}");
                     }
-                }
-                _ = token.cancelled() => {
-                    return
-                }
-            }
-            select! {
-                res = res_rx => {
-                    match res {
-                        Ok(_) => client_res_tx.send(Ok(())).ok(),
-                        Err(e) => client_res_tx.send(Err(e.into())).ok(),
-                    };
+                    client_res_tx.send(Ok(())).ok();
                 }
                 _ = token.cancelled() => {}
             }

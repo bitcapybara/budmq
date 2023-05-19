@@ -1,15 +1,11 @@
-use std::{
-    net::SocketAddr,
-    sync::{atomic::AtomicU32, Arc},
-};
+use std::net::SocketAddr;
 
 use bud_common::{mtls::MtlsProvider, protocol::ReturnCode};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    connection::ConnectionHandle,
-    connector::{self, ConsumerSender, OutgoingMessage},
-    consumer::{self, Consumer, Consumers, SubscribeMessage, CONSUME_CHANNEL_CAPACITY},
+    connection::{writer::OutgoingMessage, ConnectionHandle},
+    consumer::{self, Consumer, SubscribeMessage},
     producer::{self, Producer},
 };
 
@@ -19,7 +15,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     FromServer(ReturnCode),
     Internal(String),
-    Connector(connector::Error),
     Producer(producer::Error),
     Consumer(consumer::Error),
 }
@@ -31,7 +26,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::FromServer(e) => write!(f, "receive server error: {e}"),
             Error::Internal(e) => write!(f, "internal error: {e}"),
-            Error::Connector(e) => write!(f, "connector error: {e}"),
             Error::Consumer(e) => write!(f, "consumer error: {e}"),
             Error::Producer(e) => write!(f, "producer error: {e}"),
         }
@@ -53,12 +47,6 @@ impl From<consumer::Error> for Error {
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(e: mpsc::error::SendError<T>) -> Self {
         Self::Internal(e.to_string())
-    }
-}
-
-impl From<connector::Error> for Error {
-    fn from(e: connector::Error) -> Self {
-        Self::Connector(e)
     }
 }
 
@@ -95,14 +83,11 @@ impl ClientBuilder {
     pub async fn build(self) -> Result<Client> {
         // Channel for sending messages to the server
         let (server_tx, _server_rx) = mpsc::unbounded_channel();
-        let consumers = Consumers::new();
-
         let conn_handle =
             ConnectionHandle::new(&self.addr, &self.server_name, self.provider, self.keepalive);
 
         Ok(Client {
             server_tx,
-            consumers,
             consumer_id_gen: 0,
             conn_handle,
         })
@@ -112,7 +97,6 @@ impl ClientBuilder {
 pub struct Client {
     consumer_id_gen: u64,
     server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-    consumers: Consumers,
     conn_handle: ConnectionHandle,
 }
 
@@ -125,22 +109,7 @@ impl Client {
         Ok(Producer::new(topic, name, ordered, self.conn_handle.clone()).await?)
     }
 
-    pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {
-        let (consumer_tx, consumer_rx) = mpsc::unbounded_channel();
-        let permits = Arc::new(AtomicU32::new(CONSUME_CHANNEL_CAPACITY));
-        self.consumer_id_gen += 1;
-        let consumer = Consumer::new(
-            self.consumer_id_gen,
-            permits.clone(),
-            &subscribe,
-            self.server_tx.clone(),
-            consumer_rx,
-        )
-        .await?;
-        let sender = ConsumerSender::new(consumer.id, permits, self.server_tx.clone(), consumer_tx);
-        self.consumers
-            .add_consumer(consumer.id, subscribe, sender)
-            .await;
-        Ok(consumer)
+    pub async fn new_consumer(&mut self, _subscribe: SubscribeMessage) -> Result<Consumer> {
+        todo!()
     }
 }

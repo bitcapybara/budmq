@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use bud_common::{
     helper::wait,
+    io::SharedError,
     protocol::{self, Packet, PacketCodec, Response, ReturnCode},
 };
 use futures::{future, SinkExt, StreamExt};
@@ -170,6 +171,7 @@ impl Client {
         let local = self.conn.local_addr()?.to_string();
         let (handle, acceptor) = self.conn.split();
 
+        let error = SharedError::new();
         let token = CancellationToken::new();
 
         // read
@@ -180,6 +182,7 @@ impl Client {
             self.broker_tx,
             acceptor,
             self.keepalive,
+            error.clone(),
             token.clone(),
         );
         let read_runner = tokio::spawn(read_task.run());

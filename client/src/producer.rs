@@ -111,6 +111,7 @@ impl Producer {
     }
 
     /// use by user to send messages
+    /// TODO send_timout()/send_async() method?
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
         loop {
             self.sequence_id += 1;
@@ -160,12 +161,12 @@ impl Producer {
         self.conn = self.conn_handle.get_connection(rx, self.ordered).await?;
         self.tx = tx.clone();
         (self.id, self.sequence_id) =
-            retry_create_producer(tx, self.request_id.next(), &self.topic, &self.name).await?;
+            create_producer(tx, self.request_id.next(), &self.topic, &self.name).await?;
         Ok(())
     }
 }
 
-pub async fn retry_create_producer(
+pub async fn create_producer(
     tx: mpsc::UnboundedSender<OutgoingMessage>,
     request_id: u64,
     topic: &str,

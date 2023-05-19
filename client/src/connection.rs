@@ -1,17 +1,9 @@
 pub mod reader;
 pub mod writer;
 
-use std::{
-    io,
-    net::SocketAddr,
-    ops::DerefMut,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::{io, net::SocketAddr, ops::DerefMut, sync::Arc};
 
-use bud_common::{id::SerialId, mtls::MtlsProvider};
+use bud_common::{id::SerialId, io::SharedError, mtls::MtlsProvider};
 use log::trace;
 use s2n_quic::{
     client,
@@ -79,41 +71,6 @@ impl From<s2n_quic::connection::Error> for Error {
     }
 }
 
-#[derive(Clone)]
-pub struct SharedError {
-    error_set: Arc<AtomicBool>,
-    error: Arc<Mutex<Option<Error>>>,
-}
-
-impl SharedError {
-    pub fn new() -> SharedError {
-        SharedError {
-            error_set: Arc::new(AtomicBool::new(false)),
-            error: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    /// used by stream reader, check if error need to reconnect
-    pub fn is_set(&self) -> bool {
-        self.error_set.load(Ordering::Relaxed)
-    }
-
-    /// used by stream reader, check if error need to reconnect
-    pub async fn remove(&self) -> Option<Error> {
-        let mut lock = self.error.lock().await;
-        let error = lock.take();
-        self.error_set.store(false, Ordering::Release);
-        error
-    }
-
-    /// used by stream writer, set when error occurs in writing packets
-    pub async fn set(&self, error: Error) {
-        let mut lock = self.error.lock().await;
-        *lock = Some(error);
-        self.error_set.store(true, Ordering::Release);
-    }
-}
-
 pub enum Event {
     /// register consumer to client reader
     AddConsumer {
@@ -158,15 +115,21 @@ impl Connection {
         let error = SharedError::new();
         let (register_tx, register_rx) = mpsc::channel(1);
         // create reader from s2n_quic::Acceptor
-        let reader = Reader::new(register_rx, acceptor, token.child_token());
+        let reader = Reader::new(register_rx, acceptor, error.clone(), token.child_token());
         tokio::spawn(reader.run());
         // create writer from s2n_quic::Handle
-        let writer = Writer::new(handle.clone(), ordered, error.clone(), token.child_token());
+        let writer = Writer::new(
+            handle.clone(),
+            ordered,
+            error.clone(),
+            token.child_token(),
+            register_tx.clone(),
+        );
         tokio::spawn(writer.run(request_rx, keepalive));
         Self {
             request_id: SerialId::new(),
-            register_tx,
             error,
+            register_tx,
             token,
             handle,
             keepalive,
@@ -184,6 +147,7 @@ impl Connection {
             ordered,
             self.error.clone(),
             self.token.child_token(),
+            self.register_tx.clone(),
         );
         tokio::spawn(writer.run(request_rx, self.keepalive));
         Self {

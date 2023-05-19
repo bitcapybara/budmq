@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use bud_common::{
-    io::reader::{self, Request},
+    io::{
+        reader::{self, Request},
+        SharedError,
+    },
     protocol::{Packet, Pong, Response, ReturnCode},
 };
 use log::{error, trace, warn};
@@ -22,6 +25,7 @@ pub struct Reader {
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     read_receiver: mpsc::Receiver<Request>,
     keepalive: u16,
+    error: SharedError,
     token: CancellationToken,
 }
 
@@ -32,10 +36,11 @@ impl Reader {
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
         acceptor: StreamAcceptor,
         keepalive: u16,
+        error: SharedError,
         token: CancellationToken,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
-        let reader = reader::Reader::new(sender, acceptor, token.clone());
+        let reader = reader::Reader::new(sender, acceptor, error.clone(), token.clone());
         tokio::spawn(reader.run());
         Self {
             client_id,
@@ -44,6 +49,7 @@ impl Reader {
             read_receiver: receiver,
             keepalive,
             token,
+            error,
         }
     }
 

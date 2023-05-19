@@ -14,6 +14,8 @@ use tokio_util::{
 
 use crate::protocol::{Packet, PacketCodec};
 
+use super::SharedError;
+
 pub struct Request {
     pub packet: Packet,
     pub res_tx: oneshot::Sender<Option<Packet>>,
@@ -22,6 +24,7 @@ pub struct Request {
 pub struct Reader {
     acceptor: StreamAcceptor,
     tx: mpsc::Sender<Request>,
+    error: SharedError,
     token: CancellationToken,
 }
 
@@ -29,12 +32,14 @@ impl Reader {
     pub fn new(
         tx: mpsc::Sender<Request>,
         acceptor: StreamAcceptor,
+        error: SharedError,
         token: CancellationToken,
     ) -> Self {
         Self {
             acceptor,
             tx,
             token,
+            error,
         }
     }
 

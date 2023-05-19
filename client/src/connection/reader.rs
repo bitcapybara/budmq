@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use bud_common::{
-    io::reader::{self, Request},
+    io::{
+        reader::{self, Request},
+        SharedError,
+    },
     protocol::{Packet, Response, ReturnCode},
 };
 use log::{error, trace, warn};
@@ -27,10 +30,11 @@ impl Reader {
     pub fn new(
         register_rx: mpsc::Receiver<Event>,
         acceptor: StreamAcceptor,
+        error: SharedError,
         token: CancellationToken,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
-        let reader = reader::Reader::new(sender, acceptor, token.clone());
+        let reader = reader::Reader::new(sender, acceptor, error, token.clone());
         tokio::spawn(reader.run());
         let consumers = HashMap::new();
         Self {
