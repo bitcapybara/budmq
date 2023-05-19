@@ -9,8 +9,9 @@ use bud_common::{
 };
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
-use crate::connection::writer::OutgoingMessage;
+use crate::connection::{writer::OutgoingMessage, Connection, ConnectionHandle};
 
 pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
 
@@ -56,6 +57,26 @@ pub struct SubscribeMessage {
 pub struct ConsumeMessage {
     pub id: u64,
     pub payload: Bytes,
+}
+
+pub struct ConsumeEngine {
+    server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+    consumer_tx: mpsc::Sender<ConsumeMessage>,
+    conn: Arc<Connection>,
+    conn_handle: ConnectionHandle,
+    total_permits: u32,
+    remain_permits: u32,
+    token: CancellationToken,
+}
+
+impl ConsumeEngine {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn run(self) {
+        todo!()
+    }
 }
 
 pub struct Consumer {

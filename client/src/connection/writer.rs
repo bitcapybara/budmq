@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bud_common::{
-    id::next_id,
+    id::SerialId,
     io::writer,
     protocol::{Packet, Ping},
 };
@@ -22,6 +22,7 @@ pub struct OutgoingMessage {
 }
 
 pub struct Writer {
+    request_id: SerialId,
     /// sender message to io::writer
     sender: writer::Writer,
     /// regist consumer to reader
@@ -34,6 +35,7 @@ pub struct Writer {
 impl Writer {
     pub fn new(
         handle: Handle,
+        request_id: SerialId,
         ordered: bool,
         error: SharedError,
         token: CancellationToken,
@@ -45,6 +47,7 @@ impl Writer {
             token,
             register_tx,
             error,
+            request_id,
         }
     }
 
@@ -97,7 +100,7 @@ impl Writer {
         trace!("connector::writer::run: waiting for PONG packet");
         self.sender
             .send(Packet::Ping(Ping {
-                request_id: next_id(),
+                request_id: self.request_id.next(),
             }))
             .await?;
         todo!()

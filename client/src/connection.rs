@@ -3,7 +3,15 @@ pub mod writer;
 
 use std::{io, net::SocketAddr, ops::DerefMut, sync::Arc};
 
-use bud_common::{id::SerialId, io::SharedError, mtls::MtlsProvider};
+use bud_common::{
+    id::SerialId,
+    io::SharedError,
+    mtls::MtlsProvider,
+    protocol::{
+        CloseProducer, CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode,
+    },
+};
+use bytes::Bytes;
 use log::trace;
 use s2n_quic::{
     client,
@@ -25,6 +33,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Disconnect,
     Canceled,
+    Internal(String),
+    FromPeer(ReturnCode),
+    UnexpectedPacket,
 }
 
 impl std::error::Error for Error {}
@@ -93,6 +104,8 @@ pub struct Connection {
     request_id: SerialId,
     /// send add/del consumer events
     register_tx: mpsc::Sender<Event>,
+    /// send request
+    request_tx: mpsc::UnboundedSender<OutgoingMessage>,
     /// error to indicate weather producer/consumer need to get a new connection
     error: SharedError,
     /// connection handle
@@ -104,12 +117,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    fn new(
-        conn: connection::Connection,
-        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        ordered: bool,
-        keepalive: u16,
-    ) -> Self {
+    fn new(conn: connection::Connection, ordered: bool, keepalive: u16) -> Self {
         let (handle, acceptor) = conn.split();
         let token = CancellationToken::new();
         let error = SharedError::new();
@@ -118,41 +126,44 @@ impl Connection {
         let reader = Reader::new(register_rx, acceptor, error.clone(), token.child_token());
         tokio::spawn(reader.run());
         // create writer from s2n_quic::Handle
+        let request_id = SerialId::new();
         let writer = Writer::new(
             handle.clone(),
+            request_id.clone(),
             ordered,
             error.clone(),
             token.child_token(),
             register_tx.clone(),
         );
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
         tokio::spawn(writer.run(request_rx, keepalive));
         Self {
-            request_id: SerialId::new(),
+            request_id,
             error,
             register_tx,
             token,
             handle,
             keepalive,
+            request_tx,
         }
     }
 
-    fn clone_one(
-        &self,
-        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        ordered: bool,
-    ) -> Self {
+    fn clone_one(&self, ordered: bool) -> Self {
         // create writer from s2n_quic::Handle
         let writer = Writer::new(
             self.handle.clone(),
+            self.request_id.clone(),
             ordered,
             self.error.clone(),
             self.token.child_token(),
             self.register_tx.clone(),
         );
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
         tokio::spawn(writer.run(request_rx, self.keepalive));
         Self {
             request_id: self.request_id.clone(),
             register_tx: self.register_tx.clone(),
+            request_tx,
             error: self.error.clone(),
             handle: self.handle.clone(),
             token: self.token.clone(),
@@ -162,6 +173,60 @@ impl Connection {
 
     fn is_valid(&self) -> bool {
         !self.error.is_set()
+    }
+
+    pub async fn create_producer(&self, name: &str, topic: &str) -> Result<(u64, u64)> {
+        match self
+            .send(Packet::CreateProducer(CreateProducer {
+                request_id: self.request_id.next(),
+                producer_name: name.to_string(),
+                topic_name: topic.to_string(),
+            }))
+            .await?
+        {
+            Packet::ProducerReceipt(ProducerReceipt {
+                producer_id,
+                sequence_id,
+                ..
+            }) => Ok((producer_id, sequence_id)),
+            _ => Err(Error::UnexpectedPacket),
+        }
+    }
+
+    pub async fn publish(&self, topic: &str, sequence_id: u64, data: &[u8]) -> Result<()> {
+        match self
+            .send(Packet::Publish(Publish {
+                request_id: self.request_id.next(),
+                topic: topic.to_string(),
+                sequence_id,
+                payload: Bytes::copy_from_slice(data),
+            }))
+            .await?
+        {
+            Packet::Response(Response { code, .. }) => match code {
+                ReturnCode::Success => Ok(()),
+                code => Err(Error::FromPeer(code)),
+            },
+            _ => Err(Error::UnexpectedPacket),
+        }
+    }
+
+    pub async fn close_producer(&self, producer_id: u64) -> Result<()> {
+        self.send(Packet::CloseProducer(CloseProducer { producer_id }))
+            .await?;
+        Ok(())
+    }
+
+    async fn send(&self, packet: Packet) -> Result<Packet> {
+        let (res_tx, res_rx) = oneshot::channel();
+        self.request_tx
+            .send(OutgoingMessage { packet, res_tx })
+            .map_err(|_| Error::Disconnect)?;
+        match res_rx.await {
+            Ok(Some(packet)) => Ok(packet),
+            Ok(None) => Err(Error::Internal("response not found".to_string())),
+            Err(_) => Err(Error::Disconnect)?,
+        }
     }
 }
 
@@ -192,17 +257,13 @@ impl ConnectionHandle {
     }
 
     /// get the connection in manager, setup a new writer
-    pub async fn get_connection(
-        &self,
-        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        ordered: bool,
-    ) -> Result<Arc<Connection>> {
+    pub async fn get_connection(&self, ordered: bool) -> Result<Arc<Connection>> {
         let rx = {
             let mut conn = self.conn.lock().await;
             match conn.deref_mut() {
                 Some(ConnectionState::Connected(c)) => {
                     if c.is_valid() {
-                        let cloned = c.clone_one(request_rx, ordered);
+                        let cloned = c.clone_one(ordered);
                         return Ok(Arc::new(cloned));
                     } else {
                         None
@@ -222,16 +283,12 @@ impl ConnectionHandle {
                 Ok(conn) => conn,
                 Err(_) => Err(Error::Canceled),
             },
-            None => self.connect(request_rx, ordered).await,
+            None => self.connect(ordered).await,
         }
     }
 
-    async fn connect(
-        &self,
-        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        ordered: bool,
-    ) -> Result<Arc<Connection>> {
-        let new_conn = match self.connect_inner(request_rx, ordered).await {
+    async fn connect(&self, ordered: bool) -> Result<Arc<Connection>> {
+        let new_conn = match self.connect_inner(ordered).await {
             Ok(c) => c,
             Err(e) => {
                 let mut conn = self.conn.lock().await;
@@ -256,11 +313,7 @@ impl ConnectionHandle {
         Ok(new_conn)
     }
 
-    async fn connect_inner(
-        &self,
-        request_rx: mpsc::UnboundedReceiver<OutgoingMessage>,
-        ordered: bool,
-    ) -> Result<Arc<Connection>> {
+    async fn connect_inner(&self, ordered: bool) -> Result<Arc<Connection>> {
         // TODO loop retry backoff
         // unwrap safe: with_tls error is infallible
         trace!("connector::connect: create client and connect");
@@ -275,7 +328,6 @@ impl ConnectionHandle {
         connection.keep_alive(true)?;
         Ok(Arc::new(Connection::new(
             connection,
-            request_rx,
             ordered,
             self.keepalive,
         )))
