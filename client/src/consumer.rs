@@ -11,7 +11,7 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::connection::{writer::OutgoingMessage, Connection, ConnectionHandle};
+use crate::connection::{self, Connection, ConnectionHandle};
 
 pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
 
@@ -46,6 +46,12 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
+impl From<connection::Error> for Error {
+    fn from(_e: connection::Error) -> Self {
+        todo!()
+    }
+}
+
 #[derive(Clone)]
 pub struct SubscribeMessage {
     pub topic: String,
@@ -60,12 +66,18 @@ pub struct ConsumeMessage {
 }
 
 pub struct ConsumeEngine {
+    id: u64,
+    /// receive message from server
     server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+    /// send message to Consumer
     consumer_tx: mpsc::Sender<ConsumeMessage>,
+    /// send message to server
     conn: Arc<Connection>,
+    /// get new connection
     conn_handle: ConnectionHandle,
-    total_permits: u32,
+    /// remain permits
     remain_permits: u32,
+    /// token to notify exit
     token: CancellationToken,
 }
 
@@ -74,7 +86,36 @@ impl ConsumeEngine {
         todo!()
     }
 
-    fn run(self) {
+    async fn run(mut self) -> Result<()> {
+        loop {
+            if !self.conn.is_valid() && (self.conn.error().await).is_some() {
+                self.reconnect().await?;
+            }
+
+            if self.remain_permits < CONSUME_CHANNEL_CAPACITY / 2 {
+                let permits = CONSUME_CHANNEL_CAPACITY - self.remain_permits;
+                match self.conn.control_flow(self.id, permits).await {
+                    Ok(_) => {}
+                    Err(connection::Error::Disconnect) => {
+                        self.reconnect().await?;
+                        self.conn.control_flow(self.id, permits).await?;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            self.remain_permits = CONSUME_CHANNEL_CAPACITY;
+
+            match self.server_rx.recv().await {
+                Some(message) => {
+                    self.remain_permits -= 1;
+                    self.consumer_tx.send(message).await?;
+                }
+                None => return Ok(()),
+            }
+        }
+    }
+
+    async fn reconnect(&self) -> Result<()> {
         todo!()
     }
 }
@@ -83,7 +124,6 @@ pub struct Consumer {
     pub id: u64,
     /// remaining space of the channel
     permits: Arc<AtomicU32>,
-    server_tx: mpsc::UnboundedSender<OutgoingMessage>,
     consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
 }
 
@@ -92,8 +132,7 @@ impl Consumer {
         _id: u64,
         _permits: Arc<AtomicU32>,
         _sub: &SubscribeMessage,
-        _server_tx: mpsc::UnboundedSender<OutgoingMessage>,
-        _consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+        _server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     ) -> Result<Self> {
         // send subscribe message
         // let (sub_res_tx, sub_res_rx) = oneshot::channel();

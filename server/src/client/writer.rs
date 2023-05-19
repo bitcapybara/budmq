@@ -1,5 +1,8 @@
 use bud_common::{
-    io::{writer, SharedError},
+    io::{
+        writer::{new_pool, Request},
+        SharedError,
+    },
     protocol::Packet,
 };
 use log::{error, trace};
@@ -16,7 +19,7 @@ use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct Writer {
     local_addr: String,
-    sender: writer::Writer,
+    sender: mpsc::Sender<Request>,
     token: CancellationToken,
 }
 
@@ -26,7 +29,7 @@ impl Writer {
         handle: connection::Handle,
         token: CancellationToken,
     ) -> Result<Self> {
-        let sender = writer::Writer::new(handle, true, SharedError::new(), token.child_token());
+        let sender = new_pool(handle, true, SharedError::new(), token.child_token());
         Ok(Self {
             local_addr: local_addr.to_string(),
             sender,
@@ -79,8 +82,10 @@ impl Writer {
                     timeout_token.cancel();
                 }
             });
+            // TODO wait for res_rx
+            let (res_tx, _res_rx) = oneshot::channel();
             select! {
-                res = sender.send(packet) => {
+                res = sender.send(Request { packet , res_tx: Some(res_tx)}) => {
                     if let Err(e) = res {
                         error!("server writer send packet error: {e}");
                     }
@@ -88,6 +93,7 @@ impl Writer {
                 }
                 _ = token.cancelled() => {}
             }
+            todo!()
         });
         Ok(())
     }

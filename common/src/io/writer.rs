@@ -41,39 +41,24 @@ pub mod single;
 
 pub struct Request {
     pub packet: Packet,
-    pub res_tx: oneshot::Sender<Result<Packet>>,
+    pub res_tx: Option<oneshot::Sender<Result<Packet>>>,
 }
 
-#[derive(Clone)]
-pub struct Writer {
-    tx: mpsc::Sender<Request>,
+pub fn new_pool(
+    handle: Handle,
+    ordered: bool,
     error: SharedError,
-}
-
-impl Writer {
-    pub fn new(
-        handle: Handle,
-        ordered: bool,
-        error: SharedError,
-        token: CancellationToken,
-    ) -> Self {
-        let (tx, rx) = mpsc::channel(1);
-        if ordered {
-            let pool =
-                StreamPool::<SingleInner>::new(handle, rx, error.clone(), token.child_token());
-            tokio::spawn(pool.run());
-        } else {
-            let pool = StreamPool::<PoolInner>::new(handle, rx, error.clone(), token.child_token());
-            tokio::spawn(pool.run());
-        }
-        Self { tx, error }
+    token: CancellationToken,
+) -> mpsc::Sender<Request> {
+    let (tx, rx) = mpsc::channel(1);
+    if ordered {
+        let pool = StreamPool::<SingleInner>::new(handle, rx, error, token.child_token());
+        tokio::spawn(pool.run());
+    } else {
+        let pool = StreamPool::<PoolInner>::new(handle, rx, error, token.child_token());
+        tokio::spawn(pool.run());
     }
-
-    pub async fn send(&self, packet: Packet) -> Result<Packet> {
-        let (res_tx, res_rx) = oneshot::channel();
-        self.tx.send(Request { packet, res_tx }).await?;
-        res_rx.await?
-    }
+    tx
 }
 
 #[derive(Clone)]
@@ -147,8 +132,8 @@ impl<T: PoolRecycle> StreamPool<T> {
                         }
                     };
                     let Request { packet, res_tx } = request;
-                    match packet.request_id() {
-                        Some(id) => {
+                    match (packet.request_id(), res_tx) {
+                        (Some(id), Some(res_tx)) =>  {
                             self.res_map.add_res_tx(id, res_tx).await;
                             if let Err(e) = framed.send(packet).await {
                                 if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
@@ -156,7 +141,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                                 }
                             }
                         }
-                        None => {
+                        _ => {
                             if let Err(e) = framed.send(packet).await {
                                 error!("io::writer send packet error: {e}")
                             }

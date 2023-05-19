@@ -1,10 +1,10 @@
 use std::net::SocketAddr;
 
-use bud_common::{mtls::MtlsProvider, protocol::ReturnCode};
+use bud_common::{io::writer::Request, mtls::MtlsProvider, protocol::ReturnCode};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    connection::{writer::OutgoingMessage, ConnectionHandle},
+    connection::ConnectionHandle,
     consumer::{self, Consumer, SubscribeMessage},
     producer::{self, Producer},
 };
@@ -96,7 +96,7 @@ impl ClientBuilder {
 
 pub struct Client {
     consumer_id_gen: u64,
-    server_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    server_tx: mpsc::UnboundedSender<Request>,
     conn_handle: ConnectionHandle,
 }
 

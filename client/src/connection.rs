@@ -5,10 +5,11 @@ use std::{io, net::SocketAddr, ops::DerefMut, sync::Arc};
 
 use bud_common::{
     id::SerialId,
-    io::SharedError,
+    io::{writer::Request, SharedError},
     mtls::MtlsProvider,
     protocol::{
-        CloseProducer, CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode,
+        CloseProducer, ControlFlow, CreateProducer, Packet, ProducerReceipt, Publish, Response,
+        ReturnCode,
     },
 };
 use bytes::Bytes;
@@ -22,10 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::consumer::ConsumeMessage;
 
-use self::{
-    reader::Reader,
-    writer::{OutgoingMessage, Writer},
-};
+use self::{reader::Reader, writer::Writer};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -105,7 +103,7 @@ pub struct Connection {
     /// send add/del consumer events
     register_tx: mpsc::Sender<Event>,
     /// send request
-    request_tx: mpsc::UnboundedSender<OutgoingMessage>,
+    request_tx: mpsc::UnboundedSender<Request>,
     /// error to indicate weather producer/consumer need to get a new connection
     error: SharedError,
     /// connection handle
@@ -171,8 +169,12 @@ impl Connection {
         }
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         !self.error.is_set()
+    }
+
+    pub async fn error(&self) -> Option<bud_common::io::Error> {
+        self.error.remove().await
     }
 
     pub async fn create_producer(&self, name: &str, topic: &str) -> Result<(u64, u64)> {
@@ -194,21 +196,13 @@ impl Connection {
     }
 
     pub async fn publish(&self, topic: &str, sequence_id: u64, data: &[u8]) -> Result<()> {
-        match self
-            .send(Packet::Publish(Publish {
-                request_id: self.request_id.next(),
-                topic: topic.to_string(),
-                sequence_id,
-                payload: Bytes::copy_from_slice(data),
-            }))
-            .await?
-        {
-            Packet::Response(Response { code, .. }) => match code {
-                ReturnCode::Success => Ok(()),
-                code => Err(Error::FromPeer(code)),
-            },
-            _ => Err(Error::UnexpectedPacket),
-        }
+        self.send_ok(Packet::Publish(Publish {
+            request_id: self.request_id.next(),
+            topic: topic.to_string(),
+            sequence_id,
+            payload: Bytes::copy_from_slice(data),
+        }))
+        .await
     }
 
     pub async fn close_producer(&self, producer_id: u64) -> Result<()> {
@@ -217,14 +211,36 @@ impl Connection {
         Ok(())
     }
 
+    pub async fn control_flow(&self, consumer_id: u64, permits: u32) -> Result<()> {
+        self.send_ok(Packet::ControlFlow(ControlFlow {
+            request_id: self.request_id.next(),
+            consumer_id,
+            permits,
+        }))
+        .await
+    }
+
+    async fn send_ok(&self, packet: Packet) -> Result<()> {
+        match self.send(packet).await? {
+            Packet::Response(Response { code, .. }) => match code {
+                ReturnCode::Success => Ok(()),
+                code => Err(Error::FromPeer(code)),
+            },
+            _ => Err(Error::UnexpectedPacket),
+        }
+    }
+
     async fn send(&self, packet: Packet) -> Result<Packet> {
         let (res_tx, res_rx) = oneshot::channel();
         self.request_tx
-            .send(OutgoingMessage { packet, res_tx })
+            .send(Request {
+                packet,
+                res_tx: Some(res_tx),
+            })
             .map_err(|_| Error::Disconnect)?;
         match res_rx.await {
-            Ok(Some(packet)) => Ok(packet),
-            Ok(None) => Err(Error::Internal("response not found".to_string())),
+            Ok(Ok(packet)) => Ok(packet),
+            Ok(Err(_)) => Err(Error::Internal("send request error: {e}".to_string())),
             Err(_) => Err(Error::Disconnect)?,
         }
     }
