@@ -29,10 +29,11 @@ impl Writer {
         handle: connection::Handle,
         token: CancellationToken,
     ) -> Result<Self> {
-        let sender = new_pool(handle, true, SharedError::new(), token.child_token());
+        let (tx, rx) = mpsc::channel(1);
+        new_pool(handle, rx, true, SharedError::new(), token.child_token());
         Ok(Self {
             local_addr: local_addr.to_string(),
-            sender,
+            sender: tx,
             token,
         })
     }

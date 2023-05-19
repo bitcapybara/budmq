@@ -8,8 +8,8 @@ use bud_common::{
     io::{writer::Request, SharedError},
     mtls::MtlsProvider,
     protocol::{
-        CloseProducer, ControlFlow, CreateProducer, Packet, ProducerReceipt, Publish, Response,
-        ReturnCode,
+        CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer, Packet,
+        ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
 };
 use bytes::Bytes;
@@ -21,7 +21,7 @@ use s2n_quic::{
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use crate::consumer::ConsumeMessage;
+use crate::consumer::{ConsumeMessage, SubscribeMessage};
 
 use self::{reader::Reader, writer::Writer};
 
@@ -131,7 +131,6 @@ impl Connection {
             ordered,
             error.clone(),
             token.child_token(),
-            register_tx.clone(),
         );
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         tokio::spawn(writer.run(request_rx, keepalive));
@@ -154,7 +153,6 @@ impl Connection {
             ordered,
             self.error.clone(),
             self.token.child_token(),
-            self.register_tx.clone(),
         );
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         tokio::spawn(writer.run(request_rx, self.keepalive));
@@ -206,9 +204,62 @@ impl Connection {
     }
 
     pub async fn close_producer(&self, producer_id: u64) -> Result<()> {
-        self.send(Packet::CloseProducer(CloseProducer { producer_id }))
+        self.send_async(Packet::CloseProducer(CloseProducer { producer_id }))
+            .await
+    }
+
+    pub async fn close_consumer(&self, consumer_id: u64) -> Result<()> {
+        self.send_async(Packet::CloseConsumer(CloseConsumer { consumer_id }))
+            .await?;
+        self.register_tx
+            .send(Event::DelConsumer { consumer_id })
             .await?;
         Ok(())
+    }
+
+    pub async fn subscribe(
+        &self,
+        consumer_id: u64,
+        sub: &SubscribeMessage,
+        tx: mpsc::UnboundedSender<ConsumeMessage>,
+    ) -> Result<()> {
+        self.send_ok(Packet::Subscribe(Subscribe {
+            request_id: self.request_id.next(),
+            consumer_id,
+            topic: sub.topic.to_string(),
+            sub_name: sub.sub_name.to_string(),
+            sub_type: sub.sub_type,
+            initial_position: sub.initial_postion,
+        }))
+        .await?;
+        self.register_tx
+            .send(Event::AddConsumer {
+                consumer_id,
+                sender: tx,
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn unsubscribe(&self, consumer_id: u64) -> Result<()> {
+        self.send_ok(Packet::Unsubscribe(bud_common::protocol::Unsubscribe {
+            request_id: self.request_id.next(),
+            consumer_id,
+        }))
+        .await?;
+        self.register_tx
+            .send(Event::DelConsumer { consumer_id })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn ack(&self, consumer_id: u64, message_id: u64) -> Result<()> {
+        self.send_ok(Packet::ConsumeAck(ConsumeAck {
+            request_id: self.request_id.next(),
+            consumer_id,
+            message_id,
+        }))
+        .await
     }
 
     pub async fn control_flow(&self, consumer_id: u64, permits: u32) -> Result<()> {
@@ -243,6 +294,15 @@ impl Connection {
             Ok(Err(_)) => Err(Error::Internal("send request error: {e}".to_string())),
             Err(_) => Err(Error::Disconnect)?,
         }
+    }
+
+    async fn send_async(&self, packet: Packet) -> Result<()> {
+        self.request_tx
+            .send(Request {
+                packet,
+                res_tx: None,
+            })
+            .map_err(|_| Error::Disconnect)
     }
 }
 

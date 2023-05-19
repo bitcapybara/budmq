@@ -46,11 +46,11 @@ pub struct Request {
 
 pub fn new_pool(
     handle: Handle,
+    rx: mpsc::Receiver<Request>,
     ordered: bool,
     error: SharedError,
     token: CancellationToken,
-) -> mpsc::Sender<Request> {
-    let (tx, rx) = mpsc::channel(1);
+) {
     if ordered {
         let pool = StreamPool::<SingleInner>::new(handle, rx, error, token.child_token());
         tokio::spawn(pool.run());
@@ -58,7 +58,6 @@ pub fn new_pool(
         let pool = StreamPool::<PoolInner>::new(handle, rx, error, token.child_token());
         tokio::spawn(pool.run());
     }
-    tx
 }
 
 #[derive(Clone)]

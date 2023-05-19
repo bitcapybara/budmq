@@ -1,14 +1,15 @@
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use bud_common::{
     protocol::ReturnCode,
     subscription::{InitialPostion, SubType},
 };
 use bytes::Bytes;
-use tokio::sync::{mpsc, oneshot};
+use log::warn;
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{self, Connection, ConnectionHandle};
@@ -65,12 +66,20 @@ pub struct ConsumeMessage {
     pub payload: Bytes,
 }
 
+pub enum ConsumerEvent {
+    Ack { message_id: u64 },
+    Unsubscribe,
+}
+
 pub struct ConsumeEngine {
     id: u64,
+    sub_message: SubscribeMessage,
     /// receive message from server
     server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
     /// send message to Consumer
     consumer_tx: mpsc::Sender<ConsumeMessage>,
+    /// receive message from user, send to server
+    event_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
     /// send message to server
     conn: Arc<Connection>,
     /// get new connection
@@ -82,8 +91,26 @@ pub struct ConsumeEngine {
 }
 
 impl ConsumeEngine {
-    fn new() -> Self {
-        todo!()
+    async fn new(
+        id: u64,
+        sub_message: &SubscribeMessage,
+        server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+        event_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
+        consumer_tx: mpsc::Sender<ConsumeMessage>,
+        conn_handle: ConnectionHandle,
+        token: CancellationToken,
+    ) -> Result<Self> {
+        Ok(Self {
+            id,
+            sub_message: sub_message.clone(),
+            server_rx,
+            consumer_tx,
+            conn: conn_handle.get_connection(false).await?,
+            conn_handle,
+            remain_permits: 0,
+            token,
+            event_rx,
+        })
     }
 
     async fn run(mut self) -> Result<()> {
@@ -105,97 +132,80 @@ impl ConsumeEngine {
             }
             self.remain_permits = CONSUME_CHANNEL_CAPACITY;
 
-            match self.server_rx.recv().await {
-                Some(message) => {
+            select! {
+                res = self.server_rx.recv() => {
+                    let Some(message) = res else {
+                        return Ok(());
+                    };
                     self.remain_permits -= 1;
                     self.consumer_tx.send(message).await?;
                 }
-                None => return Ok(()),
+                res = self.event_rx.recv() => {
+                    let Some(event) = res else {
+                        return Ok(());
+                    };
+                    match event {
+                        ConsumerEvent::Ack { message_id } => {
+                            self.conn.ack(self.id, message_id).await?;
+                        },
+                        ConsumerEvent::Unsubscribe => {
+                            self.conn.unsubscribe(self.id).await?;
+                            return Ok(())
+                        },
+                    }
+                }
             }
         }
     }
 
-    async fn reconnect(&self) -> Result<()> {
-        todo!()
+    async fn reconnect(&mut self) -> Result<()> {
+        if let Err(e) = self.conn.close_consumer(self.id).await {
+            warn!("client send CLOSE_CONSUMER packet error: {e}");
+        }
+
+        self.conn = self.conn_handle.get_connection(false).await?;
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.conn
+            .subscribe(self.id, &self.sub_message.clone(), tx)
+            .await?;
+        self.server_rx = rx;
+        Ok(())
     }
 }
 
 pub struct Consumer {
-    pub id: u64,
     /// remaining space of the channel
-    permits: Arc<AtomicU32>,
-    consumer_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+    consumer_rx: mpsc::Receiver<ConsumeMessage>,
+    /// send event to server
+    event_tx: mpsc::UnboundedSender<ConsumerEvent>,
 }
 
 impl Consumer {
     pub async fn new(
-        _id: u64,
-        _permits: Arc<AtomicU32>,
-        _sub: &SubscribeMessage,
-        _server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+        id: u64,
+        conn_handle: ConnectionHandle,
+        sub_message: &SubscribeMessage,
+        server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
+        token: CancellationToken,
     ) -> Result<Self> {
-        // send subscribe message
-        // let (sub_res_tx, sub_res_rx) = oneshot::channel();
-        // server_tx.send(OutgoingMessage {
-        //     packet: Packet::Subscribe(Subscribe {
-        //         topic: sub.topic.clone(),
-        //         sub_name: sub.sub_name.clone(),
-        //         sub_type: sub.sub_type,
-        //         consumer_id: id,
-        //         initial_position: sub.initial_postion,
-        //         request_id: next_id(),
-        //     }),
-        //     res_tx: sub_res_tx,
-        // })?;
-        // let code = sub_res_rx.await??;
-        // if code != ReturnCode::Success {
-        //     return Err(Error::FromServer(code));
-        // }
-        // // send permits packet on init
-        // let (permits_res_tx, permits_res_rx) = oneshot::channel();
-        // server_tx.send(OutgoingMessage {
-        //     packet: Packet::ControlFlow(ControlFlow {
-        //         consumer_id: id,
-        //         permits: permits.load(Ordering::SeqCst),
-        //         request_id: next_id(),
-        //     }),
-        //     res_tx: permits_res_tx,
-        // })?;
-        // let code = permits_res_rx.await??;
-        // if code != ReturnCode::Success {
-        //     return Err(Error::FromServer(code));
-        // }
-        // Ok(Self {
-        //     id,
-        //     permits,
-        //     server_tx,
-        //     consumer_rx,
-        // })
-        todo!()
+        let (tx, rx) = mpsc::channel(CONSUME_CHANNEL_CAPACITY as usize);
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let engine =
+            ConsumeEngine::new(id, sub_message, server_rx, event_rx, tx, conn_handle, token)
+                .await?;
+        tokio::spawn(engine.run());
+        Ok(Self {
+            consumer_rx: rx,
+            event_tx,
+        })
     }
 
     pub async fn next(&mut self) -> Option<ConsumeMessage> {
-        let msg = self.consumer_rx.recv().await;
-        if msg.is_some() {
-            self.permits.fetch_add(1, Ordering::SeqCst);
-        }
-        msg
+        self.consumer_rx.recv().await
     }
 
-    pub async fn ack(&self, _message_id: u64) -> Result<()> {
-        // let (res_tx, res_rx) = oneshot::channel();
-        // self.server_tx.send(OutgoingMessage {
-        //     packet: Packet::ConsumeAck(ConsumeAck {
-        //         consumer_id: self.id,
-        //         message_id,
-        //         request_id: next_id(),
-        //     }),
-        //     res_tx,
-        // })?;
-        // match res_rx.await?? {
-        //     ReturnCode::Success => Ok(()),
-        //     code => Err(Error::FromServer(code)),
-        // }
-        todo!()
+    pub fn ack(&self, message_id: u64) -> Result<()> {
+        self.event_tx.send(ConsumerEvent::Ack { message_id })?;
+        Ok(())
     }
 }
