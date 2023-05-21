@@ -24,6 +24,9 @@ impl PoolRecycle for PoolInner {
     }
 
     fn put(&self, stream: IdleStream) {
+        if stream.error.is_set() {
+            return;
+        }
         let mut streams = self.idle_streams.lock();
         streams.push(stream)
     }

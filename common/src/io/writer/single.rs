@@ -25,6 +25,9 @@ impl PoolRecycle for SingleInner {
 
     fn put(&self, idle_stream: super::IdleStream) {
         let mut stream = self.stream.lock();
+        if idle_stream.error.is_set() {
+            stream.take();
+        }
         stream.replace(idle_stream);
     }
 }

@@ -22,6 +22,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     FromServer(ReturnCode),
     Internal(String),
+    Connection(connection::Error),
 }
 
 impl std::error::Error for Error {}
@@ -31,6 +32,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::FromServer(code) => write!(f, "receive from server: {code}"),
             Error::Internal(e) => write!(f, "internal error: {e}"),
+            Error::Connection(e) => write!(f, "connection error: {e}"),
         }
     }
 }
@@ -48,8 +50,8 @@ impl From<oneshot::error::RecvError> for Error {
 }
 
 impl From<connection::Error> for Error {
-    fn from(_e: connection::Error) -> Self {
-        todo!()
+    fn from(e: connection::Error) -> Self {
+        Self::Connection(e)
     }
 }
 
@@ -153,6 +155,9 @@ impl ConsumeEngine {
                             return Ok(())
                         },
                     }
+                }
+                _ = self.token.cancelled() => {
+                    return Ok(())
                 }
             }
         }

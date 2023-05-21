@@ -23,6 +23,8 @@ pub enum Error {
     ResDropped(oneshot::error::RecvError),
     Timeout,
     Connection(connection::Error),
+    ConnectionClosed,
+    StreamDisconnect,
     Protocol(protocol::Error),
 }
 
@@ -37,6 +39,8 @@ impl std::fmt::Display for Error {
             Error::Timeout => write!(f, "wait for message timeout"),
             Error::Connection(e) => write!(f, "connection error: {e}"),
             Error::Protocol(e) => write!(f, "protocol error: {e}"),
+            Error::ConnectionClosed => write!(f, "connection closed without error"),
+            Error::StreamDisconnect => write!(f, "stream disconnect"),
         }
     }
 }

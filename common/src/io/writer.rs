@@ -33,7 +33,7 @@ use tokio_util::{
 
 use self::{pool::PoolInner, single::SingleInner};
 
-use super::{Result, SharedError};
+use super::{Error, Result, SharedError};
 use crate::protocol::{Packet, PacketCodec};
 
 pub mod pool;
@@ -123,25 +123,27 @@ impl<T: PoolRecycle> StreamPool<T> {
                         return
                     };
                     // framed will recycled after send packet
-                    let mut framed = match self.create().await {
+                    let mut pooled = match self.create().await {
                         Ok(stream) => stream,
                         Err(e) => {
-                            error!("pool get stream error: {e}");
-                            continue;
+                            self.error.set(e).await;
+                            return
                         }
                     };
                     let Request { packet, res_tx } = request;
                     match (packet.request_id(), res_tx) {
                         (Some(id), Some(res_tx)) =>  {
                             self.res_map.add_res_tx(id, res_tx).await;
-                            if let Err(e) = framed.send(packet).await {
+                            if let Err(e) = pooled.send(packet).await {
+                                pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
                                 if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
                                     res_tx.send(Err(e.into())).ok();
                                 }
                             }
                         }
                         _ => {
-                            if let Err(e) = framed.send(packet).await {
+                            if let Err(e) = pooled.send(packet).await {
+                                pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
                                 error!("io::writer send packet error: {e}")
                             }
                         }
@@ -161,23 +163,29 @@ impl<T: PoolRecycle> StreamPool<T> {
                 let stream = self.handle.open_bidirectional_stream().await?;
                 let (recv_stream, send_stream) = stream.split();
                 let framed = FramedWrite::new(send_stream, PacketCodec);
+                let error = SharedError::new();
                 tokio::spawn(start_recv(
                     self.res_map.clone(),
                     FramedRead::new(recv_stream, PacketCodec),
+                    error.clone(),
                 ));
-                Ok(PooledStream::new(self.inner.clone(), framed))
+                Ok(PooledStream::new(self.inner.clone(), framed, error))
             }
         }
     }
 }
 
-async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, PacketCodec>) {
+async fn start_recv(
+    res_map: ResMap,
+    mut framed: FramedRead<ReceiveStream, PacketCodec>,
+    error: SharedError,
+) {
     while let Some(packet_res) = framed.next().await {
         let packet = match packet_res {
             Ok(packet) => packet,
             Err(e) => {
-                error!("io::writer decode protocol error: {e}");
-                continue;
+                error.set(e.into()).await;
+                return;
             }
         };
         let Some(request_id) = packet.request_id() else {
@@ -192,11 +200,12 @@ async fn start_recv(res_map: ResMap, mut framed: FramedRead<ReceiveStream, Packe
 /// used in pool
 pub struct IdleStream {
     framed: FramedWrite<SendStream, PacketCodec>,
+    error: SharedError,
 }
 
 impl IdleStream {
-    fn new(framed: FramedWrite<SendStream, PacketCodec>) -> Self {
-        Self { framed }
+    fn new(framed: FramedWrite<SendStream, PacketCodec>, error: SharedError) -> Self {
+        Self { framed, error }
     }
 }
 
@@ -207,8 +216,8 @@ pub struct PooledStream<T: PoolRecycle> {
 }
 
 impl<T: PoolRecycle> PooledStream<T> {
-    fn new(pool: T, framed: FramedWrite<SendStream, PacketCodec>) -> Self {
-        Self::new_idle(pool, IdleStream::new(framed))
+    fn new(pool: T, framed: FramedWrite<SendStream, PacketCodec>, error: SharedError) -> Self {
+        Self::new_idle(pool, IdleStream::new(framed, error))
     }
 
     fn new_idle(pool: T, stream: IdleStream) -> Self {
@@ -216,6 +225,13 @@ impl<T: PoolRecycle> PooledStream<T> {
             pool,
             stream: Some(stream),
         }
+    }
+
+    async fn set_error(&self, error: Error) {
+        let Some(stream) = &self.stream else {
+            return
+        };
+        stream.error.set(error).await
     }
 }
 

@@ -12,7 +12,10 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use crate::protocol::{Packet, PacketCodec};
+use crate::{
+    io::Error,
+    protocol::{Packet, PacketCodec},
+};
 
 use super::SharedError;
 
@@ -50,12 +53,12 @@ impl Reader {
                     let stream = match res {
                         Ok(Some(stream)) => stream,
                         Ok(None) => {
-                            self.token.cancel();
+                            self.error.set(Error::ConnectionClosed).await;
                             return
                         }
                         Err(e) => {
+                            self.error.set(Error::Connection(e)).await;
                             error!("no stream could be accepted due to an error: {e}");
-                            self.token.cancel();
                             return
                         }
                     };
@@ -85,27 +88,33 @@ async fn listen_on_stream(
                 let packet = match res {
                     Some(Ok(packet)) => packet,
                     Some(Err(e)) => {
-                        error!("io::reader decode frame error: {e}");
-                        continue;
+                        error!("io reader decode packet error: {e}");
+                        return;
                     }
                     None => return
                 };
                 let (res_tx, res_rx) = oneshot::channel();
                 // async wait for response
                 let send_framed = send_framed.clone();
+                let token = token.clone();
                 tokio::spawn(async move {
-                    // TODO timeout
-                    match res_rx.await {
-                        Ok(Some(packet)) => {
-                            let mut framed = send_framed.lock().await;
-                            if let Err(e) = framed.send(packet).await {
-                                error!("io::reader send response error: {e}")
+                    select! {
+                        // TODO timeout?
+                        res = res_rx => {
+                            match res {
+                                Ok(Some(packet)) => {
+                                    let mut framed = send_framed.lock().await;
+                                    if let Err(e) = framed.send(packet).await {
+                                        error!("io::reader send response error: {e}")
+                                    }
+                                }
+                                Err(_) => {
+                                    error!("io::reader res_tx dropped without send");
+                                }
+                                Ok(None) => {/* no need to send response */}
                             }
                         }
-                        Err(_) => {
-                            error!("io::reader res_tx dropped without send");
-                        }
-                        Ok(None) => {/* no need to send response */}
+                        _ = token.cancelled() => {}
                     }
                 });
                 if let Err(e) = tx.send(Request { packet, res_tx }).await {
