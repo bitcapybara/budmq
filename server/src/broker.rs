@@ -16,7 +16,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    client,
     subscription::{self, SendEvent, Subscription},
     topic::{self, Topic},
     WAIT_REPLY_TIMEOUT,
@@ -83,7 +82,7 @@ pub struct ClientMessage {
 /// messages from broker to client
 pub struct BrokerMessage {
     pub packet: protocol::Packet,
-    pub res_tx: oneshot::Sender<client::Result<()>>,
+    pub res_tx: oneshot::Sender<bud_common::io::Result<Packet>>,
 }
 
 struct SubInfo {
@@ -234,7 +233,7 @@ impl<S: Storage> Broker<S> {
                     return;
                 }
                 Ok(Ok(Err(e))) => {
-                    if let client::Error::Client(ReturnCode::ConsumerDuplicated) = e {
+                    if let bud_common::io::Error::FromPeer(ReturnCode::ConsumerDuplicated) = e {
                         if event.res_tx.send(true).is_err() {
                             error!("broker reply ok to send event error")
                         }

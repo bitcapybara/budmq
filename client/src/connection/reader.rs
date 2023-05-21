@@ -44,6 +44,7 @@ impl Reader {
         }
     }
 
+    /// TODO impl Future trait
     pub async fn run(mut self) {
         loop {
             select! {

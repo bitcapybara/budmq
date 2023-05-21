@@ -176,21 +176,23 @@ impl Client {
 
         // read
         trace!("client::start: start read task");
-        let read_task = Reader::new(
-            self.id,
-            &local,
-            self.broker_tx,
-            acceptor,
-            self.keepalive,
-            error.clone(),
-            token.clone(),
+        let read_runner = tokio::spawn(
+            Reader::new(
+                self.id,
+                &local,
+                self.broker_tx,
+                acceptor,
+                self.keepalive,
+                error.clone(),
+                token.clone(),
+            )
+            .run(),
         );
-        let read_runner = tokio::spawn(read_task.run());
 
         // write
         trace!("client::start: start write task");
-        let write_task = Writer::new(&local, handle, token.clone()).await?;
-        let write_runner = tokio::spawn(write_task.run(self.client_rx));
+        let write_runner =
+            tokio::spawn(Writer::new(&local, handle, self.client_rx, error, token.clone()).run());
 
         // reader or writer may self-exit
         future::join(

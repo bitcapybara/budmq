@@ -121,8 +121,7 @@ impl Connection {
         let error = SharedError::new();
         let (register_tx, register_rx) = mpsc::channel(1);
         // create reader from s2n_quic::Acceptor
-        let reader = Reader::new(register_rx, acceptor, error.clone(), token.child_token());
-        tokio::spawn(reader.run());
+        tokio::spawn(Reader::new(register_rx, acceptor, error.clone(), token.child_token()).run());
         // create writer from s2n_quic::Handle
         let request_id = SerialId::new();
         let (request_tx, request_rx) = mpsc::unbounded_channel();

@@ -1,67 +1,63 @@
-use bud_common::{
-    io::{
-        writer::{new_pool, Request},
-        SharedError,
-    },
-    protocol::Packet,
+use bud_common::io::{
+    writer::{new_pool, Request},
+    Error, SharedError,
 };
-use log::{error, trace};
+use log::trace;
 use s2n_quic::connection;
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-    time::timeout,
-};
+use tokio::{select, sync::mpsc, time::timeout};
 use tokio_util::sync::CancellationToken;
 
-use super::Result;
 use crate::{broker::BrokerMessage, WAIT_REPLY_TIMEOUT};
 
 pub struct Writer {
     local_addr: String,
+    /// send message to io stream
     sender: mpsc::Sender<Request>,
+    /// receive message from broker, send to client
+    client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
+    error: SharedError,
     token: CancellationToken,
 }
 
 impl Writer {
-    pub async fn new(
+    pub fn new(
         local_addr: &str,
         handle: connection::Handle,
+        client_rx: mpsc::UnboundedReceiver<BrokerMessage>,
+        error: SharedError,
         token: CancellationToken,
-    ) -> Result<Self> {
+    ) -> Self {
         let (tx, rx) = mpsc::channel(1);
-        new_pool(handle, rx, true, SharedError::new(), token.child_token());
-        Ok(Self {
+        new_pool(handle, rx, true, error.clone(), token.child_token());
+        Self {
             local_addr: local_addr.to_string(),
             sender: tx,
             token,
-        })
+            error,
+            client_rx,
+        }
     }
 
     /// messages sent from server to client
     /// need to open a new stream to send messages
     /// client_rx: receive message from broker
-    pub async fn run(self, mut client_rx: mpsc::UnboundedReceiver<BrokerMessage>) {
+    /// TODO impl Future trait
+    pub async fn run(mut self) {
         loop {
+            if self.error.is_set() {
+                self.token.cancel();
+                return;
+            }
             select! {
-                res = client_rx.recv() => {
+                res = self.client_rx.recv() => {
                     let Some(message) = res else {
+                        self.error.set(Error::ConnectionClosed).await;
                         return
                     };
                     trace!("client:writer: receive a new packet task, open stream");
                     // send to client: framed.send(Packet) async? error log?
-                    match message.packet {
-                        p @ Packet::Send(_) => {
-                            trace!("client::writer: Send SEND packet to client");
-                            if let Err(e) = self.send(message.res_tx, p).await {
-                                error!("send message to client error: {e}");
-                            }
-                        }
-                        p => error!(
-                            "received unexpected packet from broker: {:?}",
-                            p.packet_type()
-                        ),
-                    }
+                    trace!("client::writer: Send SEND packet to client");
+                    self.send(message).await;
                 }
                 _ = self.token.cancelled() => {
                     return
@@ -70,9 +66,11 @@ impl Writer {
         }
     }
 
-    async fn send(&self, client_res_tx: oneshot::Sender<Result<()>>, packet: Packet) -> Result<()> {
+    async fn send(&self, message: BrokerMessage) {
+        let BrokerMessage { packet, res_tx } = message;
         let sender = self.sender.clone();
         let token = self.token.child_token();
+        let error = self.error.clone();
         tokio::spawn(async move {
             let timeout_token = token.clone();
             tokio::spawn(async move {
@@ -83,19 +81,15 @@ impl Writer {
                     timeout_token.cancel();
                 }
             });
-            // TODO wait for res_rx
-            let (res_tx, _res_rx) = oneshot::channel();
+
             select! {
                 res = sender.send(Request { packet , res_tx: Some(res_tx)}) => {
-                    if let Err(e) = res {
-                        error!("server writer send packet error: {e}");
+                    if let Err(_e) = res {
+                        error.set(Error::ConnectionClosed).await;
                     }
-                    client_res_tx.send(Ok(())).ok();
                 }
                 _ = token.cancelled() => {}
             }
-            todo!()
         });
-        Ok(())
     }
 }
