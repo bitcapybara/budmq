@@ -88,16 +88,16 @@ impl ClientBuilder {
 
         Ok(Client {
             server_tx,
-            consumer_id_gen: 0,
+            consumer_id: 0,
             conn_handle,
         })
     }
 }
 
 pub struct Client {
-    consumer_id_gen: u64,
     server_tx: mpsc::UnboundedSender<Request>,
     conn_handle: ConnectionHandle,
+    consumer_id: u64,
 }
 
 impl Client {
@@ -106,10 +106,11 @@ impl Client {
     /// * ordered: use ordered writer per producer
     /// * unordered: use a global shared writer for all producers
     pub async fn new_producer(&self, topic: &str, name: &str, ordered: bool) -> Result<Producer> {
-        Ok(Producer::new(topic, name, ordered, self.conn_handle.clone()).await?)
+        Ok(Producer::new(name, topic, ordered, self.conn_handle.clone()).await?)
     }
 
-    pub async fn new_consumer(&mut self, _subscribe: SubscribeMessage) -> Result<Consumer> {
-        todo!()
+    pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {
+        self.consumer_id += 1;
+        Ok(Consumer::new(self.consumer_id, self.conn_handle.clone(), &subscribe).await?)
     }
 }

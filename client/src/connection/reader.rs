@@ -34,8 +34,7 @@ impl Reader {
         token: CancellationToken,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(1);
-        let reader = reader::Reader::new(sender, acceptor, error, token.clone());
-        tokio::spawn(reader.run());
+        tokio::spawn(reader::Reader::new(sender, acceptor, error, token.clone()).run());
         let consumers = HashMap::new();
         Self {
             consumers,

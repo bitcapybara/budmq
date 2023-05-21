@@ -3,7 +3,7 @@ use std::time::Duration;
 use bud_common::{
     io::{
         reader::{self, Request},
-        SharedError,
+        Error, SharedError,
     },
     protocol::{Packet, Pong, Response, ReturnCode},
 };
@@ -64,6 +64,7 @@ impl Reader {
                         Ok(Some(stream)) => self.process_stream(stream).await,
                         Ok(None) => {
                             error!("server connection closed");
+                            self.error.set(Error::ConnectionClosed).await;
                             return;
                         }
                         Err(_) => {
@@ -77,6 +78,7 @@ impl Reader {
                             }) {
                                 error!("wait for PING timeout, send DISCONNECT packet to broker error: {e}")
                             }
+                            self.error.set(Error::ConnectionClosed).await;
                             return
                         }
                     }

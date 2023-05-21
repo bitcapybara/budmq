@@ -227,11 +227,12 @@ impl<T: PoolRecycle> PooledStream<T> {
         }
     }
 
-    async fn set_error(&self, error: Error) {
-        let Some(stream) = &self.stream else {
+    async fn set_error(&mut self, error: Error) {
+        let Some(stream) = &mut self.stream else {
             return
         };
-        stream.error.set(error).await
+        stream.error.set(error).await;
+        stream.framed.close().await.ok();
     }
 }
 

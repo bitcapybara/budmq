@@ -125,15 +125,19 @@ impl Connection {
         tokio::spawn(reader.run());
         // create writer from s2n_quic::Handle
         let request_id = SerialId::new();
-        let writer = Writer::new(
-            handle.clone(),
-            request_id.clone(),
-            ordered,
-            error.clone(),
-            token.child_token(),
-        );
         let (request_tx, request_rx) = mpsc::unbounded_channel();
-        tokio::spawn(writer.run(request_rx, keepalive));
+        tokio::spawn(
+            Writer::new(
+                handle.clone(),
+                request_id.clone(),
+                ordered,
+                error.clone(),
+                token.child_token(),
+                request_rx,
+                keepalive,
+            )
+            .run(),
+        );
         Self {
             request_id,
             error,
@@ -147,15 +151,19 @@ impl Connection {
 
     fn clone_one(&self, ordered: bool) -> Self {
         // create writer from s2n_quic::Handle
-        let writer = Writer::new(
-            self.handle.clone(),
-            self.request_id.clone(),
-            ordered,
-            self.error.clone(),
-            self.token.child_token(),
-        );
         let (request_tx, request_rx) = mpsc::unbounded_channel();
-        tokio::spawn(writer.run(request_rx, self.keepalive));
+        tokio::spawn(
+            Writer::new(
+                self.handle.clone(),
+                self.request_id.clone(),
+                ordered,
+                self.error.clone(),
+                self.token.child_token(),
+                request_rx,
+                self.keepalive,
+            )
+            .run(),
+        );
         Self {
             request_id: self.request_id.clone(),
             register_tx: self.register_tx.clone(),

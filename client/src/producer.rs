@@ -66,8 +66,8 @@ pub struct Producer {
 
 impl Producer {
     pub async fn new(
-        topic: &str,
         name: &str,
+        topic: &str,
         ordered: bool,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
@@ -102,7 +102,7 @@ impl Producer {
         }
     }
 
-    pub async fn reconnect(&mut self) -> Result<()> {
+    async fn reconnect(&mut self) -> Result<()> {
         if let Err(e) = self.conn.close_producer(self.id).await {
             warn!("client CLOSE_PRODUCER error: {e}")
         }
