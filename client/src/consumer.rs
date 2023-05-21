@@ -104,6 +104,7 @@ impl ConsumeEngine {
         let conn = conn_handle.get_connection(false).await?;
         let (server_tx, server_rx) = mpsc::unbounded_channel();
         conn.subscribe(id, sub_message, server_tx).await?;
+        conn.control_flow(id, CONSUME_CHANNEL_CAPACITY).await?;
         Ok(Self {
             id,
             sub_message: sub_message.clone(),
@@ -170,6 +171,7 @@ impl ConsumeEngine {
             warn!("client send CLOSE_CONSUMER packet error: {e}");
         }
 
+        // TODO loop and retry
         self.conn = self.conn_handle.get_connection(false).await?;
         let (tx, rx) = mpsc::unbounded_channel();
         self.conn

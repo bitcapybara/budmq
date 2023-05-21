@@ -94,11 +94,9 @@ impl Producer {
             self.sequence_id += 1;
             match self.conn.publish(&self.topic, self.sequence_id, data).await {
                 Ok(_) => return Ok(()),
-                Err(connection::Error::Disconnect) => {}
+                Err(connection::Error::Disconnect) => self.reconnect().await?,
                 Err(e) => return Err(e)?,
             }
-
-            self.reconnect().await?;
         }
     }
 
@@ -107,6 +105,7 @@ impl Producer {
             warn!("client CLOSE_PRODUCER error: {e}")
         }
 
+        // TODO loop and retry
         self.conn = self.conn_handle.get_connection(self.ordered).await?;
         (self.id, self.sequence_id) = self.conn.create_producer(&self.name, &self.topic).await?;
         Ok(())
