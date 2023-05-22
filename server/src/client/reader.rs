@@ -165,9 +165,6 @@ impl Reader {
     }
 
     async fn send(&self, packet: Packet, res_tx: oneshot::Sender<Option<Packet>>) -> Result<()> {
-        let Some(request_id) = packet.request_id() else {
-            return Ok(())
-        };
         let (broker_res_tx, broker_res_rx) = oneshot::channel();
         // send to broker
         trace!("client::reader: send packet to broker");
@@ -188,10 +185,9 @@ impl Reader {
             select! {
                 res = timeout(WAIT_REPLY_TIMEOUT, broker_res_rx) => {
                     match res {
-                        Ok(Ok(code)) => {
-                            trace!("client::reader[spawn]: response from broker: {code}");
-                            let resp = Packet::Response(Response { request_id, code });
-                            res_tx.send(Some(resp)).ok();
+                        Ok(Ok(packet)) => {
+                            trace!("client::reader[spawn]: response from broker: {packet:?}" );
+                            res_tx.send(Some(packet)).ok();
                         }
                         Ok(Err(e)) => {
                             error!("recv client {local} reply error: {e}")

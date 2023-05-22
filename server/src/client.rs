@@ -6,7 +6,7 @@ use std::time::Duration;
 use bud_common::{
     helper::wait,
     io::SharedError,
-    protocol::{self, Packet, PacketCodec, Response, ReturnCode},
+    protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 use futures::{future, SinkExt, StreamExt};
 use log::trace;
@@ -143,17 +143,9 @@ impl Client {
                 })?;
                 // wait for reply
                 trace!("client::handshake: waiting for response from broker");
-                let code = res_rx.await?;
+                let packet = res_rx.await?;
                 trace!("client::handshake: send response to client");
-                framed
-                    .send(Packet::Response(Response {
-                        request_id: connect.request_id,
-                        code,
-                    }))
-                    .await?;
-                if code != ReturnCode::Success {
-                    return Err(Error::Server(code));
-                }
+                framed.send(packet).await?;
                 trace!("client::handshake: build new Client");
                 Ok(Self {
                     id,

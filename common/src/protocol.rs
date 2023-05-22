@@ -297,6 +297,10 @@ impl Packet {
             code: ReturnCode::Success,
         })
     }
+
+    pub fn err_response(request_id: u64, code: ReturnCode) -> Self {
+        Self::Response(Response { request_id, code })
+    }
 }
 
 #[derive(Debug, PartialEq)]

@@ -152,7 +152,7 @@ impl<S: Storage> Topic<S> {
     }
 
     /// save message in topic
-    pub async fn add_message(&mut self, message: Publish) -> Result<()> {
+    pub async fn add_message(&mut self, message: &Publish) -> Result<()> {
         if message.sequence_id <= self.latest_seq_id {
             return Err(Error::ReturnCode(ReturnCode::ProduceMessageDuplicated));
         }
@@ -161,7 +161,7 @@ impl<S: Storage> Topic<S> {
             &self.name,
             self.latest_cursor_id,
             message.sequence_id,
-            message.payload,
+            message.payload.clone(),
         );
         let message_id = self.storage.add_message(&topic_message).await?;
         self.latest_seq_id = message.sequence_id;
