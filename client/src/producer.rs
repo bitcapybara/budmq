@@ -100,6 +100,11 @@ impl Producer {
         }
     }
 
+    pub async fn close(self) -> Result<()> {
+        self.conn.close_producer(self.id).await?;
+        Ok(())
+    }
+
     async fn reconnect(&mut self) -> Result<()> {
         if let Err(e) = self.conn.close_producer(self.id).await {
             warn!("client CLOSE_PRODUCER error: {e}")

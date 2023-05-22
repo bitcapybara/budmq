@@ -43,10 +43,11 @@ async fn main() -> anyhow::Result<()> {
 
 async fn consume(mut consumer: Consumer) -> anyhow::Result<()> {
     while let Some(message) = consumer.next().await {
-        consumer.ack(message.id)?;
+        consumer.ack(message.id).await?;
         let s = String::from_utf8(message.payload.to_vec())?;
         println!("received a message: {s}");
     }
+    consumer.close().await?;
     Ok(())
 }
 

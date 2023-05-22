@@ -71,6 +71,7 @@ pub struct ConsumeMessage {
 pub enum ConsumerEvent {
     Ack { message_id: u64 },
     Unsubscribe,
+    Close,
 }
 
 pub struct ConsumeEngine {
@@ -81,7 +82,7 @@ pub struct ConsumeEngine {
     /// send message to Consumer
     consumer_tx: mpsc::Sender<ConsumeMessage>,
     /// receive message from user, send to server
-    event_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
+    event_rx: mpsc::Receiver<ConsumerEvent>,
     /// send message to server
     conn: Arc<Connection>,
     /// get new connection
@@ -96,7 +97,7 @@ impl ConsumeEngine {
     async fn new(
         id: u64,
         sub_message: &SubscribeMessage,
-        event_rx: mpsc::UnboundedReceiver<ConsumerEvent>,
+        event_rx: mpsc::Receiver<ConsumerEvent>,
         consumer_tx: mpsc::Sender<ConsumeMessage>,
         conn_handle: ConnectionHandle,
         token: CancellationToken,
@@ -155,8 +156,11 @@ impl ConsumeEngine {
                         },
                         ConsumerEvent::Unsubscribe => {
                             self.conn.unsubscribe(self.id).await?;
-                            return Ok(())
                         },
+                        ConsumerEvent::Close => {
+                            self.conn.close_consumer(self.id).await?;
+                            return Ok(())
+                        }
                     }
                 }
                 _ = self.token.cancelled() => {
@@ -186,7 +190,7 @@ pub struct Consumer {
     /// remaining space of the channel
     consumer_rx: mpsc::Receiver<ConsumeMessage>,
     /// send event to server
-    event_tx: mpsc::UnboundedSender<ConsumerEvent>,
+    event_tx: mpsc::Sender<ConsumerEvent>,
     /// token
     token: CancellationToken,
 }
@@ -198,7 +202,7 @@ impl Consumer {
         sub_message: &SubscribeMessage,
     ) -> Result<Self> {
         let (tx, rx) = mpsc::channel(CONSUME_CHANNEL_CAPACITY as usize);
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(1);
         let token = CancellationToken::new();
         let engine =
             ConsumeEngine::new(id, sub_message, event_rx, tx, conn_handle, token.clone()).await?;
@@ -214,13 +218,20 @@ impl Consumer {
         self.consumer_rx.recv().await
     }
 
-    pub fn ack(&self, message_id: u64) -> Result<()> {
-        self.event_tx.send(ConsumerEvent::Ack { message_id })?;
+    pub async fn ack(&self, message_id: u64) -> Result<()> {
+        self.event_tx
+            .send(ConsumerEvent::Ack { message_id })
+            .await?;
         Ok(())
     }
 
-    pub fn unsubscribe(self) -> Result<()> {
-        self.event_tx.send(ConsumerEvent::Unsubscribe)?;
+    pub async fn unsubscribe(&self) -> Result<()> {
+        self.event_tx.send(ConsumerEvent::Unsubscribe).await?;
+        Ok(())
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.event_tx.send(ConsumerEvent::Close).await?;
         self.token.cancel();
         Ok(())
     }

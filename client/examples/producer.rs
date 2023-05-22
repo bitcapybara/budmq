@@ -34,6 +34,7 @@ async fn produce(mut producer: Producer) -> anyhow::Result<()> {
     // for _ in 0..10 {
     producer.send(b"hello, world").await?;
     // }
+    producer.close().await?;
     Ok(())
 }
 
