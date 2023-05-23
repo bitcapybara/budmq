@@ -232,7 +232,6 @@ impl<T: PoolRecycle> PooledStream<T> {
             return
         };
         stream.error.set(error).await;
-        stream.framed.close().await.ok();
     }
 }
 

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::SinkExt;
 use parking_lot::Mutex;
 
 use super::{IdleStream, PoolRecycle};
@@ -23,11 +24,14 @@ impl PoolRecycle for PoolInner {
         streams.pop()
     }
 
-    fn put(&self, stream: IdleStream) {
+    fn put(&self, mut stream: IdleStream) {
         if stream.error.is_set() {
+            tokio::spawn(async move {
+                stream.framed.close().await.ok();
+            });
             return;
         }
         let mut streams = self.idle_streams.lock();
-        streams.push(stream)
+        streams.push(stream);
     }
 }
