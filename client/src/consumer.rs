@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bud_common::{
     protocol::ReturnCode,
-    subscription::{InitialPostion, SubType},
+    types::{InitialPostion, SubType},
 };
 use bytes::Bytes;
 use log::warn;

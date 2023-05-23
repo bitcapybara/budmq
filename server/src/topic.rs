@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bud_common::{
     protocol::{Publish, ReturnCode},
     storage::Storage,
-    subscription::{InitialPostion, SubType},
+    types::{AccessMode, InitialPostion, SubType},
 };
 use bytes::Bytes;
 
@@ -70,6 +70,42 @@ impl TopicMessage {
     }
 }
 
+#[derive(Clone)]
+pub struct Producer {
+    id: u64,
+    name: String,
+    access_mode: AccessMode,
+    sequence_id: u64,
+}
+
+pub enum Producers {
+    Exclusive(Producer),
+    Shared(HashMap<u64, Producer>),
+}
+
+pub struct TopicProducers(Option<Producers>);
+
+impl TopicProducers {
+    fn add_producer(&mut self, producer: &Producer) -> Result<()> {
+        match self.0.as_mut() {
+            Some(producers) => match (producers, producer.access_mode) {
+                (Producers::Exclusive(_), AccessMode::Exclusive) => todo!(),
+                (Producers::Shared(_), AccessMode::Shared) => todo!(),
+                _ => todo!(),
+            },
+            None => match producer.access_mode {
+                AccessMode::Exclusive => self.0 = Some(Producers::Exclusive(producer.clone())),
+                AccessMode::Shared => {
+                    let mut map = HashMap::new();
+                    map.insert(producer.id, producer.clone());
+                    self.0 = Some(Producers::Shared(map))
+                }
+            },
+        }
+        Ok(())
+    }
+}
+
 pub struct SubscriptionInfo {
     pub topic: String,
     pub name: String,
@@ -87,6 +123,8 @@ pub struct Topic<S> {
     /// all subscriptions in memory
     /// key = sub_name
     subscriptions: HashMap<String, Subscription<S>>,
+    /// producer
+    producers: TopicProducers,
     /// message storage
     storage: TopicStorage<S>,
     /// delete position
@@ -136,6 +174,7 @@ impl<S: Storage> Topic<S> {
             storage,
             delete_position,
             latest_cursor_id,
+            producers: TopicProducers(None),
         })
     }
 

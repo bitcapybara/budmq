@@ -186,7 +186,6 @@ impl Client {
         let write_runner =
             tokio::spawn(Writer::new(&local, handle, self.client_rx, error, token.clone()).run());
 
-        // reader or writer may self-exit
         future::join(
             wait(read_runner, "client read runner"),
             wait(write_runner, "client write runner"),

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bud_common::{id::SerialId, protocol::ReturnCode};
+use bud_common::{id::SerialId, protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
 use log::warn;
 use tokio::sync::{mpsc, oneshot};
@@ -57,6 +57,7 @@ pub struct Producer {
     id: u64,
     name: String,
     topic: String,
+    access_mode: AccessMode,
     request_id: SerialId,
     sequence_id: u64,
     conn: Arc<Connection>,
@@ -68,13 +69,14 @@ impl Producer {
     pub async fn new(
         name: &str,
         topic: &str,
+        access_mode: AccessMode,
         ordered: bool,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
         let conn = conn_handle.get_connection(ordered).await?;
         let request_id = SerialId::new();
         // get seq_id from ProducerReceipt packet
-        let (id, sequence_id) = conn.create_producer(name, topic).await?;
+        let (id, sequence_id) = conn.create_producer(name, topic, access_mode).await?;
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,
@@ -84,6 +86,7 @@ impl Producer {
             conn_handle,
             ordered,
             name: name.to_string(),
+            access_mode,
         })
     }
 
@@ -112,7 +115,10 @@ impl Producer {
 
         // TODO loop and retry
         self.conn = self.conn_handle.get_connection(self.ordered).await?;
-        (self.id, self.sequence_id) = self.conn.create_producer(&self.name, &self.topic).await?;
+        (self.id, self.sequence_id) = self
+            .conn
+            .create_producer(&self.name, &self.topic, self.access_mode)
+            .await?;
         Ok(())
     }
 }

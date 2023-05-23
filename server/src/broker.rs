@@ -163,13 +163,11 @@ impl<S: Storage> Broker<S> {
             .receive_client(send_tx, broker_rx, task_token.clone());
         let client_handle = tokio::spawn(client_task);
         trace!("broker::run start handle client message task");
-
         future::join(
             wait(send_handle, "broker handle send message"),
             wait(client_handle, "broker handle client message"),
         )
         .await;
-        self.token.cancel();
     }
 
     /// process send event from all subscriptions

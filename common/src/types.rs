@@ -13,3 +13,10 @@ pub enum InitialPostion {
     Latest = 1,
     Earliest,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
+pub enum AccessMode {
+    Exclusive = 1,
+    Shared,
+}

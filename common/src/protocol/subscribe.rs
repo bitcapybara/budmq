@@ -1,4 +1,4 @@
-use crate::subscription::{InitialPostion, SubType};
+use crate::types::{InitialPostion, SubType};
 
 /// Each consumer corresponds to a subscription
 #[derive(Debug, PartialEq, Clone, bud_derive::Codec)]

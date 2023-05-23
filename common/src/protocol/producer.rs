@@ -1,8 +1,11 @@
+use crate::types::AccessMode;
+
 #[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
 pub struct CreateProducer {
     pub request_id: u64,
     pub producer_name: String,
     pub topic_name: String,
+    pub access_mode: AccessMode,
 }
 
 #[derive(Debug, PartialEq, Clone, bud_derive::Codec)]

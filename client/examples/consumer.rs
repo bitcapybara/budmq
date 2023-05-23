@@ -6,7 +6,7 @@ use bud_client::{
 };
 use bud_common::{
     mtls::MtlsProvider,
-    subscription::{InitialPostion, SubType},
+    types::{InitialPostion, SubType},
 };
 use flexi_logger::{colored_detailed_format, Logger};
 

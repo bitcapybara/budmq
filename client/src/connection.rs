@@ -11,6 +11,7 @@ use bud_common::{
         CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer, Packet,
         ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
+    types::AccessMode,
 };
 use bytes::Bytes;
 use log::trace;
@@ -182,12 +183,18 @@ impl Connection {
         self.error.remove().await
     }
 
-    pub async fn create_producer(&self, name: &str, topic: &str) -> Result<(u64, u64)> {
+    pub async fn create_producer(
+        &self,
+        name: &str,
+        topic: &str,
+        access_mode: AccessMode,
+    ) -> Result<(u64, u64)> {
         match self
             .send(Packet::CreateProducer(CreateProducer {
                 request_id: self.request_id.next(),
                 producer_name: name.to_string(),
                 topic_name: topic.to_string(),
+                access_mode,
             }))
             .await?
         {

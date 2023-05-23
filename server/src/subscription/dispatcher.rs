@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bud_common::{storage::Storage, subscription::InitialPostion};
+use bud_common::{storage::Storage, types::InitialPostion};
 use log::trace;
 use tokio::{
     select,
@@ -9,7 +9,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    cursor::Cursor, Consumer, Consumers, ConsumersType, Error, Result, SendEvent, SubType,
+    cursor::Cursor, Consumer, Consumers, Error, Result, SendEvent, SubType, TopicConsumers,
 };
 
 pub enum Notify {
@@ -29,7 +29,7 @@ pub enum Notify {
 #[derive(Clone)]
 pub struct Dispatcher<S> {
     /// save all consumers in memory
-    consumers: Arc<RwLock<Consumers>>,
+    consumers: Arc<RwLock<TopicConsumers>>,
     /// cursor
     cursor: Arc<RwLock<Cursor<S>>>,
 }
@@ -38,7 +38,7 @@ impl<S: Storage> Dispatcher<S> {
     /// load from storage
     pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
         Ok(Self {
-            consumers: Arc::new(RwLock::new(Consumers::empty())),
+            consumers: Arc::new(RwLock::new(TopicConsumers::empty())),
             cursor: Arc::new(RwLock::new(
                 Cursor::new(sub_name, storage, init_position).await?,
             )),
@@ -51,7 +51,7 @@ impl<S: Storage> Dispatcher<S> {
         init_position: InitialPostion,
     ) -> Result<Self> {
         let sub_name = consumer.sub_name.clone();
-        let consumers = Arc::new(RwLock::new(Consumers::from_consumer(consumer)));
+        let consumers = Arc::new(RwLock::new(TopicConsumers::from_consumer(consumer)));
         let cursor = Arc::new(RwLock::new(
             Cursor::new(&sub_name, storage, init_position).await?,
         ));
@@ -62,8 +62,8 @@ impl<S: Storage> Dispatcher<S> {
         let mut consumers = self.consumers.write().await;
         match consumers.as_mut() {
             Some(cms) => match cms {
-                ConsumersType::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
-                ConsumersType::Shared(shared) => match consumer.sub_type {
+                Consumers::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
+                Consumers::Shared(shared) => match consumer.sub_type {
                     SubType::Exclusive => return Err(Error::SubTypeUnexpected),
                     SubType::Shared => {
                         shared.insert(consumer.client_id, consumer);
@@ -81,12 +81,10 @@ impl<S: Storage> Dispatcher<S> {
             return;
         };
         match cms {
-            ConsumersType::Exclusive(c)
-                if c.client_id == client_id && c.consumer_id == consumer_id =>
-            {
+            Consumers::Exclusive(c) if c.client_id == client_id && c.consumer_id == consumer_id => {
                 consumers.clear();
             }
-            ConsumersType::Shared(s) => {
+            Consumers::Shared(s) => {
                 let Some(c) = s.get(&client_id) else {
                     return
                 };
@@ -120,7 +118,7 @@ impl<S: Storage> Dispatcher<S> {
             return;
         };
         match cms {
-            ConsumersType::Exclusive(ex) => {
+            Consumers::Exclusive(ex) => {
                 if client_id == ex.client_id && consumer_id == ex.consumer_id {
                     if addition {
                         ex.permits += update;
@@ -129,7 +127,7 @@ impl<S: Storage> Dispatcher<S> {
                     }
                 }
             }
-            ConsumersType::Shared(shared) => {
+            Consumers::Shared(shared) => {
                 let Some(c) = shared.get_mut(&client_id) else {
                         return
                     };
@@ -150,14 +148,14 @@ impl<S: Storage> Dispatcher<S> {
             return None;
         };
         match cms {
-            ConsumersType::Exclusive(c) => {
+            Consumers::Exclusive(c) => {
                 if c.permits > 0 {
                     Some(c.clone())
                 } else {
                     None
                 }
             }
-            ConsumersType::Shared(cs) => {
+            Consumers::Shared(cs) => {
                 for c in cs.values() {
                     if c.permits > 0 {
                         return Some(c.clone());

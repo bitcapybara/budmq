@@ -14,7 +14,7 @@ use std::{io, slice::Iter, string};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::subscription::{InitialPostion, SubType};
+use crate::types::{AccessMode, InitialPostion, SubType};
 
 pub use self::{
     connect::Connect,
@@ -41,6 +41,7 @@ pub enum Error {
     UnsupportedInitPosition,
     UnsupportedSubType,
     UnsupportedReturnCode,
+    UnsupportedAccessMode,
 }
 
 impl std::error::Error for Error {}
@@ -55,6 +56,7 @@ impl std::fmt::Display for Error {
             Error::UnsupportedInitPosition => write!(f, "Unsupported initial postion"),
             Error::UnsupportedSubType => write!(f, "Unsupported subscribe type"),
             Error::UnsupportedReturnCode => write!(f, "Unsupported return code"),
+            Error::UnsupportedAccessMode => write!(f, "Unsupported access mode"),
         }
     }
 }
@@ -144,6 +146,18 @@ impl TryFrom<u8> for SubType {
             1 => Self::Exclusive,
             2 => Self::Shared,
             _ => return Err(Error::UnsupportedSubType),
+        })
+    }
+}
+
+impl TryFrom<u8> for AccessMode {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self> {
+        Ok(match value {
+            1 => Self::Exclusive,
+            2 => Self::Shared,
+            _ => return Err(Error::UnsupportedAccessMode),
         })
     }
 }

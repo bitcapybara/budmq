@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 
-use bud_common::{io::writer::Request, mtls::MtlsProvider, protocol::ReturnCode};
+use bud_common::{
+    io::writer::Request, mtls::MtlsProvider, protocol::ReturnCode, types::AccessMode,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -105,8 +107,14 @@ impl Client {
     ///
     /// * ordered: use ordered writer per producer
     /// * unordered: use a global shared writer for all producers
-    pub async fn new_producer(&self, topic: &str, name: &str, ordered: bool) -> Result<Producer> {
-        Ok(Producer::new(name, topic, ordered, self.conn_handle.clone()).await?)
+    pub async fn new_producer(
+        &self,
+        topic: &str,
+        name: &str,
+        access_mode: AccessMode,
+        ordered: bool,
+    ) -> Result<Producer> {
+        Ok(Producer::new(name, topic, access_mode, ordered, self.conn_handle.clone()).await?)
     }
 
     pub async fn new_consumer(&mut self, subscribe: SubscribeMessage) -> Result<Consumer> {

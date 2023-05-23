@@ -1,7 +1,7 @@
 use std::{fs, io::Read, path::Path};
 
 use bud_client::{client::ClientBuilder, producer::Producer};
-use bud_common::mtls::MtlsProvider;
+use bud_common::{mtls::MtlsProvider, types::AccessMode};
 use flexi_logger::{colored_detailed_format, Logger};
 
 #[tokio::main]
@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     let producer = client
-        .new_producer("test-topic", "test-producer", true)
+        .new_producer("test-topic", "test-producer", AccessMode::Exclusive, true)
         .await?;
     if let Err(e) = produce(producer).await {
         println!("produce error: {e}")

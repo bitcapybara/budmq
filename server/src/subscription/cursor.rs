@@ -1,4 +1,4 @@
-use bud_common::{storage::Storage, subscription::InitialPostion};
+use bud_common::{storage::Storage, types::InitialPostion};
 use roaring::RoaringTreemap;
 
 use crate::storage::CursorStorage;

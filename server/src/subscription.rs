@@ -7,7 +7,7 @@ use bud_common::{
     helper::wait_result,
     protocol::Subscribe,
     storage::Storage,
-    subscription::{InitialPostion, SubType},
+    types::{InitialPostion, SubType},
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -110,27 +110,27 @@ impl Consumer {
     }
 }
 
-struct Consumers(Option<ConsumersType>);
+struct TopicConsumers(Option<Consumers>);
 
-impl Consumers {
+impl TopicConsumers {
     fn empty() -> Self {
         Self(None)
     }
-    fn new(consumers: ConsumersType) -> Self {
+    fn new(consumers: Consumers) -> Self {
         Self(Some(consumers))
     }
     fn from_consumer(consumer: Consumer) -> Self {
         let consumers_type = match consumer.sub_type {
-            SubType::Exclusive => ConsumersType::Exclusive(consumer),
+            SubType::Exclusive => Consumers::Exclusive(consumer),
             SubType::Shared => {
                 let mut map = HashMap::new();
                 map.insert(consumer.client_id, consumer);
-                ConsumersType::Shared(map)
+                Consumers::Shared(map)
             }
         };
         Self(Some(consumers_type))
     }
-    fn set(&mut self, consumers: ConsumersType) {
+    fn set(&mut self, consumers: Consumers) {
         self.0 = Some(consumers)
     }
     fn clear(&mut self) {
@@ -138,26 +138,26 @@ impl Consumers {
     }
 }
 
-impl AsMut<Option<ConsumersType>> for Consumers {
-    fn as_mut(&mut self) -> &mut Option<ConsumersType> {
+impl AsMut<Option<Consumers>> for TopicConsumers {
+    fn as_mut(&mut self) -> &mut Option<Consumers> {
         &mut self.0
     }
 }
 
-impl AsRef<Option<ConsumersType>> for Consumers {
-    fn as_ref(&self) -> &Option<ConsumersType> {
+impl AsRef<Option<Consumers>> for TopicConsumers {
+    fn as_ref(&self) -> &Option<Consumers> {
         &self.0
     }
 }
 
 /// clients sub to this subscription
-enum ConsumersType {
+enum Consumers {
     Exclusive(Consumer),
     // key = client_id
     Shared(HashMap<u64, Consumer>),
 }
 
-impl From<Consumer> for ConsumersType {
+impl From<Consumer> for Consumers {
     fn from(consumer: Consumer) -> Self {
         match consumer.sub_type {
             SubType::Exclusive => Self::Exclusive(consumer),
