@@ -17,7 +17,7 @@ pub struct TopicStorage<S> {
 
 impl<S: Storage> TopicStorage<S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
-    const LATEST_SEQUENCE_ID_KEY: &[u8] = "LATEST_SEQUENCE_ID".as_bytes();
+    const PRODUCER_SEQUENCE_ID_KEY: &str = "PRODUCER_SEQUENCE_ID";
     const MAX_SUBSCRIPTION_ID_KEY: &[u8] = "SUBSCRIPTION".as_bytes();
     const LATEST_CURSOR_ID_KEY: &[u8] = "LATEST_CURSOR_ID".as_bytes();
 
@@ -65,7 +65,6 @@ impl<S: Storage> TopicStorage<S> {
         let key = self.key(msg_id.to_be_bytes().as_slice());
         let value = message.to_vec();
         self.storage.put(&key, &value).await?;
-        self.set_latest_sequence_id(message.seq_id).await?;
         Ok(msg_id)
     }
 
@@ -90,13 +89,15 @@ impl<S: Storage> TopicStorage<S> {
         Ok(())
     }
 
-    pub async fn get_latest_sequence_id(&self) -> Result<Option<u64>> {
-        let key = self.key(Self::LATEST_SEQUENCE_ID_KEY);
+    pub async fn get_sequence_id(&self, producer_name: &str) -> Result<Option<u64>> {
+        let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
+        let key = self.key(key.as_bytes());
         Ok(self.storage.get_u64(&key).await?)
     }
 
-    pub async fn set_latest_sequence_id(&self, seq_id: u64) -> Result<()> {
-        let key = self.key(Self::LATEST_SEQUENCE_ID_KEY);
+    pub async fn set_sequence_id(&self, producer_name: &str, seq_id: u64) -> Result<()> {
+        let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
+        let key = self.key(key.as_bytes());
         Ok(self
             .storage
             .put(&key, seq_id.to_be_bytes().as_slice())

@@ -207,12 +207,19 @@ impl Connection {
         }
     }
 
-    pub async fn publish(&self, topic: &str, sequence_id: u64, data: &[u8]) -> Result<()> {
+    pub async fn publish(
+        &self,
+        producer_id: u64,
+        topic: &str,
+        sequence_id: u64,
+        data: &[u8],
+    ) -> Result<()> {
         self.send_ok(Packet::Publish(Publish {
             request_id: self.request_id.next(),
             topic: topic.to_string(),
             sequence_id,
             payload: Bytes::copy_from_slice(data),
+            producer_id,
         }))
         .await
     }

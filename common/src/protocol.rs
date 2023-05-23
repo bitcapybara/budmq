@@ -534,6 +534,7 @@ mod tests {
     fn codec_publish() {
         codec_works(Packet::Publish(Publish {
             request_id: 1,
+            producer_id: 1,
             topic: "test-topic".to_string(),
             sequence_id: 200,
             payload: Bytes::from_static(b"hello, world"),

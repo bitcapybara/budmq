@@ -95,7 +95,11 @@ impl Producer {
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
         loop {
             self.sequence_id += 1;
-            match self.conn.publish(&self.topic, self.sequence_id, data).await {
+            match self
+                .conn
+                .publish(self.id, &self.topic, self.sequence_id, data)
+                .await
+            {
                 Ok(_) => return Ok(()),
                 Err(connection::Error::Disconnect) => self.reconnect().await?,
                 Err(e) => return Err(e)?,

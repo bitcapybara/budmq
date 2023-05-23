@@ -2,9 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use bud_common::{
     helper::wait,
-    id::next_id,
+    id::{next_id, SerialId},
     protocol::{
-        self, CloseConsumer, CloseProducer, Packet, PacketType, ReturnCode, Send, Unsubscribe,
+        self, CloseConsumer, CloseProducer, CreateProducer, Packet, PacketType, ProducerReceipt,
+        ReturnCode, Send, Unsubscribe,
     },
     storage::Storage,
 };
@@ -30,6 +31,7 @@ pub enum Error {
     ReplyChannelClosed,
     SendOnDroppedChannel,
     ConsumerDuplicateSubscribed,
+    ProducerDuplicated,
     ReturnCode(ReturnCode),
     Subscription(subscription::Error),
     Topic(topic::Error),
@@ -51,6 +53,7 @@ impl std::fmt::Display for Error {
             Error::Topic(e) => write!(f, "Topic error: {e}"),
             Error::Internal(s) => write!(f, "Internal error: {s}"),
             Error::UnsupportedPacket(t) => write!(f, "Unsupported packet type: {t:?}"),
+            Error::ProducerDuplicated => write!(f, "Producer duplicated"),
         }
     }
 }
@@ -97,7 +100,7 @@ struct SubInfo {
 struct Session {
     /// send to client
     client_tx: mpsc::UnboundedSender<BrokerMessage>,
-    /// key = consumer_id, value = sub_info
+    /// consumer_id -> sub_info
     consumers: HashMap<u64, SubInfo>,
 }
 
@@ -133,6 +136,8 @@ pub struct Broker<S> {
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
     topics: Arc<RwLock<HashMap<String, Topic<S>>>>,
+    /// producer id generator
+    producer_id: SerialId,
     /// token
     token: CancellationToken,
 }
@@ -144,6 +149,7 @@ impl<S: Storage> Broker<S> {
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
+            producer_id: SerialId::new(),
         }
     }
 
@@ -365,8 +371,43 @@ impl<S: Storage> Broker<S> {
         packet: Packet,
     ) -> Result<Packet> {
         match packet {
-            Packet::CreateProducer(_producer) => {
-                todo!()
+            Packet::CreateProducer(CreateProducer {
+                request_id,
+                producer_name,
+                topic_name,
+                access_mode,
+            }) => {
+                let producer_id = self.producer_id.next();
+                let mut topics = self.topics.write().await;
+                let sequence_id = match topics.get_mut(&topic_name) {
+                    Some(topic) => {
+                        if topic.get_producer(&producer_name).await.is_some() {
+                            return Err(Error::ProducerDuplicated);
+                        }
+                        topic
+                            .add_producer(producer_id, &producer_name, access_mode)
+                            .await?
+                    }
+                    None => {
+                        let mut topic = Topic::new(
+                            &topic_name,
+                            send_tx.clone(),
+                            self.storage.clone(),
+                            self.token.child_token(),
+                        )
+                        .await?;
+                        let sequence_id = topic
+                            .add_producer(producer_id, &producer_name, access_mode)
+                            .await?;
+                        topics.insert(topic_name.clone(), topic);
+                        sequence_id
+                    }
+                };
+                Ok(Packet::ProducerReceipt(ProducerReceipt {
+                    request_id,
+                    producer_id,
+                    sequence_id,
+                }))
             }
             Packet::Subscribe(sub) => {
                 trace!("broker::process_packets: receive SUBSCRIBE packet");

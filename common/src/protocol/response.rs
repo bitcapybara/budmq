@@ -8,17 +8,20 @@ pub struct Response {
 #[repr(u8)]
 pub enum ReturnCode {
     Success = 0,
-    AlreadyConnected = 1,
-    SubOnExlusive = 2,
-    UnexpectedSubType = 3,
-    ConsumerDuplicated = 4,
-    NotConnected = 5,
-    TopicNotExists = 6,
-    ConsumerNotFound = 7,
-    ProduceMessageDuplicated = 8,
-    ConsumeMessageDuplicated = 9,
-    InternalError = 10,
-    UnexpectedPacket = 11,
+    AlreadyConnected,
+    SubOnExlusive,
+    UnexpectedSubType,
+    ConsumerDuplicated,
+    NotConnected,
+    TopicNotExists,
+    ConsumerNotFound,
+    ProduceMessageDuplicated,
+    ConsumeMessageDuplicated,
+    InternalError,
+    UnexpectedPacket,
+    ProducerExclusive,
+    ProducerAccessModeConflict,
+    ProducerNotFound,
 }
 
 impl std::fmt::Display for ReturnCode {
@@ -36,6 +39,9 @@ impl std::fmt::Display for ReturnCode {
             ReturnCode::ConsumeMessageDuplicated => write!(f, "ConsumeMessageDuplicated"),
             ReturnCode::InternalError => write!(f, "ServerInternalError"),
             ReturnCode::UnexpectedPacket => write!(f, "UnecpectedPacket"),
+            ReturnCode::ProducerExclusive => write!(f, "ProducerExclusive"),
+            ReturnCode::ProducerAccessModeConflict => write!(f, "Producer access mode conflict"),
+            ReturnCode::ProducerNotFound => write!(f, "Producer not found"),
         }
     }
 }
@@ -57,6 +63,9 @@ impl TryFrom<u8> for ReturnCode {
             9 => Self::ConsumeMessageDuplicated,
             10 => Self::InternalError,
             11 => Self::UnexpectedPacket,
+            12 => Self::ProducerExclusive,
+            13 => Self::ProducerAccessModeConflict,
+            14 => Self::ProducerNotFound,
             _ => return Err(super::Error::UnsupportedReturnCode),
         })
     }

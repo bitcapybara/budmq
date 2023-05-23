@@ -19,7 +19,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
-    ReturnCode(ReturnCode),
+    Response(ReturnCode),
     Storage(storage::Error),
     Subscription(subscription::Error),
 }
@@ -31,7 +31,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Storage(e) => write!(f, "Storage error: {e}"),
             Error::Subscription(e) => write!(f, "Subscription error: {e}"),
-            Error::ReturnCode(code) => write!(f, "{code}"),
+            Error::Response(code) => write!(f, "{code}"),
         }
     }
 }
@@ -89,9 +89,13 @@ impl TopicProducers {
     fn add_producer(&mut self, producer: &Producer) -> Result<()> {
         match self.0.as_mut() {
             Some(producers) => match (producers, producer.access_mode) {
-                (Producers::Exclusive(_), AccessMode::Exclusive) => todo!(),
-                (Producers::Shared(_), AccessMode::Shared) => todo!(),
-                _ => todo!(),
+                (Producers::Exclusive(_), AccessMode::Exclusive) => {
+                    return Err(Error::Response(ReturnCode::ProducerExclusive))
+                }
+                (Producers::Shared(map), AccessMode::Shared) => {
+                    map.insert(producer.id, producer.clone());
+                }
+                _ => return Err(Error::Response(ReturnCode::ProducerAccessModeConflict)),
             },
             None => match producer.access_mode {
                 AccessMode::Exclusive => self.0 = Some(Producers::Exclusive(producer.clone())),
@@ -103,6 +107,27 @@ impl TopicProducers {
             },
         }
         Ok(())
+    }
+
+    fn get_producer_name(&self, producer_id: u64) -> Option<String> {
+        self.0.as_ref().and_then(|producers| match producers {
+            Producers::Exclusive(p) => Some(p.name.clone()),
+            Producers::Shared(map) => map.get(&producer_id).map(|p| p.name.clone()),
+        })
+    }
+
+    fn get_producer_id(&self, producer_name: &str) -> Option<u64> {
+        self.0.as_ref().and_then(|producers| match producers {
+            Producers::Exclusive(p) => Some(p.id),
+            Producers::Shared(map) => {
+                for p in map.values() {
+                    if p.name == producer_name {
+                        return Some(p.id);
+                    }
+                }
+                None
+            }
+        })
     }
 }
 
@@ -118,9 +143,6 @@ pub struct SubscriptionInfo {
 pub struct Topic<S> {
     /// topic name
     pub name: String,
-    /// producer message sequence id
-    latest_seq_id: u64,
-    /// all subscriptions in memory
     /// key = sub_name
     subscriptions: HashMap<String, Subscription<S>>,
     /// producer
@@ -141,7 +163,6 @@ impl<S: Storage> Topic<S> {
         token: CancellationToken,
     ) -> Result<Self> {
         let storage = TopicStorage::new(topic, store.clone())?;
-        let latest_seq_id = storage.get_latest_sequence_id().await?.unwrap_or_default();
         let latest_cursor_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
@@ -169,7 +190,6 @@ impl<S: Storage> Topic<S> {
         }
         Ok(Self {
             name: topic.to_string(),
-            latest_seq_id,
             subscriptions,
             storage,
             delete_position,
@@ -192,8 +212,16 @@ impl<S: Storage> Topic<S> {
 
     /// save message in topic
     pub async fn add_message(&mut self, message: &Publish) -> Result<()> {
-        if message.sequence_id <= self.latest_seq_id {
-            return Err(Error::ReturnCode(ReturnCode::ProduceMessageDuplicated));
+        let Some(producer_name) = self.producers.get_producer_name(message.producer_id) else {
+            return Err(Error::Response(ReturnCode::ProducerNotFound));
+        };
+        let sequence_id = self
+            .storage
+            .get_sequence_id(&producer_name)
+            .await?
+            .unwrap_or_default();
+        if message.sequence_id <= sequence_id {
+            return Err(Error::Response(ReturnCode::ProduceMessageDuplicated));
         }
         self.latest_cursor_id += 1;
         let topic_message = TopicMessage::new(
@@ -203,7 +231,9 @@ impl<S: Storage> Topic<S> {
             message.payload.clone(),
         );
         let message_id = self.storage.add_message(&topic_message).await?;
-        self.latest_seq_id = message.sequence_id;
+        self.storage
+            .set_sequence_id(&producer_name, sequence_id)
+            .await?;
         for sub in self.subscriptions.values() {
             sub.message_notify(message_id)?;
         }
@@ -242,5 +272,29 @@ impl<S: Storage> Topic<S> {
             self.storage.delete_range(..lowest_mark).await?;
         }
         Ok(())
+    }
+
+    pub async fn get_producer(&self, producer_name: &str) -> Option<u64> {
+        self.producers.get_producer_id(producer_name)
+    }
+
+    pub async fn add_producer(
+        &mut self,
+        producer_id: u64,
+        producer_name: &str,
+        access_mode: AccessMode,
+    ) -> Result<u64> {
+        let sequence_id = self
+            .storage
+            .get_sequence_id(producer_name)
+            .await?
+            .unwrap_or_default();
+        self.producers.add_producer(&Producer {
+            id: producer_id,
+            name: producer_name.to_string(),
+            access_mode,
+            sequence_id,
+        })?;
+        Ok(0)
     }
 }
