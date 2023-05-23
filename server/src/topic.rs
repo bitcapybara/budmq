@@ -109,6 +109,22 @@ impl TopicProducers {
         Ok(())
     }
 
+    fn del_producer(&mut self, producer_id: u64) {
+        let Some(producers) = self.0.as_mut() else {
+            return;
+        };
+        match producers {
+            Producers::Exclusive(p) => {
+                if p.id == producer_id {
+                    self.0.take();
+                }
+            }
+            Producers::Shared(map) => {
+                map.remove(&producer_id);
+            }
+        }
+    }
+
     fn get_producer_name(&self, producer_id: u64) -> Option<String> {
         self.0.as_ref().and_then(|producers| match producers {
             Producers::Exclusive(p) => Some(p.name.clone()),
@@ -296,5 +312,9 @@ impl<S: Storage> Topic<S> {
             sequence_id,
         })?;
         Ok(0)
+    }
+
+    pub fn del_producer(&mut self, producer_id: u64) {
+        self.producers.del_producer(producer_id)
     }
 }

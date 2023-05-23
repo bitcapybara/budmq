@@ -90,8 +90,13 @@ pub struct BrokerMessage {
     pub res_tx: oneshot::Sender<bud_common::io::Result<Packet>>,
 }
 
-struct SubInfo {
+struct ConsumerInfo {
     sub_name: String,
+    topic_name: String,
+}
+
+#[derive(Clone)]
+struct ProducerInfo {
     topic_name: String,
 }
 
@@ -100,8 +105,10 @@ struct SubInfo {
 struct Session {
     /// send to client
     client_tx: mpsc::UnboundedSender<BrokerMessage>,
-    /// consumer_id -> sub_info
-    consumers: HashMap<u64, SubInfo>,
+    /// consumer_id -> consumer_info
+    consumers: HashMap<u64, ConsumerInfo>,
+    /// producer_id -> producer_info
+    producers: HashMap<u64, ProducerInfo>,
 }
 
 impl Session {
@@ -112,7 +119,7 @@ impl Session {
     fn add_consumer(&mut self, consumer_id: u64, sub_name: &str, topic_name: &str) {
         self.consumers.insert(
             consumer_id,
-            SubInfo {
+            ConsumerInfo {
                 sub_name: sub_name.to_string(),
                 topic_name: topic_name.to_string(),
             },
@@ -123,7 +130,24 @@ impl Session {
         self.consumers.remove(&consumer_id);
     }
 
-    fn consumers(self) -> HashMap<u64, SubInfo> {
+    fn get_producer(&self, producer_id: u64) -> Option<ProducerInfo> {
+        self.producers.get(&producer_id).cloned()
+    }
+
+    fn add_producer(&mut self, producer_id: u64, topic_name: &str) {
+        self.producers.insert(
+            producer_id,
+            ProducerInfo {
+                topic_name: topic_name.to_string(),
+            },
+        );
+    }
+
+    fn del_producer(&mut self, producer_id: u64) {
+        self.producers.remove(&producer_id);
+    }
+
+    fn consumers(self) -> HashMap<u64, ConsumerInfo> {
         self.consumers
     }
 }
@@ -315,6 +339,7 @@ impl<S: Storage> Broker<S> {
                     Session {
                         client_tx,
                         consumers: HashMap::new(),
+                        producers: HashMap::new(),
                     },
                 );
                 res_tx.send(Packet::ok_response(request_id)).ok();
@@ -350,6 +375,24 @@ impl<S: Storage> Broker<S> {
                     trace!("broker::process_packets: subscription task exit");
                 }
             }
+            Packet::CloseProducer(CloseProducer { producer_id }) => {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.get_mut(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
+                };
+                let Some(producer_info) = session.get_producer(producer_id) else {
+                    return Ok(())
+                };
+                let mut topics = self.topics.write().await;
+                let Some(topic) = topics.get_mut(&producer_info.topic_name) else {
+                    return Ok(());
+                };
+                topic.del_producer(producer_id);
+                session.del_producer(producer_id);
+            }
+            Packet::CloseConsumer(CloseConsumer { consumer_id: _ }) => {
+                todo!()
+            }
             _ => {
                 let packet = self
                     .process_packet(send_tx.clone(), client_id, msg.packet)
@@ -377,6 +420,10 @@ impl<S: Storage> Broker<S> {
                 topic_name,
                 access_mode,
             }) => {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.get_mut(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
+                };
                 let producer_id = self.producer_id.next();
                 let mut topics = self.topics.write().await;
                 let sequence_id = match topics.get_mut(&topic_name) {
@@ -403,6 +450,7 @@ impl<S: Storage> Broker<S> {
                         sequence_id
                     }
                 };
+                session.add_producer(producer_id, &topic_name);
                 Ok(Packet::ProducerReceipt(ProducerReceipt {
                     request_id,
                     producer_id,
@@ -546,12 +594,6 @@ impl<S: Storage> Broker<S> {
                 trace!("broker::process_packets: ack message in topic");
                 topic.consume_ack(&info.sub_name, c.message_id).await?;
                 Ok(Packet::ok_response(c.request_id))
-            }
-            Packet::CloseProducer(CloseProducer { producer_id: _ }) => {
-                todo!()
-            }
-            Packet::CloseConsumer(CloseConsumer { consumer_id: _ }) => {
-                todo!()
             }
             p => Err(Error::UnsupportedPacket(p.packet_type())),
         }
