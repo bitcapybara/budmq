@@ -544,6 +544,13 @@ impl<S: Storage> Broker<S> {
                 Ok(Packet::ok_response(request_id))
             }
             Packet::Publish(p) => {
+                let clients = self.clients.read().await;
+                let Some(session) = clients.get(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
+                };
+                if session.get_producer(p.producer_id).is_none() {
+                    return Err(Error::ReturnCode(ReturnCode::ProducerNotFound));
+                }
                 trace!("broker::process_packets: receive PUBLISH packet");
                 // add to topic
                 let mut topics = self.topics.write().await;
