@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use bud_common::{
     helper::wait,
-    id::{next_id, SerialId},
+    id::SerialId,
     protocol::{
         self, CloseConsumer, CloseProducer, Connect, CreateProducer, Packet, PacketType,
         ProducerReceipt, ReturnCode, Send, Unsubscribe,
@@ -157,6 +157,8 @@ impl Session {
 pub struct Broker<S> {
     /// storage
     storage: S,
+    /// request id
+    request_id: SerialId,
     /// key = client_id
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
@@ -175,6 +177,7 @@ impl<S: Storage> Broker<S> {
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
             producer_id: SerialId::new(),
+            request_id: SerialId::new(),
         }
     }
 
@@ -250,7 +253,7 @@ impl<S: Storage> Broker<S> {
                 message_id: event.message_id,
                 consumer_id: event.consumer_id,
                 payload: message.payload,
-                request_id: next_id(),
+                request_id: self.request_id.next(),
             }),
             res_tx,
         })?;

@@ -3,11 +3,6 @@ use std::sync::{
     Arc,
 };
 
-pub fn next_id() -> u64 {
-    // TODO use SerialId
-    0
-}
-
 #[derive(Clone)]
 pub struct SerialId(Arc<AtomicU64>);
 
