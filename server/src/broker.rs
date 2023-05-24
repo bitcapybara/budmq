@@ -4,8 +4,8 @@ use bud_common::{
     helper::wait,
     id::{next_id, SerialId},
     protocol::{
-        self, CloseConsumer, CloseProducer, CreateProducer, Packet, PacketType, ProducerReceipt,
-        ReturnCode, Send, Unsubscribe,
+        self, CloseConsumer, CloseProducer, Connect, CreateProducer, Packet, PacketType,
+        ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
     storage::Storage,
 };
@@ -317,16 +317,13 @@ impl<S: Storage> Broker<S> {
         let client_id = msg.client_id;
         // handshake process
         match msg.packet {
-            Packet::Connect(_) => {
+            Packet::Connect(Connect { request_id, .. }) => {
                 trace!("broker::process_packets: broker receive CONNECT packet");
                 let Some(res_tx) = msg.res_tx else {
                     return Err(Error::Internal("Connect res_tx channel not found".to_string()))
                 };
                 let Some(client_tx) = msg.client_tx else {
                     return Err(Error::Internal("Connect client_tx channel not found".to_string()))
-                };
-                let Some(request_id) = msg.packet.request_id() else {
-                    return Err(Error::Internal("Connect res_tx channel not exists".to_string()))
                 };
                 let mut clients = self.clients.write().await;
                 if clients.contains_key(&client_id) {
