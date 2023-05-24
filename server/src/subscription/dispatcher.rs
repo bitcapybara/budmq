@@ -32,16 +32,27 @@ pub struct Dispatcher<S> {
     consumers: Arc<RwLock<TopicConsumers>>,
     /// cursor
     cursor: Arc<RwLock<Cursor<S>>>,
+    send_tx: mpsc::Sender<SendEvent>,
+    /// token
+    token: CancellationToken,
 }
 
 impl<S: Storage> Dispatcher<S> {
     /// load from storage
-    pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
+    pub async fn new(
+        sub_name: &str,
+        storage: S,
+        init_position: InitialPostion,
+        send_tx: mpsc::Sender<SendEvent>,
+        token: CancellationToken,
+    ) -> Result<Self> {
         Ok(Self {
             consumers: Arc::new(RwLock::new(TopicConsumers::empty())),
             cursor: Arc::new(RwLock::new(
                 Cursor::new(sub_name, storage, init_position).await?,
             )),
+            send_tx,
+            token,
         })
     }
 
@@ -49,13 +60,20 @@ impl<S: Storage> Dispatcher<S> {
         consumer: Consumer,
         storage: S,
         init_position: InitialPostion,
+        send_tx: mpsc::Sender<SendEvent>,
+        token: CancellationToken,
     ) -> Result<Self> {
         let sub_name = consumer.sub_name.clone();
         let consumers = Arc::new(RwLock::new(TopicConsumers::from_consumer(consumer)));
         let cursor = Arc::new(RwLock::new(
             Cursor::new(&sub_name, storage, init_position).await?,
         ));
-        Ok(Self { consumers, cursor })
+        Ok(Self {
+            consumers,
+            cursor,
+            send_tx,
+            token,
+        })
     }
 
     pub async fn add_consumer(&self, consumer: Consumer) -> Result<()> {
@@ -81,15 +99,18 @@ impl<S: Storage> Dispatcher<S> {
             return;
         };
         match cms {
-            Consumers::Exclusive(c) if c.client_id == client_id && c.consumer_id == consumer_id => {
+            Consumers::Exclusive(c) if c.client_id == client_id && c.id == consumer_id => {
                 consumers.clear();
             }
             Consumers::Shared(s) => {
                 let Some(c) = s.get(&client_id) else {
                     return
                 };
-                if c.consumer_id == consumer_id {
+                if c.id == consumer_id {
                     s.remove(&client_id);
+                }
+                if s.is_empty() {
+                    consumers.clear()
                 }
             }
             _ => {}
@@ -119,7 +140,7 @@ impl<S: Storage> Dispatcher<S> {
         };
         match cms {
             Consumers::Exclusive(ex) => {
-                if client_id == ex.client_id && consumer_id == ex.consumer_id {
+                if client_id == ex.client_id && consumer_id == ex.id {
                     if addition {
                         ex.permits += update;
                     } else {
@@ -131,7 +152,7 @@ impl<S: Storage> Dispatcher<S> {
                 let Some(c) = shared.get_mut(&client_id) else {
                         return
                     };
-                if c.consumer_id == consumer_id {
+                if c.id == consumer_id {
                     if addition {
                         c.permits += update;
                     } else {
@@ -177,12 +198,8 @@ impl<S: Storage> Dispatcher<S> {
         cursor.delete_position()
     }
 
-    pub async fn run(
-        self,
-        mut notify_rx: mpsc::UnboundedReceiver<Notify>,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
-        token: CancellationToken,
-    ) -> Result<()> {
+    /// notify_rx receive event from subscription
+    pub async fn run(self, mut notify_rx: mpsc::UnboundedReceiver<Notify>) -> Result<()> {
         trace!("dispatcher::run: start dispatcher task loop");
         loop {
             select! {
@@ -211,27 +228,39 @@ impl<S: Storage> Dispatcher<S> {
                     while let Some(next_message) = cursor.peek_message() {
                         trace!("dispatcher::run: find available consumers");
                         let Some(consumer) = self.available_consumer().await else {
-                            return Ok(());
+                            continue;
                         };
                         // serial processing
                         trace!("dispatcher::run: send message to broker");
                         let (res_tx, res_rx) = oneshot::channel();
-                        send_tx.send(SendEvent {
+                        let event = SendEvent {
                             client_id: consumer.client_id,
                             topic_name: consumer.topic_name,
                             message_id: next_message,
-                            consumer_id: consumer.consumer_id,
+                            consumer_id: consumer.id,
                             res_tx,
-                        })?;
+                        };
+                        select!{
+                            res = self.send_tx.send(event) => {
+                                res?;
+                            }
+                            _ = self.token.cancelled() => {
+                                return Ok(());
+                            }
+                        }
                         trace!("dispatcher::run: waiting for replay");
-                        if let Ok(true) = res_rx.await {
-                            cursor.read_advance().await?;
-                            self.decrease_consumer_permits(consumer.client_id, consumer.consumer_id, 1)
-                                .await;
+                        select! {
+                            res = res_rx => {
+                                if res? {
+                                    cursor.read_advance().await?;
+                                    let (client_id, consumer_id) = (consumer.client_id, consumer.id);
+                                    self.decrease_consumer_permits(client_id, consumer_id, 1).await;
+                                }
+                            }
                         }
                     }
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     return Ok(());
                 }
             }

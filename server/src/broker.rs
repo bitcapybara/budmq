@@ -90,6 +90,7 @@ pub struct BrokerMessage {
     pub res_tx: oneshot::Sender<bud_common::io::Result<Packet>>,
 }
 
+#[derive(Clone)]
 struct ConsumerInfo {
     sub_name: String,
     topic_name: String,
@@ -114,6 +115,10 @@ struct Session {
 impl Session {
     fn has_consumer(&self, consumer_id: u64) -> bool {
         self.consumers.contains_key(&consumer_id)
+    }
+
+    fn get_consumer(&self, consumer_id: u64) -> Option<ConsumerInfo> {
+        self.consumers.get(&consumer_id).cloned()
     }
 
     fn add_consumer(&mut self, consumer_id: u64, sub_name: &str, topic_name: &str) {
@@ -146,10 +151,6 @@ impl Session {
     fn del_producer(&mut self, producer_id: u64) {
         self.producers.remove(&producer_id);
     }
-
-    fn consumers(self) -> HashMap<u64, ConsumerInfo> {
-        self.consumers
-    }
 }
 
 #[derive(Clone)]
@@ -180,7 +181,7 @@ impl<S: Storage> Broker<S> {
     pub async fn run(self, broker_rx: mpsc::UnboundedReceiver<ClientMessage>) {
         let task_token = self.token.child_token();
         // subscription task
-        let (send_tx, send_rx) = mpsc::unbounded_channel();
+        let (send_tx, send_rx) = mpsc::channel(1);
         let send_task = self
             .clone()
             .handle_send_message(send_rx, task_token.clone());
@@ -203,7 +204,7 @@ impl<S: Storage> Broker<S> {
     /// process send event from all subscriptions
     async fn handle_send_message(
         self,
-        mut send_rx: mpsc::UnboundedReceiver<SendEvent>,
+        mut send_rx: mpsc::Receiver<SendEvent>,
         token: CancellationToken,
     ) {
         loop {
@@ -286,7 +287,7 @@ impl<S: Storage> Broker<S> {
 
     async fn receive_client(
         self,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
         mut broker_rx: mpsc::UnboundedReceiver<ClientMessage>,
         token: CancellationToken,
     ) {
@@ -312,7 +313,7 @@ impl<S: Storage> Broker<S> {
     async fn process_packets(
         &self,
         msg: ClientMessage,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
     ) -> Result<()> {
         let client_id = msg.client_id;
         // handshake process
@@ -343,23 +344,24 @@ impl<S: Storage> Broker<S> {
                 trace!("broker::process_packets: add new client: {}", client_id);
             }
             Packet::Disconnect => {
+                // TODO close producers and consumers
                 trace!("broker::process_packets: broker receive DISCONNECT packet");
                 let mut clients = self.clients.write().await;
-                let Some(session) = clients.remove(&client_id) else {
+                let Some(mut session) = clients.remove(&client_id) else {
                     return Ok(())
                 };
                 trace!("broker::process_packets: remove client: {}", client_id);
-                let consumers = session.consumers();
+                // remove consumer
                 let mut topics = self.topics.write().await;
-                for (consumer_id, sub_info) in consumers {
-                    let Some(topic) = topics.get_mut(&sub_info.topic_name) else {
+                for (consumer_id, consumer_info) in session.consumers.drain() {
+                    let Some(topic) = topics.get(&consumer_info.topic_name) else {
                         continue;
                     };
                     trace!(
                         "broker::process_packets: remove subscription from topic: {}",
-                        sub_info.sub_name
+                        consumer_info.sub_name
                     );
-                    let Some(sp) = topic.del_subscription(&sub_info.sub_name) else {
+                    let Some(sp) = topic.get_subscription(&consumer_info.sub_name) else {
                         continue;
                     };
                     trace!(
@@ -368,8 +370,14 @@ impl<S: Storage> Broker<S> {
                     );
                     sp.del_consumer(client_id, consumer_id).await?;
                     trace!("broker::process_packets: subscription task exiting");
-                    sp.close().await;
                     trace!("broker::process_packets: subscription task exit");
+                }
+                // remove producer
+                for (producer_id, producer_info) in session.producers.drain() {
+                    let Some(topic) = topics.get_mut(&producer_info.topic_name) else {
+                        continue;
+                    };
+                    topic.del_producer(producer_id);
                 }
             }
             Packet::CloseProducer(CloseProducer { producer_id }) => {
@@ -387,8 +395,23 @@ impl<S: Storage> Broker<S> {
                 topic.del_producer(producer_id);
                 session.del_producer(producer_id);
             }
-            Packet::CloseConsumer(CloseConsumer { consumer_id: _ }) => {
-                todo!()
+            Packet::CloseConsumer(CloseConsumer { consumer_id }) => {
+                let mut clients = self.clients.write().await;
+                let Some(session) = clients.get_mut(&client_id) else {
+                    return Err(Error::ReturnCode(ReturnCode::NotConnected));
+                };
+                let Some(consumer_info) = session.get_consumer(consumer_id) else {
+                    return Ok(());
+                };
+                let mut topics = self.topics.write().await;
+                let Some(topic) = topics.get_mut(&consumer_info.topic_name) else {
+                    return Ok(());
+                };
+                let Some(subscription) = topic.get_subscription(&consumer_info.sub_name) else {
+                    return Ok(());
+                };
+                subscription.del_consumer(client_id, consumer_id).await?;
+                session.del_consumer(consumer_id);
             }
             _ => {
                 let packet = self
@@ -406,7 +429,7 @@ impl<S: Storage> Broker<S> {
     /// DO NOT BLOCK!!!
     async fn process_packet(
         &self,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
         client_id: u64,
         packet: Packet,
     ) -> Result<Packet> {
@@ -480,6 +503,7 @@ impl<S: Storage> Broker<S> {
                                 send_tx.clone(),
                                 self.storage.clone(),
                                 sub.initial_position,
+                                self.token.child_token(),
                             )
                             .await?;
                             trace!("broker::process_packets: add subscription to topic");
@@ -492,7 +516,7 @@ impl<S: Storage> Broker<S> {
                             &sub.topic,
                             send_tx.clone(),
                             self.storage.clone(),
-                            self.token.clone(),
+                            self.token.child_token(),
                         )
                         .await?;
                         trace!("broker::process_packets: create subscription");
@@ -503,6 +527,7 @@ impl<S: Storage> Broker<S> {
                             send_tx.clone(),
                             self.storage.clone(),
                             sub.initial_position,
+                            self.token.child_token(),
                         )
                         .await?;
                         trace!("broker::process_packets: add subscription to topic");
@@ -530,11 +555,7 @@ impl<S: Storage> Broker<S> {
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
                     trace!("broker::process_packets: remove subscription from topic");
-                    if let Some(sp) = tp.del_subscription(&info.sub_name) {
-                        trace!("broker::process_packets: subscription exiting");
-                        sp.close().await;
-                        trace!("broker::process_packets: subscription exit");
-                    }
+                    tp.del_subscription(&info.sub_name);
                 }
                 trace!("broker::process_packets: remove consumer from session");
                 session.del_consumer(consumer_id);

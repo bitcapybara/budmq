@@ -4,7 +4,6 @@ mod dispatcher;
 use std::collections::HashMap;
 
 use bud_common::{
-    helper::wait_result,
     protocol::Subscribe,
     storage::Storage,
     types::{InitialPostion, SubType},
@@ -83,8 +82,8 @@ impl std::fmt::Display for SendEvent {
 
 #[derive(Debug, Clone)]
 pub struct Consumer {
+    id: u64,
     client_id: u64,
-    consumer_id: u64,
     permits: u32,
     topic_name: String,
     sub_name: String,
@@ -100,7 +99,7 @@ impl Consumer {
             sub_type: sub.sub_type,
             init_pos: sub.initial_position,
             client_id,
-            consumer_id,
+            id: consumer_id,
             sub_name: sub.sub_name.clone(),
         }
     }
@@ -135,6 +134,10 @@ impl TopicConsumers {
     }
     fn clear(&mut self) {
         self.0.take();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_none()
     }
 }
 
@@ -186,14 +189,21 @@ impl<S: Storage> Subscription<S> {
     pub async fn new(
         topic: &str,
         sub_name: &str,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
         storage: S,
         init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
-        let dispatcher = Dispatcher::new(sub_name, storage, init_position).await?;
-        let handle = tokio::spawn(dispatcher.clone().run(notify_rx, send_tx, token.clone()));
+        let dispatcher = Dispatcher::new(
+            sub_name,
+            storage,
+            init_position,
+            send_tx,
+            token.child_token(),
+        )
+        .await?;
+        let handle = tokio::spawn(dispatcher.clone().run(notify_rx));
         Ok(Self {
             topic: topic.to_string(),
             name: sub_name.to_string(),
@@ -208,16 +218,23 @@ impl<S: Storage> Subscription<S> {
         client_id: u64,
         consumer_id: u64,
         sub: &Subscribe,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
         storage: S,
         init_position: InitialPostion,
+        token: CancellationToken,
     ) -> Result<Self> {
         // start dispatch
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(client_id, consumer_id, sub);
-        let dispatcher = Dispatcher::with_consumer(consumer, storage, init_position).await?;
-        let token = CancellationToken::new();
-        let handle = tokio::spawn(dispatcher.clone().run(notify_rx, send_tx, token.clone()));
+        let dispatcher = Dispatcher::with_consumer(
+            consumer,
+            storage,
+            init_position,
+            send_tx,
+            token.child_token(),
+        )
+        .await?;
+        let handle = tokio::spawn(dispatcher.clone().run(notify_rx));
         Ok(Self {
             topic: sub.topic.clone(),
             name: sub.sub_name.clone(),
@@ -265,10 +282,10 @@ impl<S: Storage> Subscription<S> {
     pub async fn delete_position(&self) -> u64 {
         self.dispatcher.delete_position().await
     }
+}
 
-    /// TODO async drop
-    pub async fn close(self) {
+impl<S> Drop for Subscription<S> {
+    fn drop(&mut self) {
         self.token.cancel();
-        wait_result(self.handle, "dispatcher task loop").await;
     }
 }

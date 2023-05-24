@@ -174,7 +174,7 @@ pub struct Topic<S> {
 impl<S: Storage> Topic<S> {
     pub async fn new(
         topic: &str,
-        send_tx: mpsc::UnboundedSender<SendEvent>,
+        send_tx: mpsc::Sender<SendEvent>,
         store: S,
         token: CancellationToken,
     ) -> Result<Self> {
@@ -195,7 +195,7 @@ impl<S: Storage> Topic<S> {
                 send_tx.clone(),
                 store.clone(),
                 sub.init_position,
-                token.clone(),
+                token.child_token(),
             )
             .await?;
             let sub_delete_pos = subscription.delete_position().await;
