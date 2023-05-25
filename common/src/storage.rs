@@ -43,4 +43,6 @@ pub trait Storage: Clone + Send + Sync + 'static {
             .transpose()?
             .map(u64::from_be_bytes))
     }
+
+    async fn fetch_add(&self, key: &[u8], value: u64) -> Result<u64>;
 }

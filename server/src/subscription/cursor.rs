@@ -1,7 +1,7 @@
 use bud_common::{storage::Storage, types::InitialPostion};
 use roaring::RoaringTreemap;
 
-use crate::storage::CursorStorage;
+use crate::storage::cursor::CursorStorage;
 
 use super::Result;
 
@@ -26,7 +26,7 @@ pub struct Cursor<S> {
 impl<S: Storage> Cursor<S> {
     pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
         let storage = CursorStorage::new(sub_name, storage)?;
-        let latest_message_id = storage.get_latest_message_id().await?.unwrap_or_default();
+        let latest_message_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
         let bits = storage.get_ack_bits().await?.unwrap_or_default();
         let delete_position = bits.min().unwrap_or_default();
         let read_position = match init_position {
@@ -64,7 +64,7 @@ impl<S: Storage> Cursor<S> {
 
     pub async fn new_message(&mut self, message_id: u64) -> Result<()> {
         self.latest_message_id = message_id;
-        self.storage.set_latest_message_id(message_id).await?;
+        self.storage.set_latest_cursor_id(message_id).await?;
         Ok(())
     }
 

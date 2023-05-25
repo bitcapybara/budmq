@@ -11,7 +11,7 @@ use bud_common::{
         CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer, Packet,
         ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
-    types::AccessMode,
+    types::{AccessMode, MessageId},
 };
 use bytes::Bytes;
 use log::trace;
@@ -274,11 +274,11 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn ack(&self, consumer_id: u64, message_id: u64) -> Result<()> {
+    pub async fn ack(&self, consumer_id: u64, message_id: &MessageId) -> Result<()> {
         self.send_ok(Packet::ConsumeAck(ConsumeAck {
             request_id: self.request_id.next(),
             consumer_id,
-            message_id,
+            message_id: *message_id,
         }))
         .await
     }

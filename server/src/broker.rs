@@ -19,10 +19,13 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    storage::{self, broker::BrokerStorage},
     subscription::{self, SendEvent, Subscription},
     topic::{self, Topic},
     WAIT_REPLY_TIMEOUT,
 };
+
+const MAX_TOPIC_ID: u64 = 1024;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -35,6 +38,7 @@ pub enum Error {
     ReturnCode(ReturnCode),
     Subscription(subscription::Error),
     Topic(topic::Error),
+    BrokerStorage(storage::Error),
     UnsupportedPacket(PacketType),
     /// do not throw
     Internal(String),
@@ -54,6 +58,7 @@ impl std::fmt::Display for Error {
             Error::Internal(s) => write!(f, "Internal error: {s}"),
             Error::UnsupportedPacket(t) => write!(f, "Unsupported packet type: {t:?}"),
             Error::ProducerDuplicated => write!(f, "Producer duplicated"),
+            Error::BrokerStorage(e) => write!(f, "broker storage error: {e}"),
         }
     }
 }
@@ -73,6 +78,12 @@ impl From<topic::Error> for Error {
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(_: mpsc::error::SendError<T>) -> Self {
         Self::SendOnDroppedChannel
+    }
+}
+
+impl From<storage::Error> for Error {
+    fn from(e: storage::Error) -> Self {
+        Self::BrokerStorage(e)
     }
 }
 
@@ -156,7 +167,7 @@ impl Session {
 #[derive(Clone)]
 pub struct Broker<S> {
     /// storage
-    storage: S,
+    storage: BrokerStorage<S>,
     /// request id
     request_id: SerialId,
     /// key = client_id
@@ -172,7 +183,7 @@ pub struct Broker<S> {
 impl<S: Storage> Broker<S> {
     pub fn new(storage: S, token: CancellationToken) -> Self {
         Self {
-            storage,
+            storage: BrokerStorage::new(storage),
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
@@ -235,8 +246,8 @@ impl<S: Storage> Broker<S> {
         let Some(topic) = topics.get(&event.topic_name) else {
             return Err(Error::Internal(format!("topic {} not found", event.topic_name)));
         };
-        let Some(message) = topic.get_message(event.message_id).await? else {
-            return Err(Error::Internal(format!("message {} not found", event.message_id)));
+        let Some(message) = topic.get_message(&event.message_id).await? else {
+            return Err(Error::Internal(format!("message {:?} not found", event.message_id)));
         };
         let clients = self.clients.read().await;
 
@@ -459,10 +470,12 @@ impl<S: Storage> Broker<S> {
                             .await?
                     }
                     None => {
+                        let topic_id = self.storage.get_new_topic_id().await?;
                         let mut topic = Topic::new(
+                            topic_id,
                             &topic_name,
                             send_tx.clone(),
-                            self.storage.clone(),
+                            self.storage.inner(),
                             self.token.child_token(),
                         )
                         .await?;
@@ -500,11 +513,12 @@ impl<S: Storage> Broker<S> {
                         None => {
                             trace!("broker::process_peckets: create new subscription");
                             let sp = Subscription::from_subscribe(
+                                topic.id,
                                 client_id,
                                 sub.consumer_id,
                                 &sub,
                                 send_tx.clone(),
-                                self.storage.clone(),
+                                self.storage.inner(),
                                 sub.initial_position,
                                 self.token.child_token(),
                             )
@@ -515,20 +529,23 @@ impl<S: Storage> Broker<S> {
                     },
                     None => {
                         trace!("broker::process_packets: create new topic");
+                        let topic_id = self.storage.get_new_topic_id().await?;
                         let mut topic = Topic::new(
+                            topic_id,
                             &sub.topic,
                             send_tx.clone(),
-                            self.storage.clone(),
+                            self.storage.inner(),
                             self.token.child_token(),
                         )
                         .await?;
                         trace!("broker::process_packets: create subscription");
                         let sp = Subscription::from_subscribe(
+                            topic_id,
                             client_id,
                             sub.consumer_id,
                             &sub,
                             send_tx.clone(),
-                            self.storage.clone(),
+                            self.storage.inner(),
                             sub.initial_position,
                             self.token.child_token(),
                         )
@@ -620,7 +637,7 @@ impl<S: Storage> Broker<S> {
                     return Err(Error::Internal(format!("topic {} not found", info.topic_name)))
                 };
                 trace!("broker::process_packets: ack message in topic");
-                topic.consume_ack(&info.sub_name, c.message_id).await?;
+                topic.consume_ack(&info.sub_name, &c.message_id).await?;
                 Ok(Packet::ok_response(c.request_id))
             }
             p => Err(Error::UnsupportedPacket(p.packet_type())),

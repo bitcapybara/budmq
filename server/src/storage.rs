@@ -1,5 +1,6 @@
-mod cursor;
-mod topic;
+pub(crate) mod broker;
+pub(crate) mod cursor;
+pub(crate) mod topic;
 
 use std::{
     array, io,
@@ -10,13 +11,11 @@ use std::{
 use bud_common::{
     protocol::{self, get_u64, get_u8, read_bytes, read_string, write_bytes, write_string},
     storage,
+    types::MessageId,
 };
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::topic::{SubscriptionInfo, TopicMessage};
-
-pub(crate) use cursor::CursorStorage;
-pub(crate) use topic::TopicStorage;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -76,41 +75,41 @@ impl From<protocol::Error> for Error {
 }
 
 trait Codec {
-    fn to_vec(&self) -> Vec<u8>;
-    fn from_bytes(bytes: &[u8]) -> Result<Self>
+    fn encode(&self) -> Vec<u8>;
+    fn decode(bytes: &[u8]) -> Result<Self>
     where
         Self: Sized;
 }
 
 impl Codec for TopicMessage {
-    fn to_vec(&self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         // topic_name_len + topic_name + cursor_id + seq_id + payload_len + payload
-        let buf_len = 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
+        let buf_len = 8 + 8 + 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
         let mut buf = BytesMut::with_capacity(buf_len);
+        write_bytes(&mut buf, self.message_id.encode().as_slice());
         write_string(&mut buf, &self.topic_name);
-        buf.put_u64(self.topic_cursor_id);
         buf.put_u64(self.seq_id);
         write_bytes(&mut buf, &self.payload);
         buf.to_vec()
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    fn decode(bytes: &[u8]) -> Result<Self> {
         let mut buf = Bytes::copy_from_slice(bytes);
+        let message_id = MessageId::decode(&read_bytes(&mut buf)?)?;
         let topic_name = read_string(&mut buf)?;
-        let topic_cursor_id = get_u64(&mut buf)?;
         let seq_id = get_u64(&mut buf)?;
         let payload = read_bytes(&mut buf)?;
         Ok(Self {
             seq_id,
             payload,
             topic_name,
-            topic_cursor_id,
+            message_id,
         })
     }
 }
 
 impl Codec for SubscriptionInfo {
-    fn to_vec(&self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         // topic_len + topic + name_len + name + sub_type + init_position
         let buf_len = 2 + self.topic.len() + 2 + self.name.len() + 1 + 1;
         let mut buf = BytesMut::with_capacity(buf_len);
@@ -121,7 +120,7 @@ impl Codec for SubscriptionInfo {
         buf.to_vec()
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    fn decode(bytes: &[u8]) -> Result<Self> {
         let mut buf = Bytes::copy_from_slice(bytes);
         let topic = read_string(&mut buf)?;
         let name = read_string(&mut buf)?;

@@ -30,7 +30,7 @@ pub use self::{
     unsubscribe::Unsubscribe,
 };
 
-pub(in crate::protocol) type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -460,6 +460,8 @@ pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
 mod tests {
     use tokio_util::codec::Encoder;
 
+    use crate::types::MessageId;
+
     use super::*;
 
     #[test]
@@ -545,7 +547,10 @@ mod tests {
     fn codec_send() {
         codec_works(Packet::Send(Send {
             request_id: 1,
-            message_id: 1234,
+            message_id: MessageId {
+                topic_id: 1,
+                cursor_id: 200,
+            },
             consumer_id: 3456,
             payload: Bytes::from_static(b"hello, world"),
         }))
@@ -556,7 +561,10 @@ mod tests {
         codec_works(Packet::ConsumeAck(ConsumeAck {
             request_id: 1,
             consumer_id: 12345,
-            message_id: 23456,
+            message_id: MessageId {
+                topic_id: 1,
+                cursor_id: 3,
+            },
         }))
     }
 

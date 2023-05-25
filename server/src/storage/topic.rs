@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{self, AtomicU64},
 };
 
-use bud_common::storage::Storage;
+use bud_common::{storage::Storage, types::MessageId};
 
 use crate::topic::{SubscriptionInfo, TopicMessage};
 
@@ -38,7 +38,7 @@ impl<S: Storage> TopicStorage<S> {
             .map(|id| id + 1)
             .unwrap_or_default();
         id_key.extend_from_slice(&id.to_be_bytes());
-        self.storage.put(&id_key, &sub.to_vec()).await?;
+        self.storage.put(&id_key, &sub.encode()).await?;
         Ok(())
     }
 
@@ -55,25 +55,25 @@ impl<S: Storage> TopicStorage<S> {
             let Some(sub) = self.storage.get(&key).await? else {
                 continue;
             };
-            subs.push(SubscriptionInfo::from_bytes(&sub)?);
+            subs.push(SubscriptionInfo::decode(&sub)?);
         }
         Ok(subs)
     }
 
-    pub async fn add_message(&self, message: &TopicMessage) -> Result<u64> {
+    pub async fn add_message(&self, message: &TopicMessage) -> Result<()> {
         let msg_id = self.counter.fetch_add(1, atomic::Ordering::SeqCst);
         let key = self.key(msg_id.to_be_bytes().as_slice());
-        let value = message.to_vec();
+        let value = message.encode();
         self.storage.put(&key, &value).await?;
-        Ok(msg_id)
+        Ok(())
     }
 
-    pub async fn get_message(&self, message_id: u64) -> Result<Option<TopicMessage>> {
-        let key = self.key(message_id.to_be_bytes().as_slice());
+    pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
+        let key = self.key(message_id.encode().as_slice());
         self.storage
             .get(&key)
             .await?
-            .map(|b| TopicMessage::from_bytes(&b))
+            .map(|b| TopicMessage::decode(&b))
             .transpose()
     }
 
@@ -104,23 +104,9 @@ impl<S: Storage> TopicStorage<S> {
             .await?)
     }
 
-    pub async fn get_latest_cursor_id(&self) -> Result<Option<u64>> {
+    pub async fn get_new_cursor_id(&self) -> Result<u64> {
         let key = self.key(Self::LATEST_CURSOR_ID_KEY);
-        Ok(self.storage.get_u64(&key).await?)
-    }
-
-    pub async fn set_latest_cursor_id(&self, cursor_id: u64) -> Result<()> {
-        let key = self.key(Self::LATEST_CURSOR_ID_KEY);
-        Ok(self
-            .storage
-            .put(&key, cursor_id.to_be_bytes().as_slice())
-            .await?)
-    }
-
-    pub async fn get_message_cursor_id(&self, message_id: u64) -> Result<Option<u64>> {
-        self.get_message(message_id)
-            .await
-            .map(|m| m.map(|mm| mm.topic_cursor_id))
+        Ok(self.storage.fetch_add(&key, 1).await?)
     }
 
     fn key(&self, bytes: &[u8]) -> Vec<u8> {

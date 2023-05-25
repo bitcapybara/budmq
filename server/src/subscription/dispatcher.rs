@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use bud_common::{storage::Storage, types::InitialPostion};
+use bud_common::{
+    storage::Storage,
+    types::{InitialPostion, MessageId},
+};
 use log::trace;
 use tokio::{
     select,
@@ -14,7 +17,7 @@ use super::{
 
 pub enum Notify {
     /// new message id
-    NewMessage(u64),
+    NewMessage,
     /// consumer permits
     AddPermits {
         client_id: u64,
@@ -28,6 +31,8 @@ pub enum Notify {
 /// 2. dispatch messages to consumers
 #[derive(Clone)]
 pub struct Dispatcher<S> {
+    /// topic id
+    topic_id: u64,
     /// save all consumers in memory
     consumers: Arc<RwLock<TopicConsumers>>,
     /// cursor
@@ -40,6 +45,7 @@ pub struct Dispatcher<S> {
 impl<S: Storage> Dispatcher<S> {
     /// load from storage
     pub async fn new(
+        topic_id: u64,
         sub_name: &str,
         storage: S,
         init_position: InitialPostion,
@@ -53,10 +59,12 @@ impl<S: Storage> Dispatcher<S> {
             )),
             send_tx,
             token,
+            topic_id,
         })
     }
 
     pub async fn with_consumer(
+        topic_id: u64,
         consumer: Consumer,
         storage: S,
         init_position: InitialPostion,
@@ -73,6 +81,7 @@ impl<S: Storage> Dispatcher<S> {
             cursor,
             send_tx,
             token,
+            topic_id,
         })
     }
 
@@ -208,10 +217,8 @@ impl<S: Storage> Dispatcher<S> {
                         return Ok(());
                     };
                     match notify {
-                        Notify::NewMessage(msg_id) => {
+                        Notify::NewMessage => {
                             trace!("dispatcher::run: receive a NEW_MESSAGE notify");
-                            let mut cursor = self.cursor.write().await;
-                            cursor.new_message(msg_id).await?;
                         }
                         Notify::AddPermits {
                             consumer_id,
@@ -225,7 +232,7 @@ impl<S: Storage> Dispatcher<S> {
                     }
                     let mut cursor = self.cursor.write().await;
                     trace!("dispatcher::run cursor peek a message");
-                    while let Some(next_message) = cursor.peek_message() {
+                    while let Some(next_cursor_id) = cursor.peek_message() {
                         trace!("dispatcher::run: find available consumers");
                         let Some(consumer) = self.available_consumer().await else {
                             continue;
@@ -236,7 +243,7 @@ impl<S: Storage> Dispatcher<S> {
                         let event = SendEvent {
                             client_id: consumer.client_id,
                             topic_name: consumer.topic_name,
-                            message_id: next_message,
+                            message_id: MessageId { topic_id: self.topic_id, cursor_id: next_cursor_id },
                             consumer_id: consumer.id,
                             res_tx,
                         };

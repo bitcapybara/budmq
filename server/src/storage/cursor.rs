@@ -32,12 +32,12 @@ impl<S: Storage> CursorStorage<S> {
         Ok(())
     }
 
-    pub async fn get_latest_message_id(&self) -> Result<Option<u64>> {
+    pub async fn get_latest_cursor_id(&self) -> Result<Option<u64>> {
         let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
         Ok(self.storage.get_u64(&key).await?)
     }
 
-    pub async fn set_latest_message_id(&self, message_id: u64) -> Result<()> {
+    pub async fn set_latest_cursor_id(&self, message_id: u64) -> Result<()> {
         let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
         self.storage
             .put(&key, message_id.to_be_bytes().as_slice())

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bud_common::{
     protocol::{Publish, ReturnCode},
     storage::Storage,
-    types::{AccessMode, InitialPostion, SubType},
+    types::{AccessMode, InitialPostion, MessageId, SubType},
 };
 use bytes::Bytes;
 
@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    storage::{self, TopicStorage},
+    storage::{self, topic::TopicStorage},
     subscription::{self, SendEvent, Subscription},
 };
 
@@ -49,10 +49,10 @@ impl From<subscription::Error> for Error {
 }
 
 pub struct TopicMessage {
+    /// message id
+    pub message_id: MessageId,
     /// topic name
     pub topic_name: String,
-    /// topic curosr id, topic unique
-    pub topic_cursor_id: u64,
     /// producer sequence id
     pub seq_id: u64,
     /// message payload
@@ -60,12 +60,12 @@ pub struct TopicMessage {
 }
 
 impl TopicMessage {
-    pub fn new(topic: &str, cursor_id: u64, seq_id: u64, payload: Bytes) -> Self {
+    pub fn new(topic: &str, message_id: MessageId, seq_id: u64, payload: Bytes) -> Self {
         Self {
             topic_name: topic.to_string(),
-            topic_cursor_id: cursor_id,
             seq_id,
             payload,
+            message_id,
         }
     }
 }
@@ -157,6 +157,8 @@ pub struct SubscriptionInfo {
 /// Save all messages associated with this topic in subscription
 /// Save subscription associated with this topic in memory
 pub struct Topic<S> {
+    /// topic id
+    pub id: u64,
     /// topic name
     pub name: String,
     /// key = sub_name
@@ -167,19 +169,17 @@ pub struct Topic<S> {
     storage: TopicStorage<S>,
     /// delete position
     delete_position: u64,
-    /// latest cursor id
-    latest_cursor_id: u64,
 }
 
 impl<S: Storage> Topic<S> {
     pub async fn new(
+        id: u64,
         topic: &str,
         send_tx: mpsc::Sender<SendEvent>,
         store: S,
         token: CancellationToken,
     ) -> Result<Self> {
         let storage = TopicStorage::new(topic, store.clone())?;
-        let latest_cursor_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = if loaded_subscriptions.is_empty() {
@@ -190,6 +190,7 @@ impl<S: Storage> Topic<S> {
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
             let subscription = Subscription::new(
+                id,
                 &sub.topic,
                 &sub.name,
                 send_tx.clone(),
@@ -209,8 +210,8 @@ impl<S: Storage> Topic<S> {
             subscriptions,
             storage,
             delete_position,
-            latest_cursor_id,
             producers: TopicProducers(None),
+            id,
         })
     }
 
@@ -239,37 +240,37 @@ impl<S: Storage> Topic<S> {
         if message.sequence_id <= sequence_id {
             return Err(Error::Response(ReturnCode::ProduceMessageDuplicated));
         }
-        self.latest_cursor_id += 1;
+        let message_id = MessageId {
+            topic_id: self.id,
+            cursor_id: self.storage.get_new_cursor_id().await?,
+        };
         let topic_message = TopicMessage::new(
             &self.name,
-            self.latest_cursor_id,
+            message_id,
             message.sequence_id,
             message.payload.clone(),
         );
-        let message_id = self.storage.add_message(&topic_message).await?;
+        self.storage.add_message(&topic_message).await?;
         self.storage
             .set_sequence_id(&producer_name, sequence_id)
             .await?;
         for sub in self.subscriptions.values() {
-            sub.message_notify(message_id)?;
+            sub.message_notify()?;
         }
         Ok(())
     }
 
-    pub async fn get_message(&self, message_id: u64) -> Result<Option<TopicMessage>> {
+    pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
         Ok(self.storage.get_message(message_id).await?)
     }
 
-    pub async fn consume_ack(&mut self, sub_name: &str, message_id: u64) -> Result<()> {
+    pub async fn consume_ack(&mut self, sub_name: &str, message_id: &MessageId) -> Result<()> {
         let Some(sp) = self.subscriptions.get(sub_name) else {
             return Ok(());
         };
 
         // ack
-        let Some(cursor_id) = self.storage.get_message_cursor_id(message_id).await? else {
-            return Ok(());
-        };
-        sp.consume_ack(cursor_id).await?;
+        sp.consume_ack(message_id.cursor_id).await?;
 
         // remove acked messages
         const DELETE_BATCH: u64 = 100;

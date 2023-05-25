@@ -42,6 +42,9 @@ pub fn codec(input: TokenStream) -> TokenStream {
             "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
                 let #field_ident = super::get_u8(&mut buf)?.try_into()?;
             },
+            "MessageId" => quote! {
+                let #field_ident = MessageId::decode(&buf)?;
+            },
             _ => panic!("unsupported field types"),
         }
     });
@@ -66,6 +69,9 @@ pub fn codec(input: TokenStream) -> TokenStream {
             "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
                 buf.put_u8(self.#field_ident as u8);
             },
+            "MessageId" => quote! {
+                super::write_bytes(buf, self.#field_ident.encode().as_slice());
+            },
             _ => panic!("unsupported field types"),
         }
     });
@@ -86,6 +92,9 @@ pub fn codec(input: TokenStream) -> TokenStream {
             },
             "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
                 1
+            },
+            "MessageId" => quote! {
+                8 + 8
             },
             _ => panic!("unsupported field types"),
         }

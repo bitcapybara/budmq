@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bud_common::{
     protocol::ReturnCode,
-    types::{InitialPostion, SubType},
+    types::{InitialPostion, MessageId, SubType},
 };
 use bytes::Bytes;
 use log::warn;
@@ -64,12 +64,12 @@ pub struct SubscribeMessage {
 }
 
 pub struct ConsumeMessage {
-    pub id: u64,
+    pub id: MessageId,
     pub payload: Bytes,
 }
 
 pub enum ConsumerEvent {
-    Ack { message_id: u64 },
+    Ack(MessageId),
     Unsubscribe,
     Close,
 }
@@ -151,8 +151,8 @@ impl ConsumeEngine {
                         return Ok(());
                     };
                     match event {
-                        ConsumerEvent::Ack { message_id } => {
-                            self.conn.ack(self.id, message_id).await?;
+                        ConsumerEvent::Ack(message_id) => {
+                            self.conn.ack(self.id, &message_id).await?;
                         },
                         ConsumerEvent::Unsubscribe => {
                             self.conn.unsubscribe(self.id).await?;
@@ -218,10 +218,8 @@ impl Consumer {
         self.consumer_rx.recv().await
     }
 
-    pub async fn ack(&self, message_id: u64) -> Result<()> {
-        self.event_tx
-            .send(ConsumerEvent::Ack { message_id })
-            .await?;
+    pub async fn ack(&self, message_id: &MessageId) -> Result<()> {
+        self.event_tx.send(ConsumerEvent::Ack(*message_id)).await?;
         Ok(())
     }
 

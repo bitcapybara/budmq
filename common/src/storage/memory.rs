@@ -42,4 +42,20 @@ impl Storage for MemoryStorage {
         inner.remove(k);
         Ok(())
     }
+
+    async fn fetch_add(&self, k: &[u8], v: u64) -> Result<u64> {
+        let mut inner = self.inner.write().await;
+        match inner.remove(k) {
+            Some(value) => {
+                let prev = u64::from_be_bytes(value.as_slice().try_into()?);
+                inner.insert(k.to_vec(), (prev + v).to_be_bytes().to_vec());
+                Ok(prev)
+            }
+            None => {
+                let prev = 0;
+                inner.insert(k.to_vec(), v.to_be_bytes().to_vec());
+                Ok(prev)
+            }
+        }
+    }
 }

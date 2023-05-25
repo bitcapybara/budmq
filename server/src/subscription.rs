@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use bud_common::{
     protocol::Subscribe,
     storage::Storage,
-    types::{InitialPostion, SubType},
+    types::{InitialPostion, MessageId, SubType},
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -64,7 +64,7 @@ impl From<storage::Error> for Error {
 pub struct SendEvent {
     pub client_id: u64,
     pub topic_name: String,
-    pub message_id: u64,
+    pub message_id: MessageId,
     pub consumer_id: u64,
     /// true if send to client successfully
     pub res_tx: oneshot::Sender<bool>,
@@ -74,7 +74,7 @@ impl std::fmt::Display for SendEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            r#"{{ "client_id": {}, "consumer_id": {}, "topic": {}, "message_id": {} }}"#,
+            r#"{{ "client_id": {}, "consumer_id": {}, "topic": {}, "message_id": {:?} }}"#,
             self.client_id, self.consumer_id, self.topic_name, self.message_id
         )
     }
@@ -176,6 +176,7 @@ impl From<Consumer> for Consumers {
 /// save cursor in persistent
 /// save consumers in memory
 pub struct Subscription<S> {
+    pub topic_id: u64,
     pub topic: String,
     pub name: String,
     dispatcher: Dispatcher<S>,
@@ -187,6 +188,7 @@ pub struct Subscription<S> {
 impl<S: Storage> Subscription<S> {
     /// load from storage
     pub async fn new(
+        topic_id: u64,
         topic: &str,
         sub_name: &str,
         send_tx: mpsc::Sender<SendEvent>,
@@ -196,6 +198,7 @@ impl<S: Storage> Subscription<S> {
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let dispatcher = Dispatcher::new(
+            topic_id,
             sub_name,
             storage,
             init_position,
@@ -211,10 +214,13 @@ impl<S: Storage> Subscription<S> {
             notify_tx,
             handle,
             token,
+            topic_id,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn from_subscribe(
+        topic_id: u64,
         client_id: u64,
         consumer_id: u64,
         sub: &Subscribe,
@@ -227,6 +233,7 @@ impl<S: Storage> Subscription<S> {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let consumer = Consumer::new(client_id, consumer_id, sub);
         let dispatcher = Dispatcher::with_consumer(
+            topic_id,
             consumer,
             storage,
             init_position,
@@ -242,6 +249,7 @@ impl<S: Storage> Subscription<S> {
             dispatcher,
             handle,
             token,
+            topic_id,
         })
     }
 
@@ -270,8 +278,8 @@ impl<S: Storage> Subscription<S> {
         Ok(())
     }
 
-    pub fn message_notify(&self, message_id: u64) -> Result<()> {
-        self.notify_tx.send(Notify::NewMessage(message_id))?;
+    pub fn message_notify(&self) -> Result<()> {
+        self.notify_tx.send(Notify::NewMessage)?;
         Ok(())
     }
 
