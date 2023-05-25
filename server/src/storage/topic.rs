@@ -4,6 +4,7 @@ use std::{
 };
 
 use bud_common::{storage::Storage, types::MessageId};
+use bytes::BytesMut;
 
 use crate::topic::{SubscriptionInfo, TopicMessage};
 
@@ -69,7 +70,9 @@ impl<S: Storage> TopicStorage<S> {
     }
 
     pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
-        let key = self.key(message_id.encode().as_slice());
+        let mut buf = BytesMut::new();
+        message_id.encode(&mut buf);
+        let key = self.key(&buf);
         self.storage
             .get(&key)
             .await?

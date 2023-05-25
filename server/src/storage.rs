@@ -86,7 +86,7 @@ impl Codec for TopicMessage {
         // topic_name_len + topic_name + cursor_id + seq_id + payload_len + payload
         let buf_len = 8 + 8 + 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
         let mut buf = BytesMut::with_capacity(buf_len);
-        write_bytes(&mut buf, self.message_id.encode().as_slice());
+        self.message_id.encode(&mut buf);
         write_string(&mut buf, &self.topic_name);
         buf.put_u64(self.seq_id);
         write_bytes(&mut buf, &self.payload);
@@ -95,7 +95,7 @@ impl Codec for TopicMessage {
 
     fn decode(bytes: &[u8]) -> Result<Self> {
         let mut buf = Bytes::copy_from_slice(bytes);
-        let message_id = MessageId::decode(&read_bytes(&mut buf)?)?;
+        let message_id = MessageId::decode(&mut buf)?;
         let topic_name = read_string(&mut buf)?;
         let seq_id = get_u64(&mut buf)?;
         let payload = read_bytes(&mut buf)?;

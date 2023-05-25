@@ -121,6 +121,7 @@ pub trait Codec {
     fn decode(buf: Bytes) -> Result<Self>
     where
         Self: Sized;
+
     fn encode(&self, buf: &mut BytesMut) -> Result<()>;
 
     fn header(&self) -> Header;

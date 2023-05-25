@@ -32,17 +32,14 @@ pub struct MessageId {
 }
 
 impl MessageId {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut buf = BytesMut::with_capacity(8 + 8);
+    pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u64(self.topic_id);
         buf.put_u64(self.cursor_id);
-        buf.to_vec()
     }
 
-    pub fn decode(bytes: &[u8]) -> protocol::Result<Self> {
-        let mut buf = Bytes::copy_from_slice(bytes);
-        let topic_id = get_u64(&mut buf)?;
-        let cursor_id = get_u64(&mut buf)?;
+    pub fn decode(buf: &mut Bytes) -> protocol::Result<Self> {
+        let topic_id = get_u64(buf)?;
+        let cursor_id = get_u64(buf)?;
         Ok(Self {
             topic_id,
             cursor_id,

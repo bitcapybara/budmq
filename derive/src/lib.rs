@@ -43,7 +43,7 @@ pub fn codec(input: TokenStream) -> TokenStream {
                 let #field_ident = super::get_u8(&mut buf)?.try_into()?;
             },
             "MessageId" => quote! {
-                let #field_ident = MessageId::decode(&buf)?;
+                let #field_ident = MessageId::decode(&mut buf)?;
             },
             _ => panic!("unsupported field types"),
         }
@@ -70,7 +70,7 @@ pub fn codec(input: TokenStream) -> TokenStream {
                 buf.put_u8(self.#field_ident as u8);
             },
             "MessageId" => quote! {
-                super::write_bytes(buf, self.#field_ident.encode().as_slice());
+                self.#field_ident.encode(buf);
             },
             _ => panic!("unsupported field types"),
         }
