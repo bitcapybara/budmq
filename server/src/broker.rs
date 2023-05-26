@@ -470,7 +470,7 @@ impl<S: Storage> Broker<S> {
                             .await?
                     }
                     None => {
-                        let topic_id = self.storage.get_new_topic_id().await?;
+                        let topic_id = self.storage.get_or_create_topic_id(&topic_name).await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &topic_name,
@@ -529,7 +529,7 @@ impl<S: Storage> Broker<S> {
                     },
                     None => {
                         trace!("broker::process_packets: create new topic");
-                        let topic_id = self.storage.get_new_topic_id().await?;
+                        let topic_id = self.storage.get_or_create_topic_id(&sub.topic).await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &sub.topic,

@@ -35,14 +35,18 @@ pub trait Storage: Clone + Send + Sync + 'static {
 
     async fn del(&self, k: &[u8]) -> Result<()>;
 
-    async fn get_u64(&self, key: &[u8]) -> Result<Option<u64>> {
+    async fn get_u64(&self, k: &[u8]) -> Result<Option<u64>> {
         Ok(self
-            .get(key)
+            .get(k)
             .await?
             .map(|b| b.as_slice().try_into())
             .transpose()?
             .map(u64::from_be_bytes))
     }
 
-    async fn fetch_add(&self, key: &[u8], value: u64) -> Result<u64>;
+    async fn set_u64(&self, k: &[u8], v: u64) -> Result<()> {
+        Ok(self.put(k, v.to_be_bytes().as_slice()).await?)
+    }
+
+    async fn fetch_add(&self, k: &[u8], v: u64) -> Result<u64>;
 }
