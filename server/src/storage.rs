@@ -83,6 +83,7 @@ trait Codec {
 
 impl Codec for TopicMessage {
     fn encode(&self) -> Vec<u8> {
+        use bud_common::protocol::Codec;
         // topic_name_len + topic_name + cursor_id + seq_id + payload_len + payload
         let buf_len = 8 + 8 + 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
         let mut buf = BytesMut::with_capacity(buf_len);
@@ -94,6 +95,7 @@ impl Codec for TopicMessage {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self> {
+        use bud_common::protocol::Codec;
         let mut buf = Bytes::copy_from_slice(bytes);
         let message_id = MessageId::decode(&mut buf)?;
         let topic_name = read_string(&mut buf)?;

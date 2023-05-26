@@ -70,6 +70,7 @@ impl<S: Storage> TopicStorage<S> {
     }
 
     pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
+        use bud_common::protocol::Codec;
         let mut buf = BytesMut::new();
         message_id.encode(&mut buf);
         let key = self.key(&buf);

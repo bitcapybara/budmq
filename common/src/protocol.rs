@@ -83,26 +83,30 @@ impl Decoder for PacketCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
         let (header, header_len) = Header::read(src.iter())?;
         // header + body + other
-        let bytes = src
+        let mut bytes = src
             .split_to(header.remain_len + header_len) // header + body
             .split_off(header_len) // body
             .freeze();
         Ok(Some(match header.packet_type()? {
-            PacketType::Connect => Packet::Connect(Connect::decode(bytes)?),
-            PacketType::Subscribe => Packet::Subscribe(Subscribe::decode(bytes)?),
-            PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::decode(bytes)?),
-            PacketType::Publish => Packet::Publish(Publish::decode(bytes)?),
-            PacketType::Send => Packet::Send(Send::decode(bytes)?),
-            PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(bytes)?),
-            PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(bytes)?),
-            PacketType::Response => Packet::Response(Response::decode(bytes)?),
-            PacketType::CreateProducer => Packet::CreateProducer(CreateProducer::decode(bytes)?),
-            PacketType::ProducerReceipt => Packet::ProducerReceipt(ProducerReceipt::decode(bytes)?),
-            PacketType::Ping => Packet::Ping(Ping::decode(bytes)?),
-            PacketType::Pong => Packet::Pong(Pong::decode(bytes)?),
+            PacketType::Connect => Packet::Connect(Connect::decode(&mut bytes)?),
+            PacketType::Subscribe => Packet::Subscribe(Subscribe::decode(&mut bytes)?),
+            PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::decode(&mut bytes)?),
+            PacketType::Publish => Packet::Publish(Publish::decode(&mut bytes)?),
+            PacketType::Send => Packet::Send(Send::decode(&mut bytes)?),
+            PacketType::ConsumeAck => Packet::ConsumeAck(ConsumeAck::decode(&mut bytes)?),
+            PacketType::ControlFlow => Packet::ControlFlow(ControlFlow::decode(&mut bytes)?),
+            PacketType::Response => Packet::Response(Response::decode(&mut bytes)?),
+            PacketType::CreateProducer => {
+                Packet::CreateProducer(CreateProducer::decode(&mut bytes)?)
+            }
+            PacketType::ProducerReceipt => {
+                Packet::ProducerReceipt(ProducerReceipt::decode(&mut bytes)?)
+            }
+            PacketType::Ping => Packet::Ping(Ping::decode(&mut bytes)?),
+            PacketType::Pong => Packet::Pong(Pong::decode(&mut bytes)?),
             PacketType::Disconnect => Packet::Disconnect,
-            PacketType::CloseProducer => Packet::CloseProducer(CloseProducer::decode(bytes)?),
-            PacketType::CloseConsumer => Packet::CloseConsumer(CloseConsumer::decode(bytes)?),
+            PacketType::CloseProducer => Packet::CloseProducer(CloseProducer::decode(&mut bytes)?),
+            PacketType::CloseConsumer => Packet::CloseConsumer(CloseConsumer::decode(&mut bytes)?),
         }))
     }
 }
@@ -112,19 +116,19 @@ impl Encoder<Packet> for PacketCodec {
 
     fn encode(&mut self, item: Packet, dst: &mut bytes::BytesMut) -> Result<()> {
         item.header().write(dst)?;
-        item.write(dst)?;
+        item.write(dst);
         Ok(())
     }
 }
 
 pub trait Codec {
-    fn decode(buf: Bytes) -> Result<Self>
+    fn decode(buf: &mut Bytes) -> Result<Self>
     where
         Self: Sized;
 
-    fn encode(&self, buf: &mut BytesMut) -> Result<()>;
+    fn encode(&self, buf: &mut BytesMut);
 
-    // fn header(&self) -> Header;
+    fn size(&self) -> usize;
 }
 
 impl TryFrom<u8> for InitialPostion {
@@ -246,7 +250,7 @@ impl Packet {
         }
     }
 
-    fn write(&self, buf: &mut BytesMut) -> Result<()> {
+    fn write(&self, buf: &mut BytesMut) {
         match self {
             Packet::Connect(p) => p.encode(buf),
             Packet::Subscribe(p) => p.encode(buf),
@@ -260,7 +264,7 @@ impl Packet {
             Packet::ProducerReceipt(p) => p.encode(buf),
             Packet::Ping(p) => p.encode(buf),
             Packet::Pong(p) => p.encode(buf),
-            Packet::Disconnect => Ok(()),
+            Packet::Disconnect => {}
             Packet::CloseProducer(p) => p.encode(buf),
             Packet::CloseConsumer(p) => p.encode(buf),
         }

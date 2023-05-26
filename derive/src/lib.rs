@@ -15,38 +15,15 @@ pub fn packet_codec(input: TokenStream) -> TokenStream {
     let Fields::Named(fields) = struct_data.fields else {
         panic!("must derive on named fields")
     };
-    let field_sizes = fields.named.iter().map(|field| {
-        let field_ident = &field.ident;
-        match get_field_type(field).as_str() {
-            "u16" => quote! {
-                2
-            },
-            "u32" => quote! {
-                4
-            },
-            "u64" => quote! {
-                8
-            },
-            "String" | "Bytes" => quote! {
-                2 + self.#field_ident.len()
-            },
-            "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
-                1
-            },
-            "MessageId" => quote! {
-                8 + 8
-            },
-            _ => panic!("unsupported field types"),
-        }
-    });
-    let codec = codec_inner(&struct_ident, &fields);
-    quote! {
 
-        #codec
+    let codec_struct = codec_struct(&struct_ident, &fields);
+    quote! {
+        #codec_struct
 
         impl #struct_ident {
             pub fn header(&self) -> super::Header {
-                super::Header::new(super::PacketType::#struct_ident, #(#field_sizes) + *)
+                use crate::protocol::Codec;
+                super::Header::new(super::PacketType::#struct_ident, self.size())
             }
         }
     }
@@ -65,10 +42,10 @@ pub fn codec(input: TokenStream) -> TokenStream {
         panic!("must derive on named fields")
     };
 
-    codec_inner(&struct_ident, &fields).into()
+    codec_struct(&struct_ident, &fields).into()
 }
 
-fn codec_inner(
+fn codec_struct(
     struct_ident: &proc_macro2::Ident,
     fields: &FieldsNamed,
 ) -> proc_macro2::TokenStream {
@@ -80,34 +57,34 @@ fn codec_inner(
     });
     let field_decode_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
-        match get_field_type(field).as_str() {
+        let field_type_ident = get_field_type(field);
+        match field_type_ident.to_string().as_str() {
             "u16" => quote! {
-                let #field_ident = super::get_u16(&mut buf)?;
+                let #field_ident = crate::protocol::get_u16(buf)?;
             },
             "u32" => quote! {
-                let #field_ident = super::get_u32(&mut buf)?;
+                let #field_ident = crate::protocol::get_u32(buf)?;
             },
             "u64" => quote! {
-                let #field_ident = super::get_u64(&mut buf)?;
+                let #field_ident = crate::protocol::get_u64(buf)?;
             },
             "String" => quote! {
-                let #field_ident = super::read_string(&mut buf)?;
+                let #field_ident = crate::protocol::read_string(buf)?;
             },
             "Bytes" => quote! {
-                let #field_ident = super::read_bytes(&mut buf)?;
+                let #field_ident = crate::protocol::read_bytes(buf)?;
             },
             "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
-                let #field_ident = super::get_u8(&mut buf)?.try_into()?;
+                let #field_ident = crate::protocol::get_u8(buf)?.try_into()?;
             },
-            "MessageId" => quote! {
-                let #field_ident = MessageId::decode(&mut buf)?;
+            _ => quote! {
+                let #field_ident = #field_type_ident::decode(buf)?;
             },
-            _ => panic!("unsupported field types"),
         }
     });
     let field_encode_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
-        match get_field_type(field).as_str() {
+        match get_field_type(field).to_string().as_str() {
             "u16" => quote! {
                 buf.put_u16(self.#field_ident);
             },
@@ -126,31 +103,56 @@ fn codec_inner(
             "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
                 buf.put_u8(self.#field_ident as u8);
             },
-            "MessageId" => quote! {
+            _ => quote! {
                 self.#field_ident.encode(buf);
             },
-            _ => panic!("unsupported field types"),
+        }
+    });
+    let field_sizes = fields.named.iter().map(|field| {
+        let field_ident = &field.ident;
+        match get_field_type(field).to_string().as_str() {
+            "u16" => quote! {
+                2
+            },
+            "u32" => quote! {
+                4
+            },
+            "u64" => quote! {
+                8
+            },
+            "String" | "Bytes" => quote! {
+                2 + self.#field_ident.len()
+            },
+            "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
+                1
+            },
+            _ => quote! {
+                self.#field_ident.size()
+            },
         }
     });
     quote! {
-        impl super::Codec for #struct_ident {
-            fn decode(mut buf: bytes::Bytes) -> super::Result<Self> {
+        impl crate::protocol::Codec for #struct_ident {
+            fn decode(buf: &mut bytes::Bytes) -> crate::protocol::Result<Self> {
                 #(#field_decode_methods)*
                 Ok(Self {
                     #(#field_idents),*
                 })
             }
 
-            fn encode(&self, buf: &mut bytes::BytesMut) -> super::Result<()> {
+            fn encode(&self, buf: &mut bytes::BytesMut) {
                 use bytes::BufMut;
                 #(#field_encode_methods)*
-                Ok(())
+            }
+
+            fn size(&self) -> usize {
+                #(#field_sizes) + *
             }
         }
     }
 }
 
-fn get_field_type(field: &Field) -> String {
+fn get_field_type(field: &Field) -> proc_macro2::Ident {
     let Type::Path(path) = &field.ty else {
         panic!("must derive on path field type")
     };
@@ -159,5 +161,5 @@ fn get_field_type(field: &Field) -> String {
         .last()
         .expect("field type ident not found")
         .ident
-        .to_string()
+        .clone()
 }
