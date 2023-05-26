@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
+#[derive(Debug, Clone, Copy, PartialEq, bud_derive::PacketCodec)]
 pub struct Connect {
     pub request_id: u64,
     /// keepalive(ms)

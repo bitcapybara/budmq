@@ -1,6 +1,6 @@
 use crate::types::MessageId;
 
-#[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
+#[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
 pub struct Send {
     pub request_id: u64,
     pub message_id: MessageId,

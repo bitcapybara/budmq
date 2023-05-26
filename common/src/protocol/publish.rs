@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Clone, bud_derive::Codec)]
+#[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
 pub struct Publish {
     pub request_id: u64,
     pub producer_id: u64,

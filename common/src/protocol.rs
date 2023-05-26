@@ -124,7 +124,7 @@ pub trait Codec {
 
     fn encode(&self, buf: &mut BytesMut) -> Result<()>;
 
-    fn header(&self) -> Header;
+    // fn header(&self) -> Header;
 }
 
 impl TryFrom<u8> for InitialPostion {
