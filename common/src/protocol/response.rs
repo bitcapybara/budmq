@@ -4,7 +4,7 @@ pub struct Response {
     pub code: ReturnCode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
 #[repr(u8)]
 pub enum ReturnCode {
     Success = 0,

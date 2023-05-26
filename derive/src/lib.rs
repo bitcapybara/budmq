@@ -32,21 +32,43 @@ pub fn packet_codec(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(Codec)]
 pub fn codec(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let struct_ident = input.ident;
+    let input: DeriveInput = parse_macro_input!(input);
+    let input_ident = input.ident;
 
-    let Data::Struct(struct_data) = input.data else {
-        panic!("must derive on a struct")
-    };
-    let Fields::Named(fields) = struct_data.fields else {
-        panic!("must derive on named fields")
-    };
+    match input.data {
+        Data::Struct(struct_data) => {
+            let Fields::Named(fields) = struct_data.fields else {
+                panic!("must derive on named fields")
+            };
 
-    codec_struct(&struct_ident, &fields).into()
+            codec_struct(&input_ident, &fields).into()
+        }
+        Data::Enum(_) => codec_enum(&input_ident).into(),
+        _ => panic!("unsupported input type"),
+    }
+}
+
+fn codec_enum(input_ident: &proc_macro2::Ident) -> proc_macro2::TokenStream {
+    quote! {
+        impl crate::protocol::Codec for #input_ident {
+            fn decode(buf: &mut bytes::Bytes) -> crate::protocol::Result<Self> {
+                crate::protocol::get_u8(buf)?.try_into()
+            }
+
+            fn encode(&self, buf: &mut bytes::BytesMut) {
+                use bytes::BufMut;
+                buf.put_u8(*self as u8);
+            }
+
+            fn size(&self) -> usize {
+                1
+            }
+        }
+    }
 }
 
 fn codec_struct(
-    struct_ident: &proc_macro2::Ident,
+    input_ident: &proc_macro2::Ident,
     fields: &FieldsNamed,
 ) -> proc_macro2::TokenStream {
     let field_idents = fields.named.iter().map(|field| {
@@ -74,9 +96,6 @@ fn codec_struct(
             "Bytes" => quote! {
                 let #field_ident = crate::protocol::read_bytes(buf)?;
             },
-            "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
-                let #field_ident = crate::protocol::get_u8(buf)?.try_into()?;
-            },
             _ => quote! {
                 let #field_ident = #field_type_ident::decode(buf)?;
             },
@@ -100,9 +119,6 @@ fn codec_struct(
             "Bytes" => quote! {
                 super::write_bytes(buf, &self.#field_ident);
             },
-            "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
-                buf.put_u8(self.#field_ident as u8);
-            },
             _ => quote! {
                 self.#field_ident.encode(buf);
             },
@@ -123,16 +139,13 @@ fn codec_struct(
             "String" | "Bytes" => quote! {
                 2 + self.#field_ident.len()
             },
-            "ReturnCode" | "SubType" | "InitialPostion" | "AccessMode" => quote! {
-                1
-            },
             _ => quote! {
                 self.#field_ident.size()
             },
         }
     });
     quote! {
-        impl crate::protocol::Codec for #struct_ident {
+        impl crate::protocol::Codec for #input_ident {
             fn decode(buf: &mut bytes::Bytes) -> crate::protocol::Result<Self> {
                 #(#field_decode_methods)*
                 Ok(Self {

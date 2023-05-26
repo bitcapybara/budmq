@@ -14,8 +14,6 @@ use std::{io, slice::Iter, string};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::types::{AccessMode, InitialPostion, SubType};
-
 pub use self::{
     connect::Connect,
     consume_ack::ConsumeAck,
@@ -129,42 +127,6 @@ pub trait Codec {
     fn encode(&self, buf: &mut BytesMut);
 
     fn size(&self) -> usize;
-}
-
-impl TryFrom<u8> for InitialPostion {
-    type Error = Error;
-
-    fn try_from(value: u8) -> Result<Self> {
-        Ok(match value {
-            1 => Self::Latest,
-            2 => Self::Earliest,
-            _ => return Err(Error::UnsupportedInitPosition),
-        })
-    }
-}
-
-impl TryFrom<u8> for SubType {
-    type Error = Error;
-
-    fn try_from(value: u8) -> Result<Self> {
-        Ok(match value {
-            1 => Self::Exclusive,
-            2 => Self::Shared,
-            _ => return Err(Error::UnsupportedSubType),
-        })
-    }
-}
-
-impl TryFrom<u8> for AccessMode {
-    type Error = Error;
-
-    fn try_from(value: u8) -> Result<Self> {
-        Ok(match value {
-            1 => Self::Exclusive,
-            2 => Self::Shared,
-            _ => return Err(Error::UnsupportedAccessMode),
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -465,7 +427,7 @@ pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
 mod tests {
     use tokio_util::codec::Encoder;
 
-    use crate::types::MessageId;
+    use crate::types::{InitialPostion, MessageId, SubType};
 
     use super::*;
 
