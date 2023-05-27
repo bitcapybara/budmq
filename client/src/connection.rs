@@ -186,6 +186,7 @@ impl Connection {
     pub async fn create_producer(
         &self,
         name: &str,
+        id: u64,
         topic: &str,
         access_mode: AccessMode,
     ) -> Result<(u64, u64)> {
@@ -195,6 +196,7 @@ impl Connection {
                 producer_name: name.to_string(),
                 topic_name: topic.to_string(),
                 access_mode,
+                producer_id: id,
             }))
             .await?
         {

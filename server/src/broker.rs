@@ -128,6 +128,10 @@ impl Session {
         self.consumers.contains_key(&consumer_id)
     }
 
+    fn has_producer(&self, producer_id: u64) -> bool {
+        self.producers.contains_key(&producer_id)
+    }
+
     fn get_consumer(&self, consumer_id: u64) -> Option<ConsumerInfo> {
         self.consumers.get(&consumer_id).cloned()
     }
@@ -174,8 +178,6 @@ pub struct Broker<S> {
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
     topics: Arc<RwLock<HashMap<String, Topic<S>>>>,
-    /// producer id generator
-    producer_id: SerialId,
     /// token
     token: CancellationToken,
 }
@@ -187,7 +189,6 @@ impl<S: Storage> Broker<S> {
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
-            producer_id: SerialId::new(),
             request_id: SerialId::new(),
         }
     }
@@ -453,12 +454,15 @@ impl<S: Storage> Broker<S> {
                 producer_name,
                 topic_name,
                 access_mode,
+                producer_id,
             }) => {
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
                     return Err(Error::ReturnCode(ReturnCode::NotConnected));
                 };
-                let producer_id = self.producer_id.next();
+                if session.has_producer(producer_id) {
+                    return Err(Error::ProducerDuplicated);
+                }
                 let mut topics = self.topics.write().await;
                 let sequence_id = match topics.get_mut(&topic_name) {
                     Some(topic) => {

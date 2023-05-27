@@ -4,6 +4,7 @@ use crate::types::AccessMode;
 pub struct CreateProducer {
     pub request_id: u64,
     pub producer_name: String,
+    pub producer_id: u64,
     pub topic_name: String,
     pub access_mode: AccessMode,
 }

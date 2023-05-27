@@ -68,6 +68,7 @@ pub struct Producer {
 impl Producer {
     pub async fn new(
         name: &str,
+        id: u64,
         topic: &str,
         access_mode: AccessMode,
         ordered: bool,
@@ -76,7 +77,7 @@ impl Producer {
         let conn = conn_handle.get_connection(ordered).await?;
         let request_id = SerialId::new();
         // get seq_id from ProducerReceipt packet
-        let (id, sequence_id) = conn.create_producer(name, topic, access_mode).await?;
+        let (id, sequence_id) = conn.create_producer(name, id, topic, access_mode).await?;
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,
@@ -121,7 +122,7 @@ impl Producer {
         self.conn = self.conn_handle.get_connection(self.ordered).await?;
         (self.id, self.sequence_id) = self
             .conn
-            .create_producer(&self.name, &self.topic, self.access_mode)
+            .create_producer(&self.name, self.id, &self.topic, self.access_mode)
             .await?;
         Ok(())
     }

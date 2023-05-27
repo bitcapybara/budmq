@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
     let client_cert = read_file("./certs/client-cert.pem")?;
     let client_key_cert = read_file("./certs/client-key.pem")?;
     let provider = MtlsProvider::new(&ca_cert, &client_cert, &client_key_cert)?;
-    let client = ClientBuilder::new("127.0.0.1:9080".parse()?, "localhost", provider)
+    let mut client = ClientBuilder::new("127.0.0.1:9080".parse()?, "localhost", provider)
         .keepalive(10000)
         .build()
         .await?;
