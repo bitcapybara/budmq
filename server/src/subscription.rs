@@ -9,14 +9,17 @@ use bud_common::{
     types::{InitialPostion, MessageId, SubType},
 };
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, error::TrySendError},
+        oneshot,
+    },
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::storage;
 
-use self::dispatcher::{Dispatcher, Notify};
+use self::dispatcher::Dispatcher;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -46,6 +49,12 @@ impl std::fmt::Display for Error {
 impl From<oneshot::error::RecvError> for Error {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self::ReplyChannelClosed
+    }
+}
+
+impl<T> From<mpsc::error::TrySendError<T>> for Error {
+    fn from(_: mpsc::error::TrySendError<T>) -> Self {
+        Self::SendOnDroppedChannel
     }
 }
 
@@ -182,7 +191,7 @@ pub struct Subscription<S> {
     dispatcher: Dispatcher<S>,
     handle: JoinHandle<Result<()>>,
     token: CancellationToken,
-    notify_tx: mpsc::UnboundedSender<Notify>,
+    notify_tx: mpsc::Sender<()>,
 }
 
 impl<S: Storage> Subscription<S> {
@@ -196,7 +205,7 @@ impl<S: Storage> Subscription<S> {
         init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {
-        let (notify_tx, notify_rx) = mpsc::unbounded_channel();
+        let (notify_tx, notify_rx) = mpsc::channel(1);
         let dispatcher = Dispatcher::new(
             topic_id,
             sub_name,
@@ -230,7 +239,7 @@ impl<S: Storage> Subscription<S> {
         token: CancellationToken,
     ) -> Result<Self> {
         // start dispatch
-        let (notify_tx, notify_rx) = mpsc::unbounded_channel();
+        let (notify_tx, notify_rx) = mpsc::channel(1);
         let consumer = Consumer::new(client_id, consumer_id, sub);
         let dispatcher = Dispatcher::with_consumer(
             topic_id,
@@ -264,23 +273,26 @@ impl<S: Storage> Subscription<S> {
         Ok(())
     }
 
-    pub fn additional_permits(
+    pub async fn additional_permits(
         &self,
         client_id: u64,
         consumer_id: u64,
         add_permits: u32,
     ) -> Result<()> {
-        self.notify_tx.send(Notify::AddPermits {
-            client_id,
-            consumer_id,
-            add_permits,
-        })?;
-        Ok(())
+        self.dispatcher
+            .increase_consumer_permits(client_id, consumer_id, add_permits)
+            .await;
+        match self.notify_tx.try_send(()) {
+            Ok(_) | Err(TrySendError::Full(_)) => Ok(()),
+            Err(e) => Err(e)?,
+        }
     }
 
     pub fn message_notify(&self) -> Result<()> {
-        self.notify_tx.send(Notify::NewMessage)?;
-        Ok(())
+        match self.notify_tx.try_send(()) {
+            Ok(_) | Err(TrySendError::Full(_)) => Ok(()),
+            Err(e) => Err(e)?,
+        }
     }
 
     pub async fn consume_ack(&self, cursor_id: u64) -> Result<()> {

@@ -624,7 +624,8 @@ impl<S: Storage> Broker<S> {
                     return Err(Error::Internal(format!("subscription {} not found", info.sub_name)))
                 };
                 trace!("broker::process_packets: add permits to subscription");
-                sp.additional_permits(client_id, c.consumer_id, c.permits)?;
+                sp.additional_permits(client_id, c.consumer_id, c.permits)
+                    .await?;
                 Ok(Packet::ok_response(c.request_id))
             }
             Packet::ConsumeAck(c) => {

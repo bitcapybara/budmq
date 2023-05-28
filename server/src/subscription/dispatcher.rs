@@ -15,17 +15,6 @@ use super::{
     cursor::Cursor, Consumer, Consumers, Error, Result, SendEvent, SubType, TopicConsumers,
 };
 
-pub enum Notify {
-    /// new message id
-    NewMessage,
-    /// consumer permits
-    AddPermits {
-        client_id: u64,
-        consumer_id: u64,
-        add_permits: u32,
-    },
-}
-
 /// task:
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
@@ -126,7 +115,7 @@ impl<S: Storage> Dispatcher<S> {
         }
     }
 
-    async fn increase_consumer_permits(&self, client_id: u64, consumer_id: u64, increase: u32) {
+    pub async fn increase_consumer_permits(&self, client_id: u64, consumer_id: u64, increase: u32) {
         self.update_consumer_permits(client_id, consumer_id, true, increase)
             .await
     }
@@ -208,27 +197,13 @@ impl<S: Storage> Dispatcher<S> {
     }
 
     /// notify_rx receive event from subscription
-    pub async fn run(self, mut notify_rx: mpsc::UnboundedReceiver<Notify>) -> Result<()> {
+    pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) -> Result<()> {
         trace!("dispatcher::run: start dispatcher task loop");
         loop {
             select! {
                 res = notify_rx.recv() => {
-                    let Some(notify) = res else {
+                    if res.is_none() {
                         return Ok(());
-                    };
-                    match notify {
-                        Notify::NewMessage => {
-                            trace!("dispatcher::run: receive a NEW_MESSAGE notify");
-                        }
-                        Notify::AddPermits {
-                            consumer_id,
-                            add_permits,
-                            client_id,
-                        } => {
-                            trace!("dispatcher::run: receive a ADD_PERMITS notify");
-                            self.increase_consumer_permits(client_id, consumer_id, add_permits)
-                                .await;
-                        }
                     }
                     let mut cursor = self.cursor.write().await;
                     trace!("dispatcher::run cursor peek a message");
