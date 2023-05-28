@@ -112,9 +112,9 @@ impl Decoder for PacketCodec {
 impl Encoder<Packet> for PacketCodec {
     type Error = Error;
 
-    fn encode(&mut self, item: Packet, dst: &mut bytes::BytesMut) -> Result<()> {
-        item.header().write(dst)?;
-        item.write(dst);
+    fn encode(&mut self, packet: Packet, dst: &mut bytes::BytesMut) -> Result<()> {
+        packet.header().write(dst)?;
+        packet.write(dst);
         Ok(())
     }
 }
@@ -370,6 +370,8 @@ impl Header {
             11 => PacketType::Ping,
             12 => PacketType::Pong,
             13 => PacketType::Disconnect,
+            14 => PacketType::CloseProducer,
+            15 => PacketType::CloseConsumer,
             _ => return Err(Error::MalformedPacket),
         })
     }
@@ -427,7 +429,7 @@ pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
 mod tests {
     use tokio_util::codec::Encoder;
 
-    use crate::types::{InitialPostion, MessageId, SubType};
+    use crate::types::{AccessMode, InitialPostion, MessageId, SubType};
 
     use super::*;
 
@@ -483,6 +485,7 @@ mod tests {
     fn codec_subscribe() {
         codec_works(Packet::Subscribe(Subscribe {
             request_id: 1,
+            consumer_name: "test-consumer".to_string(),
             consumer_id: 1,
             topic: "test-topic".to_string(),
             sub_name: "test-subname".to_string(),
@@ -553,6 +556,36 @@ mod tests {
     }
 
     #[test]
+    fn codec_create_producer() {
+        codec_works(Packet::CreateProducer(CreateProducer {
+            request_id: 255,
+            producer_name: "producer-id".to_string(),
+            producer_id: 555,
+            topic_name: "test-topic".to_string(),
+            access_mode: AccessMode::Exclusive,
+        }))
+    }
+
+    #[test]
+    fn codec_producer_receipt() {
+        codec_works(Packet::ProducerReceipt(ProducerReceipt {
+            request_id: 90,
+            producer_id: 9,
+            sequence_id: 44,
+        }))
+    }
+
+    #[test]
+    fn codec_ping() {
+        codec_works(Packet::Ping(Ping { request_id: 22 }))
+    }
+
+    #[test]
+    fn codec_pong() {
+        codec_works(Packet::Pong(Pong { request_id: 88 }))
+    }
+
+    #[test]
     fn codec_ping_pong() {
         codec_works(Packet::Ping(Ping { request_id: 1 }));
         codec_works(Packet::Pong(Pong { request_id: 1 }));
@@ -563,9 +596,20 @@ mod tests {
         codec_works(Packet::Disconnect)
     }
 
+    #[test]
+    fn codec_close_producer() {
+        codec_works(Packet::CloseProducer(CloseProducer { producer_id: 22 }))
+    }
+
+    #[test]
+    fn codec_close_consumer() {
+        codec_works(Packet::CloseConsumer(CloseConsumer { consumer_id: 55 }))
+    }
+
     fn codec_works(packet: Packet) {
         let mut bytes = BytesMut::new();
         PacketCodec.encode(packet.clone(), &mut bytes).unwrap();
+        println!("{:?}", bytes.as_ref());
         assert_eq!(packet, PacketCodec.decode(&mut bytes).unwrap().unwrap());
     }
 }

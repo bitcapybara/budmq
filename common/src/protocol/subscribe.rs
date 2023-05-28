@@ -4,6 +4,8 @@ use crate::types::{InitialPostion, SubType};
 #[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
 pub struct Subscribe {
     pub request_id: u64,
+    /// consumer name
+    pub consumer_name: String,
     /// consumer_id, unique within one connection
     pub consumer_id: u64,
     /// subscribe topic

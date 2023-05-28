@@ -28,12 +28,15 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     let consumer = client
-        .new_consumer(SubscribeMessage {
-            topic: "test-topic".to_string(),
-            sub_name: "test-subscription".to_string(),
-            sub_type: SubType::Exclusive,
-            initial_postion: InitialPostion::Latest,
-        })
+        .new_consumer(
+            "test-consumer",
+            SubscribeMessage {
+                topic: "test-topic".to_string(),
+                sub_name: "test-subscription".to_string(),
+                sub_type: SubType::Exclusive,
+                initial_postion: InitialPostion::Latest,
+            },
+        )
         .await?;
     if let Err(e) = consume(consumer).await {
         println!("consume error: {e}")

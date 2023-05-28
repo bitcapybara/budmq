@@ -243,6 +243,7 @@ impl Connection {
     pub async fn subscribe(
         &self,
         consumer_id: u64,
+        consumer_name: &str,
         sub: &SubscribeMessage,
         tx: mpsc::UnboundedSender<ConsumeMessage>,
     ) -> Result<()> {
@@ -253,6 +254,7 @@ impl Connection {
             sub_name: sub.sub_name.to_string(),
             sub_type: sub.sub_type,
             initial_position: sub.initial_postion,
+            consumer_name: consumer_name.to_string(),
         }))
         .await?;
         self.register_tx

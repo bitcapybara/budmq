@@ -76,6 +76,7 @@ pub enum ConsumerEvent {
 
 pub struct ConsumeEngine {
     id: u64,
+    name: String,
     sub_message: SubscribeMessage,
     /// receive message from server
     server_rx: mpsc::UnboundedReceiver<ConsumeMessage>,
@@ -96,6 +97,7 @@ pub struct ConsumeEngine {
 impl ConsumeEngine {
     async fn new(
         id: u64,
+        name: &str,
         sub_message: &SubscribeMessage,
         event_rx: mpsc::Receiver<ConsumerEvent>,
         consumer_tx: mpsc::Sender<ConsumeMessage>,
@@ -104,7 +106,7 @@ impl ConsumeEngine {
     ) -> Result<Self> {
         let conn = conn_handle.get_connection(false).await?;
         let (server_tx, server_rx) = mpsc::unbounded_channel();
-        conn.subscribe(id, sub_message, server_tx).await?;
+        conn.subscribe(id, name, sub_message, server_tx).await?;
         conn.control_flow(id, CONSUME_CHANNEL_CAPACITY).await?;
         Ok(Self {
             id,
@@ -116,6 +118,7 @@ impl ConsumeEngine {
             token,
             event_rx,
             server_rx,
+            name: name.to_string(),
         })
     }
 
@@ -179,7 +182,7 @@ impl ConsumeEngine {
         self.conn = self.conn_handle.get_connection(false).await?;
         let (tx, rx) = mpsc::unbounded_channel();
         self.conn
-            .subscribe(self.id, &self.sub_message.clone(), tx)
+            .subscribe(self.id, &self.name, &self.sub_message.clone(), tx)
             .await?;
         self.server_rx = rx;
         Ok(())
@@ -198,14 +201,23 @@ pub struct Consumer {
 impl Consumer {
     pub async fn new(
         id: u64,
+        name: &str,
         conn_handle: ConnectionHandle,
         sub_message: &SubscribeMessage,
     ) -> Result<Self> {
         let (tx, rx) = mpsc::channel(CONSUME_CHANNEL_CAPACITY as usize);
         let (event_tx, event_rx) = mpsc::channel(1);
         let token = CancellationToken::new();
-        let engine =
-            ConsumeEngine::new(id, sub_message, event_rx, tx, conn_handle, token.clone()).await?;
+        let engine = ConsumeEngine::new(
+            id,
+            name,
+            sub_message,
+            event_rx,
+            tx,
+            conn_handle,
+            token.clone(),
+        )
+        .await?;
         tokio::spawn(engine.run());
         Ok(Self {
             consumer_rx: rx,
