@@ -16,7 +16,7 @@ flexi_logger = "0.25.5"
 futures = "0.3.28"
 bud-common = { version = "0.1.0", path = "./common" }
 bud-server = { version = "0.1.0", path = "./server" }
-log = "0.4.17"
+log = "0.4.18"
 once_cell = "1.17.1"
 openssl = { version = "0.10.52", features = ["vendored"] }
 roaring = "0.10.1"
