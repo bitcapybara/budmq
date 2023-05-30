@@ -3,6 +3,7 @@ use std::array;
 use async_trait::async_trait;
 
 pub mod memory;
+pub mod persist;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
