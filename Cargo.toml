@@ -17,7 +17,7 @@ futures = "0.3.28"
 bud-common = { version = "0.1.0", path = "./common" }
 bud-server = { version = "0.1.0", path = "./server" }
 log = "0.4.18"
-once_cell = "1.17.1"
+once_cell = "1.17.2"
 openssl = { version = "0.10.53", features = ["vendored"] }
 roaring = "0.10.1"
 s2n-quic = { version = "1.21.0", features = ["provider-address-token-default", "provider-tls-rustls"] }
