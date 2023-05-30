@@ -1,4 +1,7 @@
-use bonsaidb::local::AsyncDatabase;
+use bonsaidb::local::{
+    config::{Builder, StorageConfiguration},
+    AsyncDatabase,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -13,12 +16,24 @@ impl std::fmt::Display for Error {
     }
 }
 
+impl From<bonsaidb::local::Error> for Error {
+    fn from(_e: bonsaidb::local::Error) -> Self {
+        todo!()
+    }
+}
+
 #[derive(Clone)]
 pub struct PersistStorage {
     inner: AsyncDatabase,
 }
 
 impl PersistStorage {
+    async fn new() -> Result<Self> {
+        let config = StorageConfiguration::new("kv.db");
+        let inner = AsyncDatabase::open::<()>(config).await?;
+        Ok(Self { inner })
+    }
+
     async fn put(&self, _k: &[u8], _v: &[u8]) -> Result<()> {
         todo!()
     }
