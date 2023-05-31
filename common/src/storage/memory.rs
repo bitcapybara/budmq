@@ -7,7 +7,7 @@ use super::{Result, Storage};
 
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
-    inner: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+    inner: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl MemoryStorage {
@@ -30,34 +30,34 @@ impl Storage for MemoryStorage {
         Ok(Self::default())
     }
 
-    async fn put(&self, k: &[u8], v: &[u8]) -> Result<()> {
+    async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         let mut inner = self.inner.write().await;
-        inner.insert(k.to_vec(), v.to_vec());
+        inner.insert(k.to_string(), v.to_vec());
         Ok(())
     }
 
-    async fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>> {
+    async fn get(&self, k: &str) -> Result<Option<Vec<u8>>> {
         let inner = self.inner.read().await;
         Ok(inner.get(k).cloned())
     }
 
-    async fn del(&self, k: &[u8]) -> Result<()> {
+    async fn del(&self, k: &str) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner.remove(k);
         Ok(())
     }
 
-    async fn atomic_add(&self, k: &[u8], v: u64) -> Result<u64> {
+    async fn inc_u64(&self, k: &str, v: u64) -> Result<u64> {
         let mut inner = self.inner.write().await;
         match inner.remove(k) {
             Some(value) => {
                 let prev = u64::from_be_bytes(value.as_slice().try_into()?);
-                inner.insert(k.to_vec(), (prev + v).to_be_bytes().to_vec());
+                inner.insert(k.to_string(), (prev + v).to_be_bytes().to_vec());
                 Ok(prev)
             }
             None => {
                 let prev = 0;
-                inner.insert(k.to_vec(), v.to_be_bytes().to_vec());
+                inner.insert(k.to_string(), v.to_be_bytes().to_vec());
                 Ok(prev)
             }
         }

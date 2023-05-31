@@ -57,8 +57,17 @@ impl TryFrom<u8> for AccessMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, bud_derive::Codec)]
 pub struct MessageId {
     pub topic_id: u64,
     pub cursor_id: u64,
+}
+
+impl MessageId {
+    pub fn new(topic_id: u64, cursor_id: u64) -> Self {
+        Self {
+            topic_id,
+            cursor_id,
+        }
+    }
 }

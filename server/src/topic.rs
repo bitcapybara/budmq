@@ -314,7 +314,7 @@ impl<S: Storage> Topic<S> {
         }
 
         if lowest_mark - self.delete_position > DELETE_BATCH {
-            self.storage.delete_range(..lowest_mark).await?;
+            self.storage.delete_range(self.id, ..lowest_mark).await?;
         }
         Ok(())
     }

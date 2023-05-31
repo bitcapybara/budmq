@@ -27,19 +27,30 @@ impl From<array::TryFromSliceError> for Error {
         Self::DecodeSlice(e)
     }
 }
+impl From<bonsaidb::local::Error> for Error {
+    fn from(_e: bonsaidb::local::Error) -> Self {
+        todo!()
+    }
+}
+
+impl From<bonsaidb::core::Error> for Error {
+    fn from(_e: bonsaidb::core::Error) -> Self {
+        todo!()
+    }
+}
 
 #[async_trait]
 pub trait Storage: Clone + Send + Sync + 'static {
     async fn create(id: &str) -> Result<Self>
     where
         Self: Sized;
-    async fn put(&self, k: &[u8], v: &[u8]) -> Result<()>;
+    async fn put(&self, k: &str, v: &[u8]) -> Result<()>;
 
-    async fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>>;
+    async fn get(&self, k: &str) -> Result<Option<Vec<u8>>>;
 
-    async fn del(&self, k: &[u8]) -> Result<()>;
+    async fn del(&self, k: &str) -> Result<()>;
 
-    async fn get_u64(&self, k: &[u8]) -> Result<Option<u64>> {
+    async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
         Ok(self
             .get(k)
             .await?
@@ -48,9 +59,9 @@ pub trait Storage: Clone + Send + Sync + 'static {
             .map(u64::from_be_bytes))
     }
 
-    async fn set_u64(&self, k: &[u8], v: u64) -> Result<()> {
+    async fn set_u64(&self, k: &str, v: u64) -> Result<()> {
         Ok(self.put(k, v.to_be_bytes().as_slice()).await?)
     }
 
-    async fn atomic_add(&self, k: &[u8], v: u64) -> Result<u64>;
+    async fn inc_u64(&self, k: &str, v: u64) -> Result<u64>;
 }

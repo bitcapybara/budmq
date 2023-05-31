@@ -10,9 +10,9 @@ pub struct CursorStorage<S> {
 }
 
 impl<S: Storage> CursorStorage<S> {
-    const READ_POSITION_KEY: &[u8] = "READ_POSITION".as_bytes();
-    const LATEST_MESSAGE_ID_KEY: &[u8] = "LATEST_MESSAGE_ID".as_bytes();
-    const ACK_BITS_KEY: &[u8] = "ACK_BITS".as_bytes();
+    const READ_POSITION_KEY: &str = "READ_POSITION";
+    const LATEST_MESSAGE_ID_KEY: &str = "LATEST_MESSAGE_ID";
+    const ACK_BITS_KEY: &str = "ACK_BITS";
 
     pub fn new(sub_name: &str, storage: S) -> Result<Self> {
         Ok(Self {
@@ -63,9 +63,7 @@ impl<S: Storage> CursorStorage<S> {
         Ok(())
     }
 
-    fn key(&self, bytes: &[u8]) -> Vec<u8> {
-        let mut key = format!("CURSOR-{}", self.sub_name).as_bytes().to_vec();
-        key.extend_from_slice(bytes);
-        key
+    fn key(&self, s: &str) -> String {
+        format!("CURSOR-{}-{}", self.sub_name, s)
     }
 }
