@@ -422,7 +422,6 @@ dependencies = [
  "flexi_logger",
  "futures",
  "log",
- "once_cell",
  "roaring",
  "s2n-quic",
  "signal-hook",

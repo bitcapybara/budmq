@@ -8,7 +8,6 @@ bytes.workspace = true
 futures.workspace = true
 bud-common.workspace = true
 log.workspace = true
-once_cell.workspace = true
 roaring.workspace = true
 s2n-quic.workspace = true
 tokio.workspace = true
