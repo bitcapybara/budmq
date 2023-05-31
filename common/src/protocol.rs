@@ -11,9 +11,10 @@ mod unsubscribe;
 
 use std::{io, slice::Iter, string};
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
+
+use crate::codec::Codec;
 
 pub use self::{
     connect::Connect,
@@ -72,6 +73,12 @@ impl From<string::FromUtf8Error> for Error {
     }
 }
 
+impl From<crate::codec::Error> for Error {
+    fn from(_: crate::codec::Error) -> Self {
+        todo!()
+    }
+}
+
 pub struct PacketCodec;
 
 impl Decoder for PacketCodec {
@@ -117,35 +124,6 @@ impl Encoder<Packet> for PacketCodec {
         packet.header().write(dst)?;
         packet.write(dst);
         Ok(())
-    }
-}
-
-pub trait Codec {
-    fn decode(buf: &mut Bytes) -> Result<Self>
-    where
-        Self: Sized;
-
-    fn encode(&self, buf: &mut BytesMut);
-
-    fn size(&self) -> usize;
-}
-
-impl Codec for DateTime<Utc> {
-    fn decode(buf: &mut Bytes) -> Result<Self> {
-        let timestmp = get_i64(buf)?;
-        let (sec, nano) = (timestmp / 1_000_000_000, (timestmp % 1_000_000_000) as u32);
-        let ndt = NaiveDateTime::from_timestamp_opt(sec, nano).ok_or(Error::MalformedPacket)?;
-        let dt = DateTime::<Utc>::from_utc(ndt, Utc);
-        Ok(dt)
-    }
-
-    fn encode(&self, buf: &mut BytesMut) {
-        let timestamp = self.timestamp_nanos();
-        buf.put_i64(timestamp);
-    }
-
-    fn size(&self) -> usize {
-        8
     }
 }
 
@@ -397,64 +375,16 @@ impl Header {
     }
 }
 
-fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
-    if buf.len() < len {
-        return Err(Error::InsufficientBytes);
-    }
-
-    Ok(())
-}
-
-pub fn read_bytes(buf: &mut Bytes) -> Result<Bytes> {
-    let len = get_u16(buf)? as usize;
-    assert_len(buf, len)?;
-    Ok(buf.split_to(len))
-}
-
-pub fn read_string(buf: &mut Bytes) -> Result<String> {
-    let bytes = read_bytes(buf)?;
-    Ok(String::from_utf8(bytes.to_vec())?)
-}
-
-pub fn write_bytes(buf: &mut BytesMut, bytes: &[u8]) {
-    buf.put_u16(bytes.len() as u16);
-    buf.extend_from_slice(bytes);
-}
-
-pub fn write_string(buf: &mut BytesMut, string: &str) {
-    write_bytes(buf, string.as_bytes());
-}
-
-pub fn get_u8(buf: &mut Bytes) -> Result<u8> {
-    assert_len(buf, 1)?;
-    Ok(buf.get_u8())
-}
-
-pub fn get_u16(buf: &mut Bytes) -> Result<u16> {
-    assert_len(buf, 2)?;
-    Ok(buf.get_u16())
-}
-
-pub fn get_u32(buf: &mut Bytes) -> Result<u32> {
-    assert_len(buf, 4)?;
-    Ok(buf.get_u32())
-}
-
-pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
-    assert_len(buf, 8)?;
-    Ok(buf.get_u64())
-}
-
-pub fn get_i64(buf: &mut Bytes) -> Result<i64> {
-    assert_len(buf, 8)?;
-    Ok(buf.get_i64())
-}
-
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use chrono::Utc;
     use tokio_util::codec::Encoder;
 
-    use crate::types::{AccessMode, InitialPostion, MessageId, SubType};
+    use crate::{
+        codec::{read_string, write_string},
+        types::{AccessMode, InitialPostion, MessageId, SubType},
+    };
 
     use super::*;
 

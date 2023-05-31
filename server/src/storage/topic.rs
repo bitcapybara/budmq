@@ -1,7 +1,7 @@
 use std::{ops::RangeBounds, sync::atomic::AtomicU64};
 
 use bud_common::{
-    protocol::Codec,
+    codec::Codec,
     storage::Storage,
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };

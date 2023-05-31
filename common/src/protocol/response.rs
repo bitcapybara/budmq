@@ -47,9 +47,9 @@ impl std::fmt::Display for ReturnCode {
 }
 
 impl TryFrom<u8> for ReturnCode {
-    type Error = super::Error;
+    type Error = crate::codec::Error;
 
-    fn try_from(value: u8) -> super::Result<Self> {
+    fn try_from(value: u8) -> crate::codec::Result<Self> {
         Ok(match value {
             0 => Self::Success,
             1 => Self::AlreadyConnected,
@@ -66,7 +66,7 @@ impl TryFrom<u8> for ReturnCode {
             12 => Self::ProducerExclusive,
             13 => Self::ProducerAccessModeConflict,
             14 => Self::ProducerNotFound,
-            _ => return Err(super::Error::UnsupportedReturnCode),
+            _ => return Err(Self::Error::Malformed),
         })
     }
 }

@@ -11,13 +11,13 @@ pub enum SubType {
 }
 
 impl TryFrom<u8> for SubType {
-    type Error = crate::protocol::Error;
+    type Error = crate::codec::Error;
 
-    fn try_from(value: u8) -> crate::protocol::Result<Self> {
+    fn try_from(value: u8) -> crate::codec::Result<Self> {
         Ok(match value {
             1 => Self::Exclusive,
             2 => Self::Shared,
-            _ => return Err(Self::Error::UnsupportedSubType),
+            _ => return Err(Self::Error::Malformed),
         })
     }
 }
@@ -30,13 +30,13 @@ pub enum InitialPostion {
 }
 
 impl TryFrom<u8> for InitialPostion {
-    type Error = crate::protocol::Error;
+    type Error = crate::codec::Error;
 
-    fn try_from(value: u8) -> crate::protocol::Result<Self> {
+    fn try_from(value: u8) -> crate::codec::Result<Self> {
         Ok(match value {
             1 => Self::Latest,
             2 => Self::Earliest,
-            _ => return Err(Self::Error::UnsupportedInitPosition),
+            _ => return Err(Self::Error::Malformed),
         })
     }
 }
@@ -49,13 +49,13 @@ pub enum AccessMode {
 }
 
 impl TryFrom<u8> for AccessMode {
-    type Error = crate::protocol::Error;
+    type Error = crate::codec::Error;
 
-    fn try_from(value: u8) -> crate::protocol::Result<Self> {
+    fn try_from(value: u8) -> crate::codec::Result<Self> {
         Ok(match value {
             1 => Self::Exclusive,
             2 => Self::Shared,
-            _ => return Err(Self::Error::UnsupportedAccessMode),
+            _ => return Err(Self::Error::Malformed),
         })
     }
 }

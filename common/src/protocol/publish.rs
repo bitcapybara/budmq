@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
@@ -9,7 +10,7 @@ pub struct Publish {
     /// Ensure that the message sent by the producer is unique within this topic
     pub sequence_id: u64,
     /// message content
-    pub payload: bytes::Bytes,
+    pub payload: Bytes,
     /// produce time
     pub produce_time: DateTime<Utc>,
 }

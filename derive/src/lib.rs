@@ -22,7 +22,7 @@ pub fn packet_codec(input: TokenStream) -> TokenStream {
 
         impl #struct_ident {
             pub fn header(&self) -> crate::protocol::Header {
-                use crate::protocol::Codec;
+                use crate::codec::Codec;
                 crate::protocol::Header::new(crate::protocol::PacketType::#struct_ident, self.size())
             }
         }
@@ -50,9 +50,9 @@ pub fn codec(input: TokenStream) -> TokenStream {
 
 fn codec_enum(input_ident: &proc_macro2::Ident) -> proc_macro2::TokenStream {
     quote! {
-        impl crate::protocol::Codec for #input_ident {
-            fn decode(buf: &mut bytes::Bytes) -> crate::protocol::Result<Self> {
-                crate::protocol::get_u8(buf)?.try_into()
+        impl crate::codec::Codec for #input_ident {
+            fn decode(buf: &mut bytes::Bytes) -> crate::codec::Result<Self> {
+                crate::codec::get_u8(buf)?.try_into()
             }
 
             fn encode(&self, buf: &mut bytes::BytesMut) {
@@ -80,73 +80,25 @@ fn codec_struct(
     let field_decode_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
         let field_type_ident = get_field_type(field);
-        match field_type_ident.to_string().as_str() {
-            "u16" => quote! {
-                let #field_ident = crate::protocol::get_u16(buf)?;
-            },
-            "u32" => quote! {
-                let #field_ident = crate::protocol::get_u32(buf)?;
-            },
-            "u64" => quote! {
-                let #field_ident = crate::protocol::get_u64(buf)?;
-            },
-            "String" => quote! {
-                let #field_ident = crate::protocol::read_string(buf)?;
-            },
-            "Bytes" => quote! {
-                let #field_ident = crate::protocol::read_bytes(buf)?;
-            },
-            _ => quote! {
-                let #field_ident = #field_type_ident::decode(buf)?;
-            },
+        quote! {
+            let #field_ident = #field_type_ident::decode(buf)?;
         }
     });
     let field_encode_methods = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
-        match get_field_type(field).to_string().as_str() {
-            "u16" => quote! {
-                buf.put_u16(self.#field_ident);
-            },
-            "u32" => quote! {
-                buf.put_u32(self.#field_ident);
-            },
-            "u64" => quote! {
-                buf.put_u64(self.#field_ident);
-            },
-            "String" => quote! {
-                crate::protocol::write_string(buf, &self.#field_ident);
-            },
-            "Bytes" => quote! {
-                crate::protocol::write_bytes(buf, &self.#field_ident);
-            },
-            _ => quote! {
-                self.#field_ident.encode(buf);
-            },
+        quote! {
+            self.#field_ident.encode(buf);
         }
     });
     let field_sizes = fields.named.iter().map(|field| {
         let field_ident = &field.ident;
-        match get_field_type(field).to_string().as_str() {
-            "u16" => quote! {
-                2
-            },
-            "u32" => quote! {
-                4
-            },
-            "u64" => quote! {
-                8
-            },
-            "String" | "Bytes" => quote! {
-                2 + self.#field_ident.len()
-            },
-            _ => quote! {
-                self.#field_ident.size()
-            },
+        quote! {
+            self.#field_ident.size()
         }
     });
     quote! {
-        impl crate::protocol::Codec for #input_ident {
-            fn decode(buf: &mut bytes::Bytes) -> crate::protocol::Result<Self> {
+        impl crate::codec::Codec for #input_ident {
+            fn decode(buf: &mut bytes::Bytes) -> crate::codec::Result<Self> {
                 #(#field_decode_methods)*
                 Ok(Self {
                     #(#field_idents),*

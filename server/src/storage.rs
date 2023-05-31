@@ -8,7 +8,7 @@ use std::{
     string,
 };
 
-use bud_common::{protocol, storage};
+use bud_common::{codec, storage};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -19,7 +19,7 @@ pub enum Error {
     DecodeSlice(array::TryFromSliceError),
     DecodeString(string::FromUtf8Error),
     Storage(storage::Error),
-    Protocol(protocol::Error),
+    Codec(codec::Error),
 }
 
 impl std::error::Error for Error {}
@@ -32,7 +32,7 @@ impl std::fmt::Display for Error {
             Error::DecodeSlice(e) => write!(f, "decode slice error: {e}"),
             Error::DecodeString(e) => write!(f, "decode string error: {e}"),
             Error::Storage(e) => write!(f, "storage error: {e}"),
-            Error::Protocol(e) => write!(f, "decode protocol error: {e}"),
+            Error::Codec(e) => write!(f, "decode error: {e}"),
         }
     }
 }
@@ -61,9 +61,9 @@ impl From<string::FromUtf8Error> for Error {
     }
 }
 
-impl From<protocol::Error> for Error {
-    fn from(e: protocol::Error) -> Self {
-        Self::Protocol(e)
+impl From<codec::Error> for Error {
+    fn from(e: codec::Error) -> Self {
+        Self::Codec(e)
     }
 }
 
