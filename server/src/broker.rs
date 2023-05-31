@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     storage::{self, broker::BrokerStorage},
-    subscription::{self, SendEvent, Subscription},
+    subscription::{self, SendEvent},
     topic::{self, Topic},
     WAIT_REPLY_TIMEOUT,
 };
@@ -479,7 +479,6 @@ impl<S: Storage> Broker<S> {
                             topic_id,
                             &topic_name,
                             send_tx.clone(),
-                            self.storage.inner(),
                             self.token.child_token(),
                         )
                         .await?;
@@ -515,20 +514,18 @@ impl<S: Storage> Broker<S> {
                             sp.add_consumer(client_id, &sub).await?;
                         }
                         None => {
-                            trace!("broker::process_peckets: create new subscription");
-                            let sp = Subscription::from_subscribe(
-                                topic.id,
-                                client_id,
-                                sub.consumer_id,
-                                &sub,
-                                send_tx.clone(),
-                                self.storage.inner(),
-                                sub.initial_position,
-                                self.token.child_token(),
-                            )
-                            .await?;
                             trace!("broker::process_packets: add subscription to topic");
-                            topic.add_subscription(sp);
+                            topic
+                                .add_subscription(
+                                    topic.id,
+                                    client_id,
+                                    sub.consumer_id,
+                                    &sub,
+                                    send_tx.clone(),
+                                    sub.initial_position,
+                                    self.token.child_token(),
+                                )
+                                .await?;
                         }
                     },
                     None => {
@@ -538,24 +535,21 @@ impl<S: Storage> Broker<S> {
                             topic_id,
                             &sub.topic,
                             send_tx.clone(),
-                            self.storage.inner(),
-                            self.token.child_token(),
-                        )
-                        .await?;
-                        trace!("broker::process_packets: create subscription");
-                        let sp = Subscription::from_subscribe(
-                            topic_id,
-                            client_id,
-                            sub.consumer_id,
-                            &sub,
-                            send_tx.clone(),
-                            self.storage.inner(),
-                            sub.initial_position,
                             self.token.child_token(),
                         )
                         .await?;
                         trace!("broker::process_packets: add subscription to topic");
-                        topic.add_subscription(sp);
+                        topic
+                            .add_subscription(
+                                topic_id,
+                                client_id,
+                                sub.consumer_id,
+                                &sub,
+                                send_tx.clone(),
+                                sub.initial_position,
+                                self.token.child_token(),
+                            )
+                            .await?;
                         topics.insert(sub.topic.clone(), topic);
                     }
                 }

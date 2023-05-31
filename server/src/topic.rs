@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bud_common::{
-    protocol::{Publish, ReturnCode},
+    protocol::{Publish, ReturnCode, Subscribe},
     storage::Storage,
     types::{AccessMode, InitialPostion, MessageId, SubType},
 };
@@ -39,6 +39,12 @@ impl std::fmt::Display for Error {
 impl From<storage::Error> for Error {
     fn from(e: storage::Error) -> Self {
         Self::Storage(e)
+    }
+}
+
+impl From<bud_common::storage::Error> for Error {
+    fn from(e: bud_common::storage::Error) -> Self {
+        Self::Storage(e.into())
     }
 }
 
@@ -176,10 +182,10 @@ impl<S: Storage> Topic<S> {
         id: u64,
         topic: &str,
         send_tx: mpsc::Sender<SendEvent>,
-        store: S,
         token: CancellationToken,
     ) -> Result<Self> {
-        let storage = TopicStorage::new(topic, store.clone())?;
+        let base_storage = S::create(topic).await?;
+        let storage = TopicStorage::new(topic, base_storage.clone())?;
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = if loaded_subscriptions.is_empty() {
@@ -194,7 +200,7 @@ impl<S: Storage> Topic<S> {
                 &sub.topic,
                 &sub.name,
                 send_tx.clone(),
-                store.clone(),
+                base_storage.clone(),
                 sub.init_position,
                 token.child_token(),
             )
@@ -215,8 +221,30 @@ impl<S: Storage> Topic<S> {
         })
     }
 
-    pub fn add_subscription(&mut self, sub: Subscription<S>) {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_subscription(
+        &mut self,
+        topic_id: u64,
+        client_id: u64,
+        consumer_id: u64,
+        sub: &Subscribe,
+        send_tx: mpsc::Sender<SendEvent>,
+        init_position: InitialPostion,
+        token: CancellationToken,
+    ) -> Result<()> {
+        let sub = Subscription::from_subscribe(
+            topic_id,
+            client_id,
+            consumer_id,
+            sub,
+            send_tx,
+            self.storage.inner(),
+            init_position,
+            token,
+        )
+        .await?;
         self.subscriptions.insert(sub.name.clone(), sub);
+        Ok(())
     }
 
     pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription<S>> {

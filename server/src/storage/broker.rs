@@ -14,15 +14,11 @@ impl<S: Storage> BrokerStorage<S> {
         Self { storage }
     }
 
-    pub fn inner(&self) -> S {
-        self.storage.clone()
-    }
-
     pub async fn get_or_create_topic_id(&self, topic_name: &str) -> Result<u64> {
         if let Some(id) = self.get_topic_id(topic_name).await? {
             return Ok(id);
         }
-        let new_id = self.storage.fetch_add(Self::MAX_TOPIC_ID_KEY, 1).await?;
+        let new_id = self.storage.atomic_add(Self::MAX_TOPIC_ID_KEY, 1).await?;
         self.set_topic_id(topic_name, new_id).await?;
         Ok(new_id)
     }

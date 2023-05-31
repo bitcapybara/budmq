@@ -30,6 +30,10 @@ impl<S: Storage> TopicStorage<S> {
         })
     }
 
+    pub fn inner(&self) -> S {
+        self.storage.clone()
+    }
+
     pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
         let mut id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
         let id = self
@@ -110,7 +114,7 @@ impl<S: Storage> TopicStorage<S> {
 
     pub async fn get_new_cursor_id(&self) -> Result<u64> {
         let key = self.key(Self::LATEST_CURSOR_ID_KEY);
-        Ok(self.storage.fetch_add(&key, 1).await?)
+        Ok(self.storage.atomic_add(&key, 1).await?)
     }
 
     fn key(&self, bytes: &[u8]) -> Vec<u8> {

@@ -26,6 +26,10 @@ impl Default for MemoryStorage {
 
 #[async_trait]
 impl Storage for MemoryStorage {
+    async fn create(_id: &str) -> Result<Self> {
+        Ok(Self::default())
+    }
+
     async fn put(&self, k: &[u8], v: &[u8]) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner.insert(k.to_vec(), v.to_vec());
@@ -43,7 +47,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
 
-    async fn fetch_add(&self, k: &[u8], v: u64) -> Result<u64> {
+    async fn atomic_add(&self, k: &[u8], v: u64) -> Result<u64> {
         let mut inner = self.inner.write().await;
         match inner.remove(k) {
             Some(value) => {
