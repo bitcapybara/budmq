@@ -14,6 +14,7 @@ use bud_common::{
     types::{AccessMode, MessageId},
 };
 use bytes::Bytes;
+use chrono::Utc;
 use log::trace;
 use s2n_quic::{
     client,
@@ -222,6 +223,7 @@ impl Connection {
             sequence_id,
             payload: Bytes::copy_from_slice(data),
             producer_id,
+            produce_time: Utc::now(),
         }))
         .await
     }

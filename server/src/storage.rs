@@ -8,14 +8,7 @@ use std::{
     string,
 };
 
-use bud_common::{
-    protocol::{self, get_u64, get_u8, read_bytes, read_string, write_bytes, write_string},
-    storage,
-    types::MessageId,
-};
-use bytes::{BufMut, Bytes, BytesMut};
-
-use crate::topic::{SubscriptionInfo, TopicMessage};
+use bud_common::{protocol, storage};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -71,69 +64,6 @@ impl From<string::FromUtf8Error> for Error {
 impl From<protocol::Error> for Error {
     fn from(e: protocol::Error) -> Self {
         Self::Protocol(e)
-    }
-}
-
-trait Codec {
-    fn encode(&self) -> Vec<u8>;
-    fn decode(bytes: &[u8]) -> Result<Self>
-    where
-        Self: Sized;
-}
-
-impl Codec for TopicMessage {
-    fn encode(&self) -> Vec<u8> {
-        use bud_common::protocol::Codec;
-        // topic_name_len + topic_name + cursor_id + seq_id + payload_len + payload
-        let buf_len = 8 + 8 + 2 + self.topic_name.len() + 8 + 8 + 2 + self.payload.len();
-        let mut buf = BytesMut::with_capacity(buf_len);
-        self.message_id.encode(&mut buf);
-        write_string(&mut buf, &self.topic_name);
-        buf.put_u64(self.seq_id);
-        write_bytes(&mut buf, &self.payload);
-        buf.to_vec()
-    }
-
-    fn decode(bytes: &[u8]) -> Result<Self> {
-        use bud_common::protocol::Codec;
-        let mut buf = Bytes::copy_from_slice(bytes);
-        let message_id = MessageId::decode(&mut buf)?;
-        let topic_name = read_string(&mut buf)?;
-        let seq_id = get_u64(&mut buf)?;
-        let payload = read_bytes(&mut buf)?;
-        Ok(Self {
-            seq_id,
-            payload,
-            topic_name,
-            message_id,
-        })
-    }
-}
-
-impl Codec for SubscriptionInfo {
-    fn encode(&self) -> Vec<u8> {
-        // topic_len + topic + name_len + name + sub_type + init_position
-        let buf_len = 2 + self.topic.len() + 2 + self.name.len() + 1 + 1;
-        let mut buf = BytesMut::with_capacity(buf_len);
-        write_string(&mut buf, &self.topic);
-        write_string(&mut buf, &self.name);
-        buf.put_u8(self.sub_type as u8);
-        buf.put_u8(self.init_position as u8);
-        buf.to_vec()
-    }
-
-    fn decode(bytes: &[u8]) -> Result<Self> {
-        let mut buf = Bytes::copy_from_slice(bytes);
-        let topic = read_string(&mut buf)?;
-        let name = read_string(&mut buf)?;
-        let sub_type = get_u8(&mut buf)?.try_into()?;
-        let init_position = get_u8(&mut buf)?.try_into()?;
-        Ok(Self {
-            topic,
-            name,
-            sub_type,
-            init_position,
-        })
     }
 }
 

@@ -3,10 +3,8 @@ use std::collections::HashMap;
 use bud_common::{
     protocol::{Publish, ReturnCode, Subscribe},
     storage::Storage,
-    types::{AccessMode, InitialPostion, MessageId, SubType},
+    types::{AccessMode, InitialPostion, MessageId, TopicMessage},
 };
-use bytes::Bytes;
-
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -51,28 +49,6 @@ impl From<bud_common::storage::Error> for Error {
 impl From<subscription::Error> for Error {
     fn from(e: subscription::Error) -> Self {
         Self::Subscription(e)
-    }
-}
-
-pub struct TopicMessage {
-    /// message id
-    pub message_id: MessageId,
-    /// topic name
-    pub topic_name: String,
-    /// producer sequence id
-    pub seq_id: u64,
-    /// message payload
-    pub payload: Bytes,
-}
-
-impl TopicMessage {
-    pub fn new(topic: &str, message_id: MessageId, seq_id: u64, payload: Bytes) -> Self {
-        Self {
-            topic_name: topic.to_string(),
-            seq_id,
-            payload,
-            message_id,
-        }
     }
 }
 
@@ -151,13 +127,6 @@ impl TopicProducers {
             }
         })
     }
-}
-
-pub struct SubscriptionInfo {
-    pub topic: String,
-    pub name: String,
-    pub sub_type: SubType,
-    pub init_position: InitialPostion,
 }
 
 /// Save all messages associated with this topic in subscription
@@ -277,6 +246,7 @@ impl<S: Storage> Topic<S> {
             message_id,
             message.sequence_id,
             message.payload.clone(),
+            message.produce_time,
         );
         self.storage.add_message(&topic_message).await?;
         self.storage

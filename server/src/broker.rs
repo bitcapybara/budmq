@@ -9,6 +9,7 @@ use bud_common::{
     },
     storage::Storage,
 };
+use chrono::Utc;
 use futures::future;
 use log::{error, trace};
 use tokio::{
@@ -266,6 +267,8 @@ impl<S: Storage> Broker<S> {
                 consumer_id: event.consumer_id,
                 payload: message.payload,
                 request_id: self.request_id.next(),
+                produce_time: message.produce_time,
+                send_time: Utc::now(),
             }),
             res_tx,
         })?;

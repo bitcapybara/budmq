@@ -12,6 +12,7 @@ mod unsubscribe;
 use std::{io, slice::Iter, string};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub use self::{
@@ -127,6 +128,25 @@ pub trait Codec {
     fn encode(&self, buf: &mut BytesMut);
 
     fn size(&self) -> usize;
+}
+
+impl Codec for DateTime<Utc> {
+    fn decode(buf: &mut Bytes) -> Result<Self> {
+        let timestmp = get_i64(buf)?;
+        let (sec, nano) = (timestmp / 1_000_000_000, (timestmp % 1_000_000_000) as u32);
+        let ndt = NaiveDateTime::from_timestamp_opt(sec, nano).ok_or(Error::MalformedPacket)?;
+        let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+        Ok(dt)
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let timestamp = self.timestamp_nanos();
+        buf.put_i64(timestamp);
+    }
+
+    fn size(&self) -> usize {
+        8
+    }
 }
 
 #[derive(Debug)]
@@ -425,6 +445,11 @@ pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
     Ok(buf.get_u64())
 }
 
+pub fn get_i64(buf: &mut Bytes) -> Result<i64> {
+    assert_len(buf, 8)?;
+    Ok(buf.get_i64())
+}
+
 #[cfg(test)]
 mod tests {
     use tokio_util::codec::Encoder;
@@ -510,6 +535,7 @@ mod tests {
             topic: "test-topic".to_string(),
             sequence_id: 200,
             payload: Bytes::from_static(b"hello, world"),
+            produce_time: Utc::now(),
         }))
     }
 
@@ -523,6 +549,8 @@ mod tests {
             },
             consumer_id: 3456,
             payload: Bytes::from_static(b"hello, world"),
+            produce_time: Utc::now(),
+            send_time: Utc::now(),
         }))
     }
 

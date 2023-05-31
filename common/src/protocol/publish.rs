@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+
 #[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
 pub struct Publish {
     pub request_id: u64,
@@ -8,4 +10,6 @@ pub struct Publish {
     pub sequence_id: u64,
     /// message content
     pub payload: bytes::Bytes,
+    /// produce time
+    pub produce_time: DateTime<Utc>,
 }

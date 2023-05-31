@@ -1,3 +1,6 @@
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+
 #[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
 #[repr(u8)]
 pub enum SubType {
@@ -70,4 +73,44 @@ impl MessageId {
             cursor_id,
         }
     }
+}
+
+#[derive(bud_derive::Codec)]
+pub struct TopicMessage {
+    /// message id
+    pub message_id: MessageId,
+    /// topic name
+    pub topic_name: String,
+    /// producer sequence id
+    pub seq_id: u64,
+    /// message payload
+    pub payload: Bytes,
+    /// produce time
+    pub produce_time: DateTime<Utc>,
+}
+
+impl TopicMessage {
+    pub fn new(
+        topic: &str,
+        message_id: MessageId,
+        seq_id: u64,
+        payload: Bytes,
+        produce_time: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            topic_name: topic.to_string(),
+            seq_id,
+            payload,
+            message_id,
+            produce_time,
+        }
+    }
+}
+
+#[derive(bud_derive::Codec)]
+pub struct SubscriptionInfo {
+    pub topic: String,
+    pub name: String,
+    pub sub_type: SubType,
+    pub init_position: InitialPostion,
 }

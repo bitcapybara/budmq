@@ -21,9 +21,9 @@ pub fn packet_codec(input: TokenStream) -> TokenStream {
         #codec_struct
 
         impl #struct_ident {
-            pub fn header(&self) -> super::Header {
+            pub fn header(&self) -> crate::protocol::Header {
                 use crate::protocol::Codec;
-                super::Header::new(super::PacketType::#struct_ident, self.size())
+                crate::protocol::Header::new(crate::protocol::PacketType::#struct_ident, self.size())
             }
         }
     }
@@ -114,10 +114,10 @@ fn codec_struct(
                 buf.put_u64(self.#field_ident);
             },
             "String" => quote! {
-                super::write_string(buf, &self.#field_ident);
+                crate::protocol::write_string(buf, &self.#field_ident);
             },
             "Bytes" => quote! {
-                super::write_bytes(buf, &self.#field_ident);
+                crate::protocol::write_bytes(buf, &self.#field_ident);
             },
             _ => quote! {
                 self.#field_ident.encode(buf);

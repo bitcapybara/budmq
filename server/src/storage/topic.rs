@@ -1,10 +1,13 @@
 use std::{ops::RangeBounds, sync::atomic::AtomicU64};
 
-use bud_common::{storage::Storage, types::MessageId};
+use bud_common::{
+    protocol::Codec,
+    storage::Storage,
+    types::{MessageId, SubscriptionInfo, TopicMessage},
+};
+use bytes::{Bytes, BytesMut};
 
-use crate::topic::{SubscriptionInfo, TopicMessage};
-
-use super::{get_range, Codec, Result};
+use super::{get_range, Result};
 
 pub struct TopicStorage<S> {
     topic_name: String,
@@ -36,7 +39,9 @@ impl<S: Storage> TopicStorage<S> {
         let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
         let id = self.storage.inc_u64(&id_key, 1).await?;
         let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, id));
-        self.storage.put(&id_key, &sub.encode()).await?;
+        let mut buf = BytesMut::new();
+        sub.encode(&mut buf);
+        self.storage.put(&id_key, &buf).await?;
         Ok(())
     }
 
@@ -52,7 +57,8 @@ impl<S: Storage> TopicStorage<S> {
             let Some(sub) = self.storage.get(&key).await? else {
                 continue;
             };
-            subs.push(SubscriptionInfo::decode(&sub)?);
+            let mut buf = Bytes::copy_from_slice(&sub);
+            subs.push(SubscriptionInfo::decode(&mut buf)?);
         }
         Ok(subs)
     }
@@ -65,8 +71,9 @@ impl<S: Storage> TopicStorage<S> {
             msg_id.topic_id,
             msg_id.cursor_id
         ));
-        let value = message.encode();
-        self.storage.put(&key, &value).await?;
+        let mut buf = BytesMut::new();
+        message.encode(&mut buf);
+        self.storage.put(&key, &buf).await?;
         Ok(())
     }
 
@@ -77,11 +84,15 @@ impl<S: Storage> TopicStorage<S> {
             message_id.topic_id,
             message_id.cursor_id
         ));
-        self.storage
+        Ok(self
+            .storage
             .get(&key)
             .await?
-            .map(|b| TopicMessage::decode(&b))
-            .transpose()
+            .map(|b| {
+                let mut buf = Bytes::copy_from_slice(&b);
+                TopicMessage::decode(&mut buf)
+            })
+            .transpose()?)
     }
 
     pub async fn delete_range<R>(&self, topic_id: u64, cursor_range: R) -> Result<()>
