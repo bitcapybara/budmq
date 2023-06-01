@@ -10,11 +10,7 @@
 //! 4. wait for response (not for PING/DISCONNECT packet)
 //! 5. send response to this stream
 
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::ops::{Deref, DerefMut};
 
 use futures::{SinkExt, StreamExt};
 use log::error;
@@ -60,29 +56,6 @@ pub fn new_pool(
     }
 }
 
-#[derive(Clone)]
-pub struct ResMap(Arc<tokio::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Packet>>>>>);
-
-impl ResMap {
-    async fn add_res_tx(&self, id: u64, res_tx: oneshot::Sender<Result<Packet>>) {
-        let mut map = self.0.lock().await;
-        map.retain(|_, s| !s.is_closed());
-        map.insert(id, res_tx);
-    }
-
-    async fn remove_res_tx(&self, id: u64) -> Option<oneshot::Sender<Result<Packet>>> {
-        let mut map = self.0.lock().await;
-        map.retain(|_, s| !s.is_closed());
-        map.remove(&id)
-    }
-}
-
-impl Default for ResMap {
-    fn default() -> Self {
-        Self(Arc::new(tokio::sync::Mutex::new(HashMap::new())))
-    }
-}
-
 pub trait PoolRecycle: Default + Clone {
     fn get(&self) -> Option<IdleStream>;
     fn put(&self, stream: IdleStream);
@@ -90,7 +63,6 @@ pub trait PoolRecycle: Default + Clone {
 
 pub struct StreamPool<T: PoolRecycle> {
     handle: Handle,
-    res_map: ResMap,
     inner: T,
     error: SharedError,
     request_rx: mpsc::Receiver<Request>,
@@ -108,14 +80,12 @@ impl<T: PoolRecycle> StreamPool<T> {
             inner: T::default(),
             request_rx: rx,
             handle,
-            res_map: ResMap::default(),
             token,
             error,
         }
     }
 
     pub async fn run(mut self) {
-        // TODO set sharederror when error occurs
         loop {
             select! {
                 res = self.request_rx.recv() => {
@@ -169,6 +139,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                     res_receiver,
                     FramedRead::new(recv_stream, PacketCodec),
                     error.clone(),
+                    self.token.child_token(),
                 ));
                 Ok(PooledStream::new(
                     self.inner.clone(),
@@ -185,20 +156,30 @@ async fn start_recv(
     mut res_receiver: mpsc::Receiver<oneshot::Sender<Result<Packet>>>,
     mut framed: FramedRead<ReceiveStream, PacketCodec>,
     error: SharedError,
+    token: CancellationToken,
 ) {
-    // TODO select on token cancel
-    while let Some(res_tx) = res_receiver.recv().await {
-        match framed.next().await {
-            Some(Ok(resp)) => {
-                res_tx.send(Ok(resp)).ok();
+    loop {
+        select! {
+            res_tx = res_receiver.recv() => {
+                let Some(res_tx) = res_tx else {
+                    return;
+                };
+                match framed.next().await {
+                    Some(Ok(resp)) => {
+                        res_tx.send(Ok(resp)).ok();
+                    }
+                    Some(Err(e)) => {
+                        error.set(Error::StreamDisconnect).await;
+                        res_tx.send(Err(e.into())).ok();
+                    }
+                    None => {
+                        error.set(Error::StreamDisconnect).await;
+                        res_tx.send(Err(Error::StreamDisconnect)).ok();
+                    }
+                }
             }
-            Some(Err(e)) => {
-                error.set(Error::StreamDisconnect).await;
-                res_tx.send(Err(e.into())).ok();
-            }
-            None => {
-                error.set(Error::StreamDisconnect).await;
-                res_tx.send(Err(Error::StreamDisconnect)).ok();
+            _ = token.cancelled() => {
+                return
             }
         }
     }
