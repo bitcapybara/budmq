@@ -1,7 +1,6 @@
 mod connect;
 mod consume_ack;
 mod control_flow;
-mod ping_pong;
 mod producer;
 mod publish;
 mod response;
