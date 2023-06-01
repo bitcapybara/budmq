@@ -131,20 +131,19 @@ impl<T: PoolRecycle> StreamPool<T> {
                         }
                     };
                     let Request { packet, res_tx } = request;
-                    match (packet.request_id(), res_tx) {
-                        (Some(id), Some(res_tx)) =>  {
-                            self.res_map.add_res_tx(id, res_tx).await;
-                            if let Err(e) = pooled.send(packet).await {
+                    match res_tx {
+                        Some(res_tx) =>  {
+                            if let Err(e) = pooled.framed.send(packet).await {
                                 pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
-                                if let Some(res_tx) = self.res_map.remove_res_tx(id).await {
-                                    res_tx.send(Err(e.into())).ok();
-                                }
+                                res_tx.send(Err(e.into())).ok();
+                                continue;
                             }
+                            pooled.res_sender.send(res_tx).await.ok();
                         }
                         _ => {
-                            if let Err(e) = pooled.send(packet).await {
+                            if let Err(e) = pooled.framed.send(packet).await {
                                 pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
-                                error!("io::writer send packet error: {e}")
+                                error!("io::writer send packet error: {e}");
                             }
                         }
                     }
@@ -164,48 +163,65 @@ impl<T: PoolRecycle> StreamPool<T> {
                 let (recv_stream, send_stream) = stream.split();
                 let framed = FramedWrite::new(send_stream, PacketCodec);
                 let error = SharedError::new();
+                // TODO back pressure for max inflight requests
+                let (res_sender, res_receiver) = mpsc::channel(100);
                 tokio::spawn(start_recv(
-                    self.res_map.clone(),
+                    res_receiver,
                     FramedRead::new(recv_stream, PacketCodec),
                     error.clone(),
                 ));
-                Ok(PooledStream::new(self.inner.clone(), framed, error))
+                Ok(PooledStream::new(
+                    self.inner.clone(),
+                    res_sender,
+                    framed,
+                    error,
+                ))
             }
         }
     }
 }
 
 async fn start_recv(
-    res_map: ResMap,
+    mut res_receiver: mpsc::Receiver<oneshot::Sender<Result<Packet>>>,
     mut framed: FramedRead<ReceiveStream, PacketCodec>,
     error: SharedError,
 ) {
-    while let Some(packet_res) = framed.next().await {
-        let packet = match packet_res {
-            Ok(packet) => packet,
-            Err(e) => {
-                error.set(e.into()).await;
-                return;
+    // TODO select on token cancel
+    while let Some(res_tx) = res_receiver.recv().await {
+        match framed.next().await {
+            Some(Ok(resp)) => {
+                res_tx.send(Ok(resp)).ok();
             }
-        };
-        let Some(request_id) = packet.request_id() else {
-            continue;
-        };
-        if let Some(res_tx) = res_map.remove_res_tx(request_id).await {
-            res_tx.send(Ok(packet)).ok();
+            Some(Err(e)) => {
+                error.set(Error::StreamDisconnect).await;
+                res_tx.send(Err(e.into())).ok();
+            }
+            None => {
+                error.set(Error::StreamDisconnect).await;
+                res_tx.send(Err(Error::StreamDisconnect)).ok();
+            }
         }
     }
 }
 
 /// used in pool
 pub struct IdleStream {
+    res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
     framed: FramedWrite<SendStream, PacketCodec>,
     error: SharedError,
 }
 
 impl IdleStream {
-    fn new(framed: FramedWrite<SendStream, PacketCodec>, error: SharedError) -> Self {
-        Self { framed, error }
+    fn new(
+        res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
+        framed: FramedWrite<SendStream, PacketCodec>,
+        error: SharedError,
+    ) -> Self {
+        Self {
+            framed,
+            error,
+            res_sender,
+        }
     }
 }
 
@@ -216,8 +232,13 @@ pub struct PooledStream<T: PoolRecycle> {
 }
 
 impl<T: PoolRecycle> PooledStream<T> {
-    fn new(pool: T, framed: FramedWrite<SendStream, PacketCodec>, error: SharedError) -> Self {
-        Self::new_idle(pool, IdleStream::new(framed, error))
+    fn new(
+        pool: T,
+        res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
+        framed: FramedWrite<SendStream, PacketCodec>,
+        error: SharedError,
+    ) -> Self {
+        Self::new_idle(pool, IdleStream::new(res_sender, framed, error))
     }
 
     fn new_idle(pool: T, stream: IdleStream) -> Self {
@@ -242,15 +263,15 @@ impl<T: PoolRecycle> Drop for PooledStream<T> {
 }
 
 impl<T: PoolRecycle> Deref for PooledStream<T> {
-    type Target = FramedWrite<SendStream, PacketCodec>;
+    type Target = IdleStream;
 
     fn deref(&self) -> &Self::Target {
-        &self.stream.as_ref().unwrap().framed
+        self.stream.as_ref().unwrap()
     }
 }
 
 impl<T: PoolRecycle> DerefMut for PooledStream<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.stream.as_mut().unwrap().framed
+        self.stream.as_mut().unwrap()
     }
 }
