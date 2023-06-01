@@ -89,7 +89,7 @@ impl Reader {
             Packet::Send(s) => {
                 let Some(sender) = self.consumers.get(&s.consumer_id) else {
                     warn!("recv a message but consumer not found");
-                    let packet = Packet::Response(Response { request_id: s.request_id, code: ReturnCode::ConsumerNotFound });
+                    let packet = Packet::Response(Response {  code: ReturnCode::ConsumerNotFound });
                     res_tx.send(Some(packet)).ok();
                     return Ok(());
                 };
@@ -102,12 +102,11 @@ impl Reader {
                 };
                 match sender.send(message) {
                     Ok(_) => {
-                        res_tx.send(Some(Packet::ok_response(s.request_id))).ok();
+                        res_tx.send(Some(Packet::ok_response())).ok();
                     }
                     Err(e) => {
                         error!("send message to consumer error: {e}");
                         let packet = Packet::Response(Response {
-                            request_id: s.request_id,
                             code: ReturnCode::ConsumerNotFound,
                         });
                         res_tx.send(Some(packet)).ok();

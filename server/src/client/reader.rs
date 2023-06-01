@@ -5,7 +5,7 @@ use bud_common::{
         reader::{self, Request},
         Error, SharedError,
     },
-    protocol::{Packet, Pong, Response, ReturnCode},
+    protocol::{Packet, Response, ReturnCode},
 };
 use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
@@ -105,12 +105,11 @@ impl Reader {
         trace!("client::reader: waiting for framed packet");
         let Request { packet, res_tx } = request;
         match packet {
-            Packet::Connect(c) => {
+            Packet::Connect(_) => {
                 warn!("client::reader: receive a CONNECT packet after handshake");
                 // Do not allow duplicate connections
                 let code = ReturnCode::AlreadyConnected;
-                let request_id = c.request_id;
-                let resp = Packet::Response(Response { request_id, code });
+                let resp = Packet::Response(Response { code });
                 res_tx.send(Some(resp)).ok();
             }
             p @ (Packet::Subscribe(_)
@@ -124,12 +123,10 @@ impl Reader {
                     return Err(e);
                 }
             }
-            Packet::Ping(p) => {
+            Packet::Ping => {
                 // return pong packet directly
                 trace!("client::reader: receive PING packet");
-                let packet = Packet::Pong(Pong {
-                    request_id: p.request_id,
-                });
+                let packet = Packet::Pong;
                 res_tx.send(Some(packet)).ok();
             }
             Packet::Disconnect => {
@@ -146,19 +143,11 @@ impl Reader {
             }
             p => {
                 error!("received unsupported packet: {}", p.packet_type());
-                match p.request_id() {
-                    Some(request_id) => {
-                        res_tx
-                            .send(Some(Packet::Response(Response {
-                                request_id,
-                                code: ReturnCode::UnexpectedPacket,
-                            })))
-                            .ok();
-                    }
-                    None => {
-                        res_tx.send(None).ok();
-                    }
-                }
+                res_tx
+                    .send(Some(Packet::Response(Response {
+                        code: ReturnCode::UnexpectedPacket,
+                    })))
+                    .ok();
             }
         }
         Ok(())

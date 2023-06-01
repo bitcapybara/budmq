@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use bud_common::{
-    id::SerialId,
     io::{
         writer::{new_pool, Request},
         Error,
     },
-    protocol::{Packet, Ping},
+    protocol::Packet,
 };
 use log::trace;
 use s2n_quic::connection::Handle;
@@ -20,7 +19,6 @@ use tokio_util::sync::CancellationToken;
 use super::{Result, SharedError};
 
 pub struct Writer {
-    request_id: SerialId,
     /// send message to server
     sender: mpsc::Sender<Request>,
     /// error
@@ -33,7 +31,6 @@ pub struct Writer {
 impl Writer {
     pub fn new(
         handle: Handle,
-        request_id: SerialId,
         ordered: bool,
         error: SharedError,
         token: CancellationToken,
@@ -45,7 +42,6 @@ impl Writer {
         Self {
             token,
             error,
-            request_id,
             sender: tx,
             request_rx,
             keepalive,
@@ -102,14 +98,12 @@ impl Writer {
         let (res_tx, res_rx) = oneshot::channel();
         self.sender
             .send(Request {
-                packet: Packet::Ping(Ping {
-                    request_id: self.request_id.next(),
-                }),
+                packet: Packet::Ping,
                 res_tx: Some(res_tx),
             })
             .await?;
         match res_rx.await? {
-            Ok(Packet::Pong(_)) => Ok(Some(())),
+            Ok(Packet::Pong) => Ok(Some(())),
             Ok(_) => Ok(None),
             Err(e) => Err(e)?,
         }

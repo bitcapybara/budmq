@@ -4,7 +4,6 @@ pub mod writer;
 use std::{io, net::SocketAddr, ops::DerefMut, sync::Arc};
 
 use bud_common::{
-    id::SerialId,
     io::{writer::Request, SharedError},
     mtls::MtlsProvider,
     protocol::{
@@ -101,7 +100,6 @@ pub enum ConnectionState {
 
 /// held by producer/consumer
 pub struct Connection {
-    request_id: SerialId,
     /// send add/del consumer events
     register_tx: mpsc::Sender<Event>,
     /// send request
@@ -125,12 +123,10 @@ impl Connection {
         // create reader from s2n_quic::Acceptor
         tokio::spawn(Reader::new(register_rx, acceptor, error.clone(), token.child_token()).run());
         // create writer from s2n_quic::Handle
-        let request_id = SerialId::new();
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         tokio::spawn(
             Writer::new(
                 handle.clone(),
-                request_id.clone(),
                 ordered,
                 error.clone(),
                 token.child_token(),
@@ -140,7 +136,6 @@ impl Connection {
             .run(),
         );
         Self {
-            request_id,
             error,
             register_tx,
             token,
@@ -156,7 +151,6 @@ impl Connection {
         tokio::spawn(
             Writer::new(
                 self.handle.clone(),
-                self.request_id.clone(),
                 ordered,
                 self.error.clone(),
                 self.token.child_token(),
@@ -166,7 +160,6 @@ impl Connection {
             .run(),
         );
         Self {
-            request_id: self.request_id.clone(),
             register_tx: self.register_tx.clone(),
             request_tx,
             error: self.error.clone(),
@@ -193,7 +186,6 @@ impl Connection {
     ) -> Result<(u64, u64)> {
         match self
             .send(Packet::CreateProducer(CreateProducer {
-                request_id: self.request_id.next(),
                 producer_name: name.to_string(),
                 topic_name: topic.to_string(),
                 access_mode,
@@ -218,7 +210,6 @@ impl Connection {
         data: &[u8],
     ) -> Result<()> {
         self.send_ok(Packet::Publish(Publish {
-            request_id: self.request_id.next(),
             topic: topic.to_string(),
             sequence_id,
             payload: Bytes::copy_from_slice(data),
@@ -250,7 +241,6 @@ impl Connection {
         tx: mpsc::UnboundedSender<ConsumeMessage>,
     ) -> Result<()> {
         self.send_ok(Packet::Subscribe(Subscribe {
-            request_id: self.request_id.next(),
             consumer_id,
             topic: sub.topic.to_string(),
             sub_name: sub.sub_name.to_string(),
@@ -270,7 +260,6 @@ impl Connection {
 
     pub async fn unsubscribe(&self, consumer_id: u64) -> Result<()> {
         self.send_ok(Packet::Unsubscribe(bud_common::protocol::Unsubscribe {
-            request_id: self.request_id.next(),
             consumer_id,
         }))
         .await?;
@@ -282,7 +271,6 @@ impl Connection {
 
     pub async fn ack(&self, consumer_id: u64, message_id: &MessageId) -> Result<()> {
         self.send_ok(Packet::ConsumeAck(ConsumeAck {
-            request_id: self.request_id.next(),
             consumer_id,
             message_id: *message_id,
         }))
@@ -291,7 +279,6 @@ impl Connection {
 
     pub async fn control_flow(&self, consumer_id: u64, permits: u32) -> Result<()> {
         self.send_ok(Packet::ControlFlow(ControlFlow {
-            request_id: self.request_id.next(),
             consumer_id,
             permits,
         }))

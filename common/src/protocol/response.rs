@@ -1,6 +1,5 @@
 #[derive(Debug, Clone, PartialEq, bud_derive::PacketCodec)]
 pub struct Response {
-    pub request_id: u64,
     pub code: ReturnCode,
 }
 

@@ -20,7 +20,6 @@ pub use self::{
     connect::Connect,
     consume_ack::ConsumeAck,
     control_flow::ControlFlow,
-    ping_pong::{Ping, Pong},
     producer::{CloseProducer, CreateProducer, ProducerReceipt},
     publish::Publish,
     response::Response,
@@ -108,8 +107,8 @@ impl Decoder for PacketCodec {
             PacketType::ProducerReceipt => {
                 Packet::ProducerReceipt(ProducerReceipt::decode(&mut bytes)?)
             }
-            PacketType::Ping => Packet::Ping(Ping::decode(&mut bytes)?),
-            PacketType::Pong => Packet::Pong(Pong::decode(&mut bytes)?),
+            PacketType::Ping => Packet::Ping,
+            PacketType::Pong => Packet::Pong,
             PacketType::Disconnect => Packet::Disconnect,
             PacketType::CloseProducer => Packet::CloseProducer(CloseProducer::decode(&mut bytes)?),
             PacketType::CloseConsumer => Packet::CloseConsumer(CloseConsumer::decode(&mut bytes)?),
@@ -182,8 +181,8 @@ pub enum Packet {
     Response(Response),
     CreateProducer(CreateProducer),
     ProducerReceipt(ProducerReceipt),
-    Ping(Ping),
-    Pong(Pong),
+    Ping,
+    Pong,
     Disconnect,
     CloseProducer(CloseProducer),
     CloseConsumer(CloseConsumer),
@@ -202,8 +201,8 @@ impl Packet {
             Packet::Response(p) => p.header(),
             Packet::CreateProducer(p) => p.header(),
             Packet::ProducerReceipt(p) => p.header(),
-            Packet::Ping(p) => p.header(),
-            Packet::Pong(p) => p.header(),
+            Packet::Ping => Header::new(PacketType::Ping, 0),
+            Packet::Pong => Header::new(PacketType::Pong, 0),
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
             Packet::CloseProducer(p) => p.header(),
             Packet::CloseConsumer(p) => p.header(),
@@ -222,8 +221,8 @@ impl Packet {
             Packet::Response(p) => p.encode(buf),
             Packet::CreateProducer(p) => p.encode(buf),
             Packet::ProducerReceipt(p) => p.encode(buf),
-            Packet::Ping(p) => p.encode(buf),
-            Packet::Pong(p) => p.encode(buf),
+            Packet::Ping => {}
+            Packet::Pong => {}
             Packet::Disconnect => {}
             Packet::CloseProducer(p) => p.encode(buf),
             Packet::CloseConsumer(p) => p.encode(buf),
@@ -242,43 +241,22 @@ impl Packet {
             Packet::Response(_) => PacketType::Response,
             Packet::CreateProducer(_) => PacketType::CreateProducer,
             Packet::ProducerReceipt(_) => PacketType::ProducerReceipt,
-            Packet::Ping(_) => PacketType::Ping,
-            Packet::Pong(_) => PacketType::Pong,
+            Packet::Ping => PacketType::Ping,
+            Packet::Pong => PacketType::Pong,
             Packet::Disconnect => PacketType::Disconnect,
             Packet::CloseProducer(_) => PacketType::CloseProducer,
             Packet::CloseConsumer(_) => PacketType::CloseConsumer,
         }
     }
 
-    pub fn request_id(&self) -> Option<u64> {
-        match self {
-            Packet::Connect(p) => Some(p.request_id),
-            Packet::Subscribe(p) => Some(p.request_id),
-            Packet::Unsubscribe(p) => Some(p.request_id),
-            Packet::Publish(p) => Some(p.request_id),
-            Packet::Send(p) => Some(p.request_id),
-            Packet::ConsumeAck(p) => Some(p.request_id),
-            Packet::ControlFlow(p) => Some(p.request_id),
-            Packet::Response(p) => Some(p.request_id),
-            Packet::CreateProducer(p) => Some(p.request_id),
-            Packet::ProducerReceipt(p) => Some(p.request_id),
-            Packet::Ping(p) => Some(p.request_id),
-            Packet::Pong(p) => Some(p.request_id),
-            Packet::Disconnect => None,
-            Packet::CloseProducer(_) => None,
-            Packet::CloseConsumer(_) => None,
-        }
-    }
-
-    pub fn ok_response(request_id: u64) -> Self {
+    pub fn ok_response() -> Self {
         Self::Response(Response {
-            request_id,
             code: ReturnCode::Success,
         })
     }
 
-    pub fn err_response(request_id: u64, code: ReturnCode) -> Self {
-        Self::Response(Response { request_id, code })
+    pub fn err_response(code: ReturnCode) -> Self {
+        Self::Response(Response { code })
     }
 }
 
@@ -430,16 +408,12 @@ mod tests {
 
     #[test]
     fn codec_connect() {
-        codec_works(Packet::Connect(Connect {
-            request_id: 1,
-            keepalive: 10000,
-        }))
+        codec_works(Packet::Connect(Connect { keepalive: 10000 }))
     }
 
     #[test]
     fn codec_subscribe() {
         codec_works(Packet::Subscribe(Subscribe {
-            request_id: 1,
             consumer_name: "test-consumer".to_string(),
             consumer_id: 1,
             topic: "test-topic".to_string(),
@@ -451,16 +425,12 @@ mod tests {
 
     #[test]
     fn codec_unsubscribe() {
-        codec_works(Packet::Unsubscribe(Unsubscribe {
-            request_id: 1,
-            consumer_id: 1,
-        }))
+        codec_works(Packet::Unsubscribe(Unsubscribe { consumer_id: 1 }))
     }
 
     #[test]
     fn codec_publish() {
         codec_works(Packet::Publish(Publish {
-            request_id: 1,
             producer_id: 1,
             topic: "test-topic".to_string(),
             sequence_id: 200,
@@ -472,7 +442,6 @@ mod tests {
     #[test]
     fn codec_send() {
         codec_works(Packet::Send(Send {
-            request_id: 1,
             message_id: MessageId {
                 topic_id: 1,
                 cursor_id: 200,
@@ -487,7 +456,6 @@ mod tests {
     #[test]
     fn codec_consume_ack() {
         codec_works(Packet::ConsumeAck(ConsumeAck {
-            request_id: 1,
             consumer_id: 12345,
             message_id: MessageId {
                 topic_id: 1,
@@ -499,7 +467,6 @@ mod tests {
     #[test]
     fn codec_control_flow() {
         codec_works(Packet::ControlFlow(ControlFlow {
-            request_id: 1,
             consumer_id: 123,
             permits: 500,
         }))
@@ -508,7 +475,6 @@ mod tests {
     #[test]
     fn codec_response() {
         codec_works(Packet::Response(Response {
-            request_id: 1,
             code: ReturnCode::Success,
         }))
     }
@@ -516,7 +482,6 @@ mod tests {
     #[test]
     fn codec_create_producer() {
         codec_works(Packet::CreateProducer(CreateProducer {
-            request_id: 255,
             producer_name: "producer-id".to_string(),
             producer_id: 555,
             topic_name: "test-topic".to_string(),
@@ -527,7 +492,6 @@ mod tests {
     #[test]
     fn codec_producer_receipt() {
         codec_works(Packet::ProducerReceipt(ProducerReceipt {
-            request_id: 90,
             producer_id: 9,
             sequence_id: 44,
         }))
@@ -535,18 +499,18 @@ mod tests {
 
     #[test]
     fn codec_ping() {
-        codec_works(Packet::Ping(Ping { request_id: 22 }))
+        codec_works(Packet::Ping)
     }
 
     #[test]
     fn codec_pong() {
-        codec_works(Packet::Pong(Pong { request_id: 88 }))
+        codec_works(Packet::Pong)
     }
 
     #[test]
     fn codec_ping_pong() {
-        codec_works(Packet::Ping(Ping { request_id: 1 }));
-        codec_works(Packet::Pong(Pong { request_id: 1 }));
+        codec_works(Packet::Ping);
+        codec_works(Packet::Pong);
     }
 
     #[test]

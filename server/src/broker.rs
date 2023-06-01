@@ -266,7 +266,6 @@ impl<S: Storage> Broker<S> {
                 message_id: event.message_id,
                 consumer_id: event.consumer_id,
                 payload: message.payload,
-                request_id: self.request_id.next(),
                 produce_time: message.produce_time,
                 send_time: Utc::now(),
             }),
@@ -336,7 +335,7 @@ impl<S: Storage> Broker<S> {
         let client_id = msg.client_id;
         // handshake process
         match msg.packet {
-            Packet::Connect(Connect { request_id, .. }) => {
+            Packet::Connect(Connect { .. }) => {
                 trace!("broker::process_packets: broker receive CONNECT packet");
                 let Some(res_tx) = msg.res_tx else {
                     return Err(Error::Internal("Connect res_tx channel not found".to_string()))
@@ -346,7 +345,7 @@ impl<S: Storage> Broker<S> {
                 };
                 let mut clients = self.clients.write().await;
                 if clients.contains_key(&client_id) {
-                    let packet = Packet::err_response(request_id, ReturnCode::AlreadyConnected);
+                    let packet = Packet::err_response(ReturnCode::AlreadyConnected);
                     res_tx.send(packet).ok();
                     return Ok(());
                 }
@@ -358,7 +357,7 @@ impl<S: Storage> Broker<S> {
                         producers: HashMap::new(),
                     },
                 );
-                res_tx.send(Packet::ok_response(request_id)).ok();
+                res_tx.send(Packet::ok_response()).ok();
                 trace!("broker::process_packets: add new client: {}", client_id);
             }
             Packet::Disconnect => {
@@ -453,7 +452,6 @@ impl<S: Storage> Broker<S> {
     ) -> Result<Packet> {
         match packet {
             Packet::CreateProducer(CreateProducer {
-                request_id,
                 producer_name,
                 topic_name,
                 access_mode,
@@ -494,7 +492,6 @@ impl<S: Storage> Broker<S> {
                 };
                 session.add_producer(producer_id, &topic_name);
                 Ok(Packet::ProducerReceipt(ProducerReceipt {
-                    request_id,
                     producer_id,
                     sequence_id,
                 }))
@@ -559,19 +556,16 @@ impl<S: Storage> Broker<S> {
                 // add consumer to session
                 trace!("broker::process_packets: add consumer to session");
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
-                Ok(Packet::ok_response(sub.request_id))
+                Ok(Packet::ok_response())
             }
-            Packet::Unsubscribe(Unsubscribe {
-                consumer_id,
-                request_id,
-            }) => {
+            Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
                 trace!("broker::process_packets: receive UNSUBSCRIBE packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(Packet::ok_response(request_id));
+                    return Ok(Packet::ok_response());
                 };
                 let Some(info) = session.consumers.get(&consumer_id) else {
-                    return Ok(Packet::ok_response(request_id));
+                    return Ok(Packet::ok_response());
                 };
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
@@ -580,7 +574,7 @@ impl<S: Storage> Broker<S> {
                 }
                 trace!("broker::process_packets: remove consumer from session");
                 session.del_consumer(consumer_id);
-                Ok(Packet::ok_response(request_id))
+                Ok(Packet::ok_response())
             }
             Packet::Publish(p) => {
                 let clients = self.clients.read().await;
@@ -601,7 +595,7 @@ impl<S: Storage> Broker<S> {
                     }
                     None => return Err(Error::ReturnCode(ReturnCode::TopicNotExists)),
                 }
-                Ok(Packet::ok_response(p.request_id))
+                Ok(Packet::ok_response())
             }
             Packet::ControlFlow(c) => {
                 trace!("broker::process_packets: receive CONTROLFLOW packet");
@@ -623,7 +617,7 @@ impl<S: Storage> Broker<S> {
                 trace!("broker::process_packets: add permits to subscription");
                 sp.additional_permits(client_id, c.consumer_id, c.permits)
                     .await?;
-                Ok(Packet::ok_response(c.request_id))
+                Ok(Packet::ok_response())
             }
             Packet::ConsumeAck(c) => {
                 trace!("broker::process_packets: receive CONSUMEACK packet");
@@ -640,7 +634,7 @@ impl<S: Storage> Broker<S> {
                 };
                 trace!("broker::process_packets: ack message in topic");
                 topic.consume_ack(&info.sub_name, &c.message_id).await?;
-                Ok(Packet::ok_response(c.request_id))
+                Ok(Packet::ok_response())
             }
             p => Err(Error::UnsupportedPacket(p.packet_type())),
         }
