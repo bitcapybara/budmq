@@ -5,6 +5,7 @@ use bud_common::{
     types::{InitialPostion, MessageId, SubType},
 };
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use log::warn;
 use tokio::{
     select,
@@ -66,6 +67,9 @@ pub struct SubscribeMessage {
 pub struct ConsumeMessage {
     pub id: MessageId,
     pub payload: Bytes,
+    pub produce_time: DateTime<Utc>,
+    pub send_time: DateTime<Utc>,
+    pub receive_time: DateTime<Utc>,
 }
 
 pub enum ConsumerEvent {

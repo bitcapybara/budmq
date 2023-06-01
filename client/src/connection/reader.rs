@@ -7,6 +7,7 @@ use bud_common::{
     },
     protocol::{Packet, Response, ReturnCode},
 };
+use chrono::Utc;
 use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::{select, sync::mpsc};
@@ -95,6 +96,9 @@ impl Reader {
                 let message = ConsumeMessage {
                     id: s.message_id,
                     payload: s.payload,
+                    produce_time: s.produce_time,
+                    send_time: s.send_time,
+                    receive_time: Utc::now(),
                 };
                 match sender.send(message) {
                     Ok(_) => {
