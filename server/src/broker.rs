@@ -632,6 +632,9 @@ impl<S: Storage> Broker<S> {
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
                     return Err(Error::Internal(format!("topic {} not found", info.topic_name)))
                 };
+                if topic.id != c.message_id.topic_id {
+                    return Err(Error::ReturnCode(ReturnCode::AckTopicMissMatch));
+                }
                 trace!("broker::process_packets: ack message in topic");
                 topic.consume_ack(&info.sub_name, &c.message_id).await?;
                 Ok(Packet::ok_response())

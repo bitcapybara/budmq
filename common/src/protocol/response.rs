@@ -21,6 +21,7 @@ pub enum ReturnCode {
     ProducerExclusive,
     ProducerAccessModeConflict,
     ProducerNotFound,
+    AckTopicMissMatch,
 }
 
 impl std::fmt::Display for ReturnCode {
@@ -41,6 +42,7 @@ impl std::fmt::Display for ReturnCode {
             ReturnCode::ProducerExclusive => write!(f, "ProducerExclusive"),
             ReturnCode::ProducerAccessModeConflict => write!(f, "Producer access mode conflict"),
             ReturnCode::ProducerNotFound => write!(f, "Producer not found"),
+            ReturnCode::AckTopicMissMatch => write!(f, "Ack topic miss match"),
         }
     }
 }
@@ -65,6 +67,7 @@ impl TryFrom<u8> for ReturnCode {
             12 => Self::ProducerExclusive,
             13 => Self::ProducerAccessModeConflict,
             14 => Self::ProducerNotFound,
+            15 => Self::AckTopicMissMatch,
             _ => return Err(Self::Error::Malformed),
         })
     }

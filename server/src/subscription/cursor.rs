@@ -68,17 +68,17 @@ impl<S: Storage> Cursor<S> {
         Ok(())
     }
 
-    pub async fn ack(&mut self, message_id: u64) -> Result<()> {
+    pub async fn ack(&mut self, cursor_id: u64) -> Result<()> {
         // set message acked
-        self.bits.insert(message_id);
+        self.bits.insert(cursor_id);
         // update delete_position
-        if message_id - self.delete_position > 1 {
+        if cursor_id - self.delete_position > 1 {
             return Ok(());
         }
         let Some(max) = self.bits.max() else {
                 return Ok(());
         };
-        for i in message_id..max {
+        for i in cursor_id..max {
             if self.bits.contains(i) {
                 self.delete_position = i;
             } else {
