@@ -2,6 +2,8 @@ use std::array;
 
 use async_trait::async_trait;
 
+use crate::types::{MessageId, TopicMessage};
+
 pub mod memory;
 pub mod persist;
 
@@ -64,4 +66,11 @@ pub trait Storage: Clone + Send + Sync + 'static {
     }
 
     async fn inc_u64(&self, k: &str, v: u64) -> Result<u64>;
+}
+
+#[async_trait]
+pub trait MessageStorage: Send + Sync + 'static {
+    async fn put_message(&self, _msg: TopicMessage) -> Result<()>;
+    async fn get_message(&self, _id: &MessageId) -> Result<()>;
+    async fn del_message(&self, _id: &MessageId) -> Result<()>;
 }
