@@ -18,7 +18,7 @@ pub struct Cursor<S> {
     /// low water mark
     delete_position: u64,
     /// message ack info
-    bits: RoaringTreemap,
+    acked: RoaringTreemap,
     /// storage
     storage: CursorStorage<S>,
 }
@@ -27,8 +27,8 @@ impl<S: Storage> Cursor<S> {
     pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
         let storage = CursorStorage::new(sub_name, storage)?;
         let latest_message_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
-        let bits = storage.get_ack_bits().await?.unwrap_or_default();
-        let delete_position = bits.min().unwrap_or_default();
+        let acked = storage.get_ack_bits().await?.unwrap_or_default();
+        let delete_position = acked.min().unwrap_or_default();
         let read_position = match init_position {
             InitialPostion::Latest => storage.get_read_position().await?.unwrap_or_default(),
             InitialPostion::Earliest => delete_position + 1,
@@ -37,7 +37,7 @@ impl<S: Storage> Cursor<S> {
             read_position,
             latest_message_id,
             delete_position,
-            bits,
+            acked,
             storage,
         })
     }
@@ -70,24 +70,26 @@ impl<S: Storage> Cursor<S> {
 
     pub async fn ack(&mut self, cursor_id: u64) -> Result<()> {
         // set message acked
-        self.bits.insert(cursor_id);
+        self.acked.insert(cursor_id);
         // update delete_position
         if cursor_id - self.delete_position > 1 {
             return Ok(());
         }
-        let Some(max) = self.bits.max() else {
-                return Ok(());
+        let Some(max) = self.acked.max() else {
+            return Ok(());
         };
+        let prev_delete_pos = self.delete_position;
         for i in cursor_id..max {
-            if self.bits.contains(i) {
+            if self.acked.contains(i) {
                 self.delete_position = i;
             } else {
                 break;
             }
         }
         // remove all values less than delete position
-        self.bits.remove_range(..self.delete_position);
-        self.storage.set_ack_bits(&self.bits).await?;
+        self.acked
+            .remove_range(prev_delete_pos..self.delete_position);
+        self.storage.set_ack_bits(&self.acked).await?;
         Ok(())
     }
 }
