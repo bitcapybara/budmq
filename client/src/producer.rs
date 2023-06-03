@@ -77,7 +77,7 @@ impl Producer {
         let conn = conn_handle.get_connection(ordered).await?;
         let request_id = SerialId::new();
         // get seq_id from ProducerReceipt packet
-        let (id, sequence_id) = conn.create_producer(name, id, topic, access_mode).await?;
+        let sequence_id = conn.create_producer(name, id, topic, access_mode).await?;
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,
@@ -120,7 +120,7 @@ impl Producer {
 
         // TODO loop and retry
         self.conn = self.conn_handle.get_connection(self.ordered).await?;
-        (self.id, self.sequence_id) = self
+        self.sequence_id = self
             .conn
             .create_producer(&self.name, self.id, &self.topic, self.access_mode)
             .await?;

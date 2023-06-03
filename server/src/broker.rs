@@ -491,10 +491,7 @@ impl<S: Storage> Broker<S> {
                     }
                 };
                 session.add_producer(producer_id, &topic_name);
-                Ok(Packet::ProducerReceipt(ProducerReceipt {
-                    producer_id,
-                    sequence_id,
-                }))
+                Ok(Packet::ProducerReceipt(ProducerReceipt { sequence_id }))
             }
             Packet::Subscribe(sub) => {
                 trace!("broker::process_packets: receive SUBSCRIBE packet");

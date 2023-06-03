@@ -490,10 +490,7 @@ mod tests {
 
     #[test]
     fn codec_producer_receipt() {
-        codec_works(Packet::ProducerReceipt(ProducerReceipt {
-            producer_id: 9,
-            sequence_id: 44,
-        }))
+        codec_works(Packet::ProducerReceipt(ProducerReceipt { sequence_id: 44 }))
     }
 
     #[test]

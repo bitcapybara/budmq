@@ -10,7 +10,6 @@ pub struct CreateProducer {
 
 #[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]
 pub struct ProducerReceipt {
-    pub producer_id: u64,
     pub sequence_id: u64,
 }
 

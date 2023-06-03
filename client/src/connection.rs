@@ -183,7 +183,7 @@ impl Connection {
         id: u64,
         topic: &str,
         access_mode: AccessMode,
-    ) -> Result<(u64, u64)> {
+    ) -> Result<u64> {
         match self
             .send(Packet::CreateProducer(CreateProducer {
                 producer_name: name.to_string(),
@@ -193,11 +193,7 @@ impl Connection {
             }))
             .await?
         {
-            Packet::ProducerReceipt(ProducerReceipt {
-                producer_id,
-                sequence_id,
-                ..
-            }) => Ok((producer_id, sequence_id)),
+            Packet::ProducerReceipt(ProducerReceipt { sequence_id }) => Ok(sequence_id),
             _ => Err(Error::UnexpectedPacket),
         }
     }
