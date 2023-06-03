@@ -1,16 +1,14 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use bud_common::{protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
 use log::warn;
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::sleep,
-};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     client::RetryOptions,
     connection::{self, Connection, ConnectionHandle},
+    retry_op::producer_reconnect,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -81,16 +79,40 @@ impl Producer {
         retry_opts: Option<RetryOptions>,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
-        let (conn, sequence_id) = reconnect(
-            &retry_opts,
-            ordered,
-            &conn_handle,
-            name,
-            id,
-            topic,
-            access_mode,
-        )
-        .await?;
+        let (conn, sequence_id) = match conn_handle.get_connection(ordered).await {
+            Ok(conn) => match conn.create_producer(name, id, topic, access_mode).await {
+                Ok(sequence_id) => (conn, sequence_id),
+                Err(connection::Error::Disconnect) => {
+                    if let Err(e) = conn.close_producer(id).await {
+                        warn!("client CLOSE_PRODUCER error: {e}")
+                    }
+                    producer_reconnect(
+                        &retry_opts,
+                        ordered,
+                        &conn_handle,
+                        name,
+                        id,
+                        topic,
+                        access_mode,
+                    )
+                    .await?
+                }
+                Err(e) => return Err(e.into()),
+            },
+            Err(connection::Error::Disconnect) => {
+                producer_reconnect(
+                    &retry_opts,
+                    ordered,
+                    &conn_handle,
+                    name,
+                    id,
+                    topic,
+                    access_mode,
+                )
+                .await?
+            }
+            Err(e) => return Err(e.into()),
+        };
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,
@@ -118,7 +140,7 @@ impl Producer {
                     if let Err(e) = self.conn.close_producer(self.id).await {
                         warn!("client CLOSE_PRODUCER error: {e}")
                     }
-                    (self.conn, self.sequence_id) = reconnect(
+                    (self.conn, self.sequence_id) = producer_reconnect(
                         &self.retry_opts,
                         self.ordered,
                         &self.conn_handle,
@@ -137,54 +159,5 @@ impl Producer {
     pub async fn close(self) -> Result<()> {
         self.conn.close_producer(self.id).await?;
         Ok(())
-    }
-}
-
-async fn reconnect(
-    retry_opts: &Option<RetryOptions>,
-    ordered: bool,
-    conn_handle: &ConnectionHandle,
-    name: &str,
-    id: u64,
-    topic: &str,
-    access_mode: AccessMode,
-) -> Result<(Arc<Connection>, u64)> {
-    let Some(retry_opts) = retry_opts else {
-        return Err(connection::Error::Disconnect.into());
-    };
-
-    const MAX_DELAY: Duration = Duration::from_secs(30);
-    let mut delay = retry_opts.min_retry_delay;
-    let update_delay = |delay: &mut Duration| {
-        *delay *= 2;
-        if *delay * 2 > MAX_DELAY {
-            *delay = MAX_DELAY;
-        }
-    };
-    let mut count = 0;
-    loop {
-        match conn_handle.get_connection(ordered).await {
-            Ok(conn) => match conn.create_producer(name, id, topic, access_mode).await {
-                Ok(seq_id) => return Ok((conn, seq_id)),
-                Err(e @ connection::Error::Disconnect) => {
-                    count += 1;
-                    if count >= retry_opts.max_retry_count {
-                        return Err(e.into());
-                    }
-                    sleep(delay).await;
-                    update_delay(&mut delay);
-                }
-                Err(e) => return Err(e.into()),
-            },
-            Err(e @ connection::Error::Disconnect) => {
-                count += 1;
-                if count >= retry_opts.max_retry_count {
-                    return Err(e.into());
-                }
-                sleep(delay).await;
-                update_delay(&mut delay);
-            }
-            Err(e) => return Err(e.into()),
-        }
     }
 }

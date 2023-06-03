@@ -146,6 +146,13 @@ impl Client {
         subscribe: SubscribeMessage,
     ) -> Result<Consumer> {
         self.consumer_id += 1;
-        Ok(Consumer::new(self.consumer_id, name, self.conn_handle.clone(), &subscribe).await?)
+        Ok(Consumer::new(
+            self.consumer_id,
+            name,
+            self.conn_handle.clone(),
+            &subscribe,
+            self.retry_opts.clone(),
+        )
+        .await?)
     }
 }

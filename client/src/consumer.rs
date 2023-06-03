@@ -13,7 +13,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::connection::{self, Connection, ConnectionHandle};
+use crate::{
+    client::RetryOptions,
+    connection::{self, Connection, ConnectionHandle},
+    retry_op::consumer_reconnect,
+};
 
 pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
 
@@ -94,11 +98,14 @@ pub struct ConsumeEngine {
     conn_handle: ConnectionHandle,
     /// remain permits
     remain_permits: u32,
+    /// retry options
+    retry_opts: Option<RetryOptions>,
     /// token to notify exit
     token: CancellationToken,
 }
 
 impl ConsumeEngine {
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         id: u64,
         name: &str,
@@ -106,6 +113,7 @@ impl ConsumeEngine {
         event_rx: mpsc::Receiver<ConsumerEvent>,
         consumer_tx: mpsc::Sender<ConsumeMessage>,
         conn_handle: ConnectionHandle,
+        retry_opts: Option<RetryOptions>,
         token: CancellationToken,
     ) -> Result<Self> {
         let conn = conn_handle.get_connection(false).await?;
@@ -123,13 +131,25 @@ impl ConsumeEngine {
             event_rx,
             server_rx,
             name: name.to_string(),
+            retry_opts,
         })
     }
 
     async fn run(mut self) -> Result<()> {
         loop {
             if !self.conn.is_valid() && (self.conn.error().await).is_some() {
-                self.reconnect().await?;
+                if let Err(e) = self.conn.close_consumer(self.id).await {
+                    warn!("client send CLOSE_CONSUMER packet error: {e}");
+                }
+                consumer_reconnect(
+                    self.id,
+                    &self.name,
+                    &self.sub_message,
+                    &self.retry_opts,
+                    &self.conn_handle,
+                )
+                .await?;
+                self.remain_permits = CONSUME_CHANNEL_CAPACITY;
             }
 
             if self.remain_permits < CONSUME_CHANNEL_CAPACITY / 2 {
@@ -137,8 +157,17 @@ impl ConsumeEngine {
                 match self.conn.control_flow(self.id, permits).await {
                     Ok(_) => {}
                     Err(connection::Error::Disconnect) => {
-                        self.reconnect().await?;
-                        self.conn.control_flow(self.id, permits).await?;
+                        if let Err(e) = self.conn.close_consumer(self.id).await {
+                            warn!("client send CLOSE_CONSUMER packet error: {e}");
+                        }
+                        consumer_reconnect(
+                            self.id,
+                            &self.name,
+                            &self.sub_message,
+                            &self.retry_opts,
+                            &self.conn_handle,
+                        )
+                        .await?;
                     }
                     Err(e) => return Err(e.into()),
                 }
@@ -176,21 +205,6 @@ impl ConsumeEngine {
             }
         }
     }
-
-    async fn reconnect(&mut self) -> Result<()> {
-        if let Err(e) = self.conn.close_consumer(self.id).await {
-            warn!("client send CLOSE_CONSUMER packet error: {e}");
-        }
-
-        // TODO loop and retry
-        self.conn = self.conn_handle.get_connection(false).await?;
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.conn
-            .subscribe(self.id, &self.name, &self.sub_message.clone(), tx)
-            .await?;
-        self.server_rx = rx;
-        Ok(())
-    }
 }
 
 pub struct Consumer {
@@ -198,6 +212,8 @@ pub struct Consumer {
     consumer_rx: mpsc::Receiver<ConsumeMessage>,
     /// send event to server
     event_tx: mpsc::Sender<ConsumerEvent>,
+    /// retry options used in engine
+    retry_opts: Option<RetryOptions>,
     /// token
     token: CancellationToken,
 }
@@ -208,6 +224,7 @@ impl Consumer {
         name: &str,
         conn_handle: ConnectionHandle,
         sub_message: &SubscribeMessage,
+        retry_opts: Option<RetryOptions>,
     ) -> Result<Self> {
         let (tx, rx) = mpsc::channel(CONSUME_CHANNEL_CAPACITY as usize);
         let (event_tx, event_rx) = mpsc::channel(1);
@@ -219,6 +236,7 @@ impl Consumer {
             event_rx,
             tx,
             conn_handle,
+            retry_opts.clone(),
             token.clone(),
         )
         .await?;
@@ -227,6 +245,7 @@ impl Consumer {
             consumer_rx: rx,
             event_tx,
             token,
+            retry_opts,
         })
     }
 
