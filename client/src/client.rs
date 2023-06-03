@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use bud_common::{
     io::writer::Request, mtls::MtlsProvider, protocol::ReturnCode, types::AccessMode,
@@ -58,12 +58,19 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
+#[derive(Clone)]
+pub struct RetryOptions {
+    pub max_retry_count: usize,
+    pub min_retry_delay: Duration,
+}
+
 pub struct ClientBuilder {
     addr: SocketAddr,
     server_name: String,
     provider: MtlsProvider,
     // default to 10000ms
     keepalive: u16,
+    retry_opts: Option<RetryOptions>,
 }
 
 impl ClientBuilder {
@@ -74,11 +81,17 @@ impl ClientBuilder {
             provider,
             keepalive: Self::DEFAULT_KEEPALIVE_MS,
             server_name: server_name.to_string(),
+            retry_opts: None,
         }
     }
 
     pub fn keepalive(mut self, keepalive: u16) -> Self {
         self.keepalive = keepalive;
+        self
+    }
+
+    pub fn retry(mut self, retry_opts: RetryOptions) -> Self {
+        self.retry_opts = Some(retry_opts);
         self
     }
 
@@ -93,6 +106,7 @@ impl ClientBuilder {
             consumer_id: 0,
             producer_id: 0,
             conn_handle,
+            retry_opts: self.retry_opts,
         })
     }
 }
@@ -102,6 +116,7 @@ pub struct Client {
     conn_handle: ConnectionHandle,
     consumer_id: u64,
     producer_id: u64,
+    retry_opts: Option<RetryOptions>,
 }
 
 impl Client {
@@ -119,6 +134,7 @@ impl Client {
             topic,
             access_mode,
             ordered,
+            self.retry_opts.clone(),
             self.conn_handle.clone(),
         )
         .await?)

@@ -4,7 +4,3 @@ pub mod client;
 mod connection;
 pub mod consumer;
 pub mod producer;
-
-use std::time::Duration;
-
-pub(crate) const WAIT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
