@@ -2,7 +2,10 @@ use std::array;
 
 use async_trait::async_trait;
 
-use crate::types::{MessageId, TopicMessage};
+use crate::{
+    codec,
+    types::{MessageId, TopicMessage},
+};
 
 pub mod memory;
 pub mod persist;
@@ -37,6 +40,12 @@ impl From<bonsaidb::local::Error> for Error {
 
 impl From<bonsaidb::core::Error> for Error {
     fn from(_e: bonsaidb::core::Error) -> Self {
+        todo!()
+    }
+}
+
+impl From<codec::Error> for Error {
+    fn from(_e: codec::Error) -> Self {
         todo!()
     }
 }
