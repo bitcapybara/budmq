@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bud_common::{
-    storage::Storage,
+    storage::MetaStorage,
     types::{InitialPostion, MessageId},
 };
 use log::trace;
@@ -31,7 +31,7 @@ pub struct Dispatcher<S> {
     token: CancellationToken,
 }
 
-impl<S: Storage> Dispatcher<S> {
+impl<S: MetaStorage> Dispatcher<S> {
     /// load from storage
     pub async fn new(
         topic_id: u64,

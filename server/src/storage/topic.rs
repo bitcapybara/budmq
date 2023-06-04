@@ -2,7 +2,7 @@ use std::{ops::RangeBounds, sync::atomic::AtomicU64};
 
 use bud_common::{
     codec::Codec,
-    storage::Storage,
+    storage::MetaStorage,
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
 use bytes::{Bytes, BytesMut};
@@ -15,7 +15,7 @@ pub struct TopicStorage<S> {
     counter: AtomicU64,
 }
 
-impl<S: Storage> TopicStorage<S> {
+impl<S: MetaStorage> TopicStorage<S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
     const PRODUCER_SEQUENCE_ID_KEY: &str = "PRODUCER_SEQUENCE_ID";
     const MAX_SUBSCRIPTION_ID_KEY: &str = "MAX_SUBSCRIPTION_ID";

@@ -1,4 +1,4 @@
-use bud_common::storage::Storage;
+use bud_common::storage::MetaStorage;
 use roaring::RoaringTreemap;
 
 use super::Result;
@@ -9,7 +9,7 @@ pub struct CursorStorage<S> {
     storage: S,
 }
 
-impl<S: Storage> CursorStorage<S> {
+impl<S: MetaStorage> CursorStorage<S> {
     const READ_POSITION_KEY: &str = "READ_POSITION";
     const LATEST_MESSAGE_ID_KEY: &str = "LATEST_MESSAGE_ID";
     const ACK_BITS_KEY: &str = "ACK_BITS";

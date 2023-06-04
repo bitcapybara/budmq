@@ -75,7 +75,7 @@ impl MessageId {
     }
 }
 
-#[derive(bud_derive::Codec)]
+#[derive(Debug, Clone, bud_derive::Codec)]
 pub struct TopicMessage {
     /// message id
     pub message_id: MessageId,

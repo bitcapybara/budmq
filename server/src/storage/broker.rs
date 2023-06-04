@@ -1,4 +1,4 @@
-use bud_common::storage::Storage;
+use bud_common::storage::MetaStorage;
 
 use super::Result;
 
@@ -7,7 +7,7 @@ pub struct BrokerStorage<S> {
     storage: S,
 }
 
-impl<S: Storage> BrokerStorage<S> {
+impl<S: MetaStorage> BrokerStorage<S> {
     const MAX_TOPIC_ID_KEY: &str = "MAX_TOPIC_ID";
     const TOPIC_ID_KEY: &str = "TOPIC_ID";
     pub fn new(storage: S) -> Self {

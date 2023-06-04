@@ -7,7 +7,7 @@ use bud_common::{
         self, CloseConsumer, CloseProducer, Connect, CreateProducer, Packet, PacketType,
         ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
-    storage::Storage,
+    storage::MetaStorage,
 };
 use chrono::Utc;
 use futures::future;
@@ -183,7 +183,7 @@ pub struct Broker<S> {
     token: CancellationToken,
 }
 
-impl<S: Storage> Broker<S> {
+impl<S: MetaStorage> Broker<S> {
     pub fn new(storage: S, token: CancellationToken) -> Self {
         Self {
             storage: BrokerStorage::new(storage),

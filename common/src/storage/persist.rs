@@ -7,7 +7,7 @@ use bonsaidb::{
     },
 };
 
-use super::{Result, Storage};
+use super::{MetaStorage, Result};
 
 #[derive(Clone)]
 pub struct PersistStorage {
@@ -15,7 +15,7 @@ pub struct PersistStorage {
 }
 
 #[async_trait]
-impl Storage for PersistStorage {
+impl MetaStorage for PersistStorage {
     async fn create(id: &str) -> Result<Self> {
         let config = StorageConfiguration::new(format!("data/{id}.db"));
         let inner = AsyncDatabase::open::<()>(config).await?;

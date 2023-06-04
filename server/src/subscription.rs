@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use bud_common::{
     protocol::Subscribe,
-    storage::Storage,
+    storage::MetaStorage,
     types::{InitialPostion, MessageId, SubType},
 };
 use tokio::{
@@ -200,7 +200,7 @@ pub struct Subscription<S> {
     notify_tx: mpsc::Sender<()>,
 }
 
-impl<S: Storage> Subscription<S> {
+impl<S: MetaStorage> Subscription<S> {
     /// load from storage
     pub async fn new(
         topic_id: u64,

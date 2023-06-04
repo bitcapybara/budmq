@@ -1,6 +1,6 @@
 use std::{io, net::SocketAddr};
 
-use bud_common::{helper::wait, mtls::MtlsProvider, storage::Storage};
+use bud_common::{helper::wait, mtls::MtlsProvider, storage::MetaStorage};
 use futures::future;
 use log::{error, trace};
 use s2n_quic::{connection, provider, Connection};
@@ -70,7 +70,7 @@ impl Server {
         )
     }
 
-    pub async fn start<S: Storage>(self, storage: S) -> Result<()> {
+    pub async fn start<S: MetaStorage>(self, storage: S) -> Result<()> {
         let token = self.token.child_token();
         // start broker loop
         trace!("server::start: start broker task");

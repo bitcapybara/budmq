@@ -1,4 +1,4 @@
-use bud_common::{storage::Storage, types::InitialPostion};
+use bud_common::{storage::MetaStorage, types::InitialPostion};
 use roaring::RoaringTreemap;
 
 use crate::storage::cursor::CursorStorage;
@@ -23,7 +23,7 @@ pub struct Cursor<S> {
     storage: CursorStorage<S>,
 }
 
-impl<S: Storage> Cursor<S> {
+impl<S: MetaStorage> Cursor<S> {
     pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
         let storage = CursorStorage::new(sub_name, storage)?;
         let latest_message_id = storage.get_latest_cursor_id().await?.unwrap_or_default();

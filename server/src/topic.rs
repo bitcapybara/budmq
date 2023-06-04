@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bud_common::{
     protocol::{Publish, ReturnCode, Subscribe},
-    storage::Storage,
+    storage::MetaStorage,
     types::{AccessMode, InitialPostion, MessageId, TopicMessage},
 };
 use tokio::sync::mpsc;
@@ -146,7 +146,7 @@ pub struct Topic<S> {
     delete_position: u64,
 }
 
-impl<S: Storage> Topic<S> {
+impl<S: MetaStorage> Topic<S> {
     pub async fn new(
         id: u64,
         topic: &str,
