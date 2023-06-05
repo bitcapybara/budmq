@@ -15,6 +15,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     DecodeSlice(array::TryFromSliceError),
+    PersistDb(String),
+    Codec(codec::Error),
 }
 
 impl std::error::Error for Error {}
@@ -23,6 +25,8 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::DecodeSlice(e) => write!(f, "decode from slice error: {e}"),
+            Error::PersistDb(e) => write!(f, "persistent db error: {e}"),
+            Error::Codec(e) => write!(f, "protocol codec error: {e}"),
         }
     }
 }
@@ -33,20 +37,20 @@ impl From<array::TryFromSliceError> for Error {
     }
 }
 impl From<bonsaidb::local::Error> for Error {
-    fn from(_e: bonsaidb::local::Error) -> Self {
-        todo!()
+    fn from(e: bonsaidb::local::Error) -> Self {
+        Self::PersistDb(e.to_string())
     }
 }
 
 impl From<bonsaidb::core::Error> for Error {
-    fn from(_e: bonsaidb::core::Error) -> Self {
-        todo!()
+    fn from(e: bonsaidb::core::Error) -> Self {
+        Self::PersistDb(e.to_string())
     }
 }
 
 impl From<codec::Error> for Error {
-    fn from(_e: codec::Error) -> Self {
-        todo!()
+    fn from(e: codec::Error) -> Self {
+        Self::Codec(e)
     }
 }
 

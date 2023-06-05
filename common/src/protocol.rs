@@ -36,6 +36,7 @@ pub enum Error {
     InsufficientBytes,
     MalformedPacket,
     MalformedString(string::FromUtf8Error),
+    Codec(crate::codec::Error),
     UnsupportedInitPosition,
     UnsupportedSubType,
     UnsupportedReturnCode,
@@ -55,6 +56,7 @@ impl std::fmt::Display for Error {
             Error::UnsupportedSubType => write!(f, "Unsupported subscribe type"),
             Error::UnsupportedReturnCode => write!(f, "Unsupported return code"),
             Error::UnsupportedAccessMode => write!(f, "Unsupported access mode"),
+            Error::Codec(e) => write!(f, "protocol codec error: {e}"),
         }
     }
 }
@@ -72,8 +74,8 @@ impl From<string::FromUtf8Error> for Error {
 }
 
 impl From<crate::codec::Error> for Error {
-    fn from(_: crate::codec::Error) -> Self {
-        todo!()
+    fn from(e: crate::codec::Error) -> Self {
+        Self::Codec(e)
     }
 }
 
