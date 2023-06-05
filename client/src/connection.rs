@@ -35,49 +35,65 @@ pub enum Error {
     Internal(String),
     FromPeer(ReturnCode),
     UnexpectedPacket,
+    CommonIo(bud_common::io::Error),
+    Send(String),
+    Recv(String),
+    Io(io::Error),
+    Quic(String),
 }
 
 impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Disconnect => write!(f, "Disconnected"),
+            Error::Canceled => write!(f, "Canceled"),
+            Error::Internal(e) => write!(f, "Internal error: {e}"),
+            Error::FromPeer(e) => write!(f, "Error from peer: {e}"),
+            Error::UnexpectedPacket => write!(f, "Unexpected packet"),
+            Error::CommonIo(e) => write!(f, "Common mod io error: {e}"),
+            Error::Send(e) => write!(f, "Send error: {e}"),
+            Error::Recv(e) => write!(f, "Recv error: {e}"),
+            Error::Io(e) => write!(f, "I/O error: {e}"),
+            Error::Quic(e) => write!(f, "QUIC error: {e}"),
+        }
     }
 }
 
 impl From<bud_common::io::Error> for Error {
-    fn from(_e: bud_common::io::Error) -> Self {
-        todo!()
+    fn from(e: bud_common::io::Error) -> Self {
+        Self::CommonIo(e)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(_e: mpsc::error::SendError<T>) -> Self {
-        todo!()
+    fn from(e: mpsc::error::SendError<T>) -> Self {
+        Self::Send(e.to_string())
     }
 }
 
 impl From<oneshot::error::RecvError> for Error {
-    fn from(_e: oneshot::error::RecvError) -> Self {
-        todo!()
+    fn from(e: oneshot::error::RecvError) -> Self {
+        Self::Recv(e.to_string())
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(_e: io::Error) -> Self {
-        todo!()
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
     }
 }
 
 impl From<s2n_quic::provider::StartError> for Error {
-    fn from(_e: s2n_quic::provider::StartError) -> Self {
-        todo!()
+    fn from(e: s2n_quic::provider::StartError) -> Self {
+        Self::Quic(e.to_string())
     }
 }
 
 impl From<s2n_quic::connection::Error> for Error {
-    fn from(_e: s2n_quic::connection::Error) -> Self {
-        todo!()
+    fn from(e: s2n_quic::connection::Error) -> Self {
+        Self::Quic(e.to_string())
     }
 }
 

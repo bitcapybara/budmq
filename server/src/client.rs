@@ -40,6 +40,7 @@ pub enum Error {
     Connection(connection::Error),
     Protocol(protocol::Error),
     Timeout,
+    CommonIo(bud_common::io::Error),
 }
 
 impl std::error::Error for Error {}
@@ -60,6 +61,7 @@ impl std::fmt::Display for Error {
             Error::Connection(e) => write!(f, "Connection error: {e}"),
             Error::Protocol(e) => write!(f, "Protocol error: {e}"),
             Error::Timeout => write!(f, "Time out error"),
+            Error::CommonIo(e) => write!(f, "Common mod io error: {e}"),
         }
     }
 }
@@ -95,8 +97,8 @@ impl From<tokio::time::error::Elapsed> for Error {
 }
 
 impl From<bud_common::io::Error> for Error {
-    fn from(_e: bud_common::io::Error) -> Self {
-        todo!()
+    fn from(e: bud_common::io::Error) -> Self {
+        Self::CommonIo(e)
     }
 }
 
