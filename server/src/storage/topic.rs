@@ -66,35 +66,12 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     }
 
     pub async fn add_message(&self, message: &TopicMessage) -> Result<()> {
-        let msg_id = message.message_id;
-        let key = self.key(&format!(
-            "{}-{}-{}",
-            Self::MESSAGE_KEY,
-            msg_id.topic_id,
-            msg_id.cursor_id
-        ));
-        let mut buf = BytesMut::new();
-        message.encode(&mut buf);
-        self.meta_storage.put(&key, &buf).await?;
+        self.message_storage.put_message(message).await?;
         Ok(())
     }
 
     pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
-        let key = self.key(&format!(
-            "{}-{}-{}",
-            Self::MESSAGE_KEY,
-            message_id.topic_id,
-            message_id.cursor_id
-        ));
-        Ok(self
-            .meta_storage
-            .get(&key)
-            .await?
-            .map(|b| {
-                let mut buf = Bytes::copy_from_slice(&b);
-                TopicMessage::decode(&mut buf)
-            })
-            .transpose()?)
+        Ok(self.message_storage.get_message(message_id).await?)
     }
 
     pub async fn delete_range<R>(&self, topic_id: u64, cursor_range: R) -> Result<()>
@@ -102,8 +79,11 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
         R: RangeBounds<u64>,
     {
         for i in get_range(cursor_range)? {
-            self.meta_storage
-                .del(&self.key(&format!("{}-{}-{}", Self::MESSAGE_KEY, topic_id, i)))
+            self.message_storage
+                .del_message(&MessageId {
+                    topic_id,
+                    cursor_id: i,
+                })
                 .await?;
         }
         Ok(())

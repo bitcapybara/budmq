@@ -52,9 +52,6 @@ impl From<codec::Error> for Error {
 
 #[async_trait]
 pub trait MetaStorage: Clone + Send + Sync + 'static {
-    async fn create(id: &str) -> Result<Self>
-    where
-        Self: Sized;
     async fn put(&self, k: &str, v: &[u8]) -> Result<()>;
 
     async fn get(&self, k: &str) -> Result<Option<Vec<u8>>>;
@@ -79,7 +76,7 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
 
 #[async_trait]
 pub trait MessageStorage: Clone + Send + Sync + 'static {
-    async fn put_message(&self, _msg: TopicMessage) -> Result<()>;
-    async fn get_message(&self, _id: &MessageId) -> Result<Option<TopicMessage>>;
-    async fn del_message(&self, _id: &MessageId) -> Result<()>;
+    async fn put_message(&self, msg: &TopicMessage) -> Result<()>;
+    async fn get_message(&self, id: &MessageId) -> Result<Option<TopicMessage>>;
+    async fn del_message(&self, id: &MessageId) -> Result<()>;
 }

@@ -33,10 +33,6 @@ impl Default for MemoryStorage {
 
 #[async_trait]
 impl MetaStorage for MemoryStorage {
-    async fn create(_id: &str) -> Result<Self> {
-        Ok(Self::default())
-    }
-
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         let mut inner = self.metas.write().await;
         inner.insert(k.to_string(), v.to_vec());
@@ -73,7 +69,7 @@ impl MetaStorage for MemoryStorage {
 
 #[async_trait]
 impl MessageStorage for MemoryStorage {
-    async fn put_message(&self, msg: TopicMessage) -> Result<()> {
+    async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
         let MessageId {
             topic_id,
             cursor_id,
@@ -81,11 +77,11 @@ impl MessageStorage for MemoryStorage {
         let mut messages = self.messages.write().await;
         match messages.get_mut(&topic_id) {
             Some(msgs) => {
-                msgs.insert(cursor_id, msg);
+                msgs.insert(cursor_id, msg.clone());
             }
             None => {
                 let mut map = HashMap::new();
-                map.insert(cursor_id, msg);
+                map.insert(cursor_id, msg.clone());
                 messages.insert(topic_id, map);
             }
         }

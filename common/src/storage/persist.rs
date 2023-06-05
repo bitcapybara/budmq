@@ -27,15 +27,6 @@ pub struct PersistStorage {
 
 #[async_trait]
 impl MetaStorage for PersistStorage {
-    async fn create(id: &str) -> Result<Self> {
-        let config = StorageConfiguration::new(format!("data/{id}.db"));
-        let metas = AsyncDatabase::open::<()>(config).await?;
-        Ok(Self {
-            metas,
-            message_dbs: Arc::new(RwLock::new(HashMap::new())),
-        })
-    }
-
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         self.metas.set_binary_key(k, v).await?;
         Ok(())
@@ -81,7 +72,7 @@ impl MetaStorage for PersistStorage {
 
 #[async_trait]
 impl MessageStorage for PersistStorage {
-    async fn put_message(&self, msg: TopicMessage) -> Result<()> {
+    async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
         let MessageId {
             topic_id,
             cursor_id,
