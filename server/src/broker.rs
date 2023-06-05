@@ -7,7 +7,7 @@ use bud_common::{
         self, CloseConsumer, CloseProducer, Connect, CreateProducer, Packet, PacketType,
         ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
-    storage::MetaStorage,
+    storage::{MessageStorage, MetaStorage},
 };
 use chrono::Utc;
 use futures::future;
@@ -170,27 +170,30 @@ impl Session {
 }
 
 #[derive(Clone)]
-pub struct Broker<S> {
-    /// storage
-    storage: BrokerStorage<S>,
+pub struct Broker<M, S> {
+    /// meta storage
+    meta_storage: BrokerStorage<M>,
+    /// topic storage
+    message_storage: S,
     /// request id
     request_id: SerialId,
     /// key = client_id
     clients: Arc<RwLock<HashMap<u64, Session>>>,
     /// key = topic
-    topics: Arc<RwLock<HashMap<String, Topic<S>>>>,
+    topics: Arc<RwLock<HashMap<String, Topic<M, S>>>>,
     /// token
     token: CancellationToken,
 }
 
-impl<S: MetaStorage> Broker<S> {
-    pub fn new(storage: S, token: CancellationToken) -> Self {
+impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
+    pub fn new(meta_storage: M, message_storage: S, token: CancellationToken) -> Self {
         Self {
-            storage: BrokerStorage::new(storage),
+            meta_storage: BrokerStorage::new(meta_storage),
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
             request_id: SerialId::new(),
+            message_storage,
         }
     }
 
@@ -475,11 +478,16 @@ impl<S: MetaStorage> Broker<S> {
                             .await?
                     }
                     None => {
-                        let topic_id = self.storage.get_or_create_topic_id(&topic_name).await?;
+                        let topic_id = self
+                            .meta_storage
+                            .get_or_create_topic_id(&topic_name)
+                            .await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &topic_name,
                             send_tx.clone(),
+                            self.meta_storage.inner(),
+                            self.message_storage.clone(),
                             self.token.child_token(),
                         )
                         .await?;
@@ -527,11 +535,13 @@ impl<S: MetaStorage> Broker<S> {
                     },
                     None => {
                         trace!("broker::process_packets: create new topic");
-                        let topic_id = self.storage.get_or_create_topic_id(&sub.topic).await?;
+                        let topic_id = self.meta_storage.get_or_create_topic_id(&sub.topic).await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &sub.topic,
                             send_tx.clone(),
+                            self.meta_storage.inner(),
+                            self.message_storage.clone(),
                             self.token.child_token(),
                         )
                         .await?;

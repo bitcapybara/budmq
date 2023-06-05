@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bud_common::{
     protocol::{Publish, ReturnCode, Subscribe},
-    storage::MetaStorage,
+    storage::{MessageStorage, MetaStorage},
     types::{AccessMode, InitialPostion, MessageId, TopicMessage},
 };
 use tokio::sync::mpsc;
@@ -131,30 +131,31 @@ impl TopicProducers {
 
 /// Save all messages associated with this topic in subscription
 /// Save subscription associated with this topic in memory
-pub struct Topic<S> {
+pub struct Topic<M, S> {
     /// topic id
     pub id: u64,
     /// topic name
     pub name: String,
     /// key = sub_name
-    subscriptions: HashMap<String, Subscription<S>>,
+    subscriptions: HashMap<String, Subscription<M>>,
     /// producer
     producers: TopicProducers,
     /// message storage
-    storage: TopicStorage<S>,
+    storage: TopicStorage<M, S>,
     /// delete position
     delete_position: u64,
 }
 
-impl<S: MetaStorage> Topic<S> {
+impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
     pub async fn new(
         id: u64,
         topic: &str,
         send_tx: mpsc::Sender<SendEvent>,
+        meta_storage: M,
+        message_storage: S,
         token: CancellationToken,
     ) -> Result<Self> {
-        let base_storage = S::create(topic).await?;
-        let storage = TopicStorage::new(topic, base_storage.clone())?;
+        let storage = TopicStorage::new(topic, meta_storage.clone(), message_storage)?;
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = if loaded_subscriptions.is_empty() {
@@ -169,7 +170,7 @@ impl<S: MetaStorage> Topic<S> {
                 &sub.topic,
                 &sub.name,
                 send_tx.clone(),
-                base_storage.clone(),
+                meta_storage.clone(),
                 sub.init_position,
                 token.child_token(),
             )
@@ -216,11 +217,11 @@ impl<S: MetaStorage> Topic<S> {
         Ok(())
     }
 
-    pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription<S>> {
+    pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription<M>> {
         self.subscriptions.remove(sub_name)
     }
 
-    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<S>> {
+    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<M>> {
         self.subscriptions.get(sub_name)
     }
 

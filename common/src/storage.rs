@@ -78,7 +78,7 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
 }
 
 #[async_trait]
-pub trait MessageStorage: Send + Sync + 'static {
+pub trait MessageStorage: Clone + Send + Sync + 'static {
     async fn put_message(&self, _msg: TopicMessage) -> Result<()>;
     async fn get_message(&self, _id: &MessageId) -> Result<Option<TopicMessage>>;
     async fn del_message(&self, _id: &MessageId) -> Result<()>;

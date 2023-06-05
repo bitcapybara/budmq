@@ -1,6 +1,10 @@
 use std::{io, net::SocketAddr};
 
-use bud_common::{helper::wait, mtls::MtlsProvider, storage::MetaStorage};
+use bud_common::{
+    helper::wait,
+    mtls::MtlsProvider,
+    storage::{MessageStorage, MetaStorage},
+};
 use futures::future;
 use log::{error, trace};
 use s2n_quic::{connection, provider, Connection};
@@ -70,12 +74,16 @@ impl Server {
         )
     }
 
-    pub async fn start<S: MetaStorage>(self, storage: S) -> Result<()> {
+    pub async fn start<M: MetaStorage, S: MessageStorage>(
+        self,
+        meta_storage: M,
+        message_storage: S,
+    ) -> Result<()> {
         let token = self.token.child_token();
         // start broker loop
         trace!("server::start: start broker task");
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new(storage, token.clone()).run(broker_rx);
+        let broker_task = Broker::new(meta_storage, message_storage, token.clone()).run(broker_rx);
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop

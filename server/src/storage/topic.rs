@@ -2,20 +2,21 @@ use std::{ops::RangeBounds, sync::atomic::AtomicU64};
 
 use bud_common::{
     codec::Codec,
-    storage::MetaStorage,
+    storage::{MessageStorage, MetaStorage},
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
 use bytes::{Bytes, BytesMut};
 
 use super::{get_range, Result};
 
-pub struct TopicStorage<S> {
+pub struct TopicStorage<M, S> {
     topic_name: String,
-    storage: S,
+    meta_storage: M,
+    message_storage: S,
     counter: AtomicU64,
 }
 
-impl<S: MetaStorage> TopicStorage<S> {
+impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
     const PRODUCER_SEQUENCE_ID_KEY: &str = "PRODUCER_SEQUENCE_ID";
     const MAX_SUBSCRIPTION_ID_KEY: &str = "MAX_SUBSCRIPTION_ID";
@@ -23,38 +24,39 @@ impl<S: MetaStorage> TopicStorage<S> {
     const LATEST_CURSOR_ID_KEY: &str = "LATEST_CURSOR_ID";
     const MESSAGE_KEY: &str = "MESSAGE";
 
-    pub fn new(topic_name: &str, storage: S) -> Result<Self> {
+    pub fn new(topic_name: &str, meta_storage: M, message_storage: S) -> Result<Self> {
         Ok(Self {
             topic_name: topic_name.to_string(),
-            storage,
+            meta_storage,
             counter: AtomicU64::new(1),
+            message_storage,
         })
     }
 
-    pub fn inner(&self) -> S {
-        self.storage.clone()
+    pub fn inner(&self) -> M {
+        self.meta_storage.clone()
     }
 
     pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
         let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let id = self.storage.inc_u64(&id_key, 1).await?;
+        let id = self.meta_storage.inc_u64(&id_key, 1).await?;
         let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, id));
         let mut buf = BytesMut::new();
         sub.encode(&mut buf);
-        self.storage.put(&id_key, &buf).await?;
+        self.meta_storage.put(&id_key, &buf).await?;
         Ok(())
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
         let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let Some(max_id)= self.storage.get_u64(&id_key).await? else {
+        let Some(max_id)= self.meta_storage.get_u64(&id_key).await? else {
             return Ok(vec![]);
         };
 
         let mut subs = Vec::with_capacity(max_id as usize + 1);
         for i in 0..=max_id {
             let key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, i));
-            let Some(sub) = self.storage.get(&key).await? else {
+            let Some(sub) = self.meta_storage.get(&key).await? else {
                 continue;
             };
             let mut buf = Bytes::copy_from_slice(&sub);
@@ -73,7 +75,7 @@ impl<S: MetaStorage> TopicStorage<S> {
         ));
         let mut buf = BytesMut::new();
         message.encode(&mut buf);
-        self.storage.put(&key, &buf).await?;
+        self.meta_storage.put(&key, &buf).await?;
         Ok(())
     }
 
@@ -85,7 +87,7 @@ impl<S: MetaStorage> TopicStorage<S> {
             message_id.cursor_id
         ));
         Ok(self
-            .storage
+            .meta_storage
             .get(&key)
             .await?
             .map(|b| {
@@ -100,7 +102,7 @@ impl<S: MetaStorage> TopicStorage<S> {
         R: RangeBounds<u64>,
     {
         for i in get_range(cursor_range)? {
-            self.storage
+            self.meta_storage
                 .del(&self.key(&format!("{}-{}-{}", Self::MESSAGE_KEY, topic_id, i)))
                 .await?;
         }
@@ -110,18 +112,18 @@ impl<S: MetaStorage> TopicStorage<S> {
     pub async fn get_sequence_id(&self, producer_name: &str) -> Result<Option<u64>> {
         let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
         let key = self.key(&key);
-        Ok(self.storage.get_u64(&key).await?)
+        Ok(self.meta_storage.get_u64(&key).await?)
     }
 
     pub async fn set_sequence_id(&self, producer_name: &str, seq_id: u64) -> Result<()> {
         let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
         let key = self.key(&key);
-        Ok(self.storage.set_u64(&key, seq_id).await?)
+        Ok(self.meta_storage.set_u64(&key, seq_id).await?)
     }
 
     pub async fn get_new_cursor_id(&self) -> Result<u64> {
         let key = self.key(Self::LATEST_CURSOR_ID_KEY);
-        Ok(self.storage.inc_u64(&key, 1).await?)
+        Ok(self.meta_storage.inc_u64(&key, 1).await?)
     }
 
     fn key(&self, s: &str) -> String {

@@ -190,24 +190,24 @@ impl From<Consumer> for Consumers {
 
 /// save cursor in persistent
 /// save consumers in memory
-pub struct Subscription<S> {
+pub struct Subscription<M> {
     pub topic_id: u64,
     pub topic: String,
     pub name: String,
-    dispatcher: Dispatcher<S>,
+    dispatcher: Dispatcher<M>,
     handle: JoinHandle<Result<()>>,
     token: CancellationToken,
     notify_tx: mpsc::Sender<()>,
 }
 
-impl<S: MetaStorage> Subscription<S> {
+impl<M: MetaStorage> Subscription<M> {
     /// load from storage
     pub async fn new(
         topic_id: u64,
         topic: &str,
         sub_name: &str,
         send_tx: mpsc::Sender<SendEvent>,
-        storage: S,
+        storage: M,
         init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {
@@ -240,7 +240,7 @@ impl<S: MetaStorage> Subscription<S> {
         consumer_id: u64,
         sub: &Subscribe,
         send_tx: mpsc::Sender<SendEvent>,
-        storage: S,
+        storage: M,
         init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {

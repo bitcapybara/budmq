@@ -3,15 +3,19 @@ use bud_common::storage::MetaStorage;
 use super::Result;
 
 #[derive(Clone)]
-pub struct BrokerStorage<S> {
-    storage: S,
+pub struct BrokerStorage<M> {
+    storage: M,
 }
 
-impl<S: MetaStorage> BrokerStorage<S> {
+impl<M: MetaStorage> BrokerStorage<M> {
     const MAX_TOPIC_ID_KEY: &str = "MAX_TOPIC_ID";
     const TOPIC_ID_KEY: &str = "TOPIC_ID";
-    pub fn new(storage: S) -> Self {
+    pub fn new(storage: M) -> Self {
         Self { storage }
+    }
+
+    pub fn inner(&self) -> M {
+        self.storage.clone()
     }
 
     pub async fn get_or_create_topic_id(&self, topic_name: &str) -> Result<u64> {
