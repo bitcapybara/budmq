@@ -12,6 +12,7 @@ s2n-quic.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 chrono.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

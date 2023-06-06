@@ -386,6 +386,7 @@ dependencies = [
  "futures",
  "log",
  "s2n-quic",
+ "thiserror",
  "tokio",
  "tokio-util",
 ]
@@ -405,6 +406,7 @@ dependencies = [
  "parking_lot",
  "rustls-pemfile",
  "s2n-quic",
+ "thiserror",
  "tokio",
  "tokio-util",
 ]
@@ -435,6 +437,7 @@ dependencies = [
  "s2n-quic",
  "signal-hook",
  "signal-hook-tokio",
+ "thiserror",
  "tokio",
  "tokio-util",
 ]
