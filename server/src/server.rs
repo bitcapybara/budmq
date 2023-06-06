@@ -18,40 +18,19 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Io(io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("QUIC start up error: {0}")]
     StartUp(String),
-    Connection(connection::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Io(e) => write!(f, "I/O error: {e}"),
-            Error::StartUp(e) => write!(f, "Start up error: {e}"),
-            Error::Connection(e) => write!(f, "Connection error: {e}"),
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
+    #[error("QUIC connection error: {0}")]
+    Connection(#[from] connection::Error),
 }
 
 impl From<provider::StartError> for Error {
     fn from(e: provider::StartError) -> Self {
         Self::StartUp(e.to_string())
-    }
-}
-
-impl From<connection::Error> for Error {
-    fn from(e: connection::Error) -> Self {
-        Self::Connection(e)
     }
 }
 

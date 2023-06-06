@@ -12,59 +12,20 @@ use bud_common::{codec, storage};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Invalid range")]
     InvalidRange,
-    Io(io::Error),
-    DecodeSlice(array::TryFromSliceError),
-    DecodeString(string::FromUtf8Error),
-    Storage(storage::Error),
-    Codec(codec::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::InvalidRange => write!(f, "invalid range"),
-            Error::Io(e) => write!(f, "io error: {e}"),
-            Error::DecodeSlice(e) => write!(f, "decode slice error: {e}"),
-            Error::DecodeString(e) => write!(f, "decode string error: {e}"),
-            Error::Storage(e) => write!(f, "storage error: {e}"),
-            Error::Codec(e) => write!(f, "decode error: {e}"),
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<storage::Error> for Error {
-    fn from(e: storage::Error) -> Self {
-        Self::Storage(e)
-    }
-}
-
-impl From<array::TryFromSliceError> for Error {
-    fn from(e: array::TryFromSliceError) -> Self {
-        Self::DecodeSlice(e)
-    }
-}
-
-impl From<string::FromUtf8Error> for Error {
-    fn from(e: string::FromUtf8Error) -> Self {
-        Self::DecodeString(e)
-    }
-}
-
-impl From<codec::Error> for Error {
-    fn from(e: codec::Error) -> Self {
-        Self::Codec(e)
-    }
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Decode slice error: {0}")]
+    DecodeSlice(#[from] array::TryFromSliceError),
+    #[error("Decode string error: {0}")]
+    DecodeString(#[from] string::FromUtf8Error),
+    #[error("Storage error: {0}")]
+    Storage(#[from] storage::Error),
+    #[error("Protocol Codec error: {0}")]
+    Codec(#[from] codec::Error),
 }
 
 fn get_range<R>(range: R) -> Result<RangeInclusive<u64>>

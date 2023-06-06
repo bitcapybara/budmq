@@ -15,23 +15,14 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Response code: {0}")]
     Response(ReturnCode),
+    #[error("Storage error: {0}")]
     Storage(storage::Error),
-    Subscription(subscription::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Storage(e) => write!(f, "Storage error: {e}"),
-            Error::Subscription(e) => write!(f, "Subscription error: {e}"),
-            Error::Response(code) => write!(f, "{code}"),
-        }
-    }
+    #[error("Subscription error: {0}")]
+    Subscription(#[from] subscription::Error),
 }
 
 impl From<storage::Error> for Error {
@@ -43,12 +34,6 @@ impl From<storage::Error> for Error {
 impl From<bud_common::storage::Error> for Error {
     fn from(e: bud_common::storage::Error) -> Self {
         Self::Storage(e.into())
-    }
-}
-
-impl From<subscription::Error> for Error {
-    fn from(e: subscription::Error) -> Self {
-        Self::Subscription(e)
     }
 }
 

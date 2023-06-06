@@ -3,21 +3,12 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Insufficient bytes")]
     InsufficientBytes,
+    #[error("Malformed packet")]
     Malformed,
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::InsufficientBytes => write!(f, "InsufficientBytes"),
-            Error::Malformed => write!(f, "Malformed Packet"),
-        }
-    }
 }
 
 pub trait Codec {

@@ -13,37 +13,16 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Receive server error: {0}")]
     FromServer(ReturnCode),
+    #[error("internal error: {0}")]
     Internal(String),
-    Producer(producer::Error),
-    Consumer(consumer::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::FromServer(e) => write!(f, "receive server error: {e}"),
-            Error::Internal(e) => write!(f, "internal error: {e}"),
-            Error::Consumer(e) => write!(f, "consumer error: {e}"),
-            Error::Producer(e) => write!(f, "producer error: {e}"),
-        }
-    }
-}
-
-impl From<producer::Error> for Error {
-    fn from(e: producer::Error) -> Self {
-        Self::Producer(e)
-    }
-}
-
-impl From<consumer::Error> for Error {
-    fn from(e: consumer::Error) -> Self {
-        Self::Consumer(e)
-    }
+    #[error("consumer error: {0}")]
+    Producer(#[from] producer::Error),
+    #[error("producer error: {0}")]
+    Consumer(#[from] consumer::Error),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {

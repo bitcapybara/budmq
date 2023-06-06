@@ -25,57 +25,36 @@ const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("")]
     HandshakeTimeout,
+    #[error("Miss Connect packet")]
     MissConnectPacket,
+    #[error("Unexpected packet")]
     UnexpectedPacket,
+    #[error("Client has disconnected")]
     ClientDisconnect,
+    #[error("Client idle time out")]
     ClientIdleTimeout,
+    #[error("Send on dropped channel")]
     SendOnDroppedChannel,
+    #[error("Wait reply on dropped channel")]
     WaitOnDroppedChannel,
+    #[error("Server ReturnCode: {0}")]
     Server(ReturnCode),
+    #[error("Client ReturnCode: {0}")]
     Client(ReturnCode),
+    #[error("Stream closed")]
     StreamClosed,
-    Connection(connection::Error),
-    Protocol(protocol::Error),
+    #[error("Connection error: {0}")]
+    Connection(#[from] connection::Error),
+    #[error("Protocol error: {0}")]
+    Protocol(#[from] protocol::Error),
+    #[error("Time out error")]
     Timeout,
-    CommonIo(bud_common::io::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::HandshakeTimeout => write!(f, "Handshake time out"),
-            Error::MissConnectPacket => write!(f, "Miss Connect packet"),
-            Error::UnexpectedPacket => write!(f, "Unexpected packet"),
-            Error::ClientDisconnect => write!(f, "Client has disconnected"),
-            Error::ClientIdleTimeout => write!(f, "Client idle time out"),
-            Error::SendOnDroppedChannel => write!(f, "Send on dropped channel"),
-            Error::WaitOnDroppedChannel => write!(f, "Wait reply on dropped channel"),
-            Error::Server(c) => write!(f, "Server ReturnCode: {c}"),
-            Error::Client(c) => write!(f, "Client ReturnCode: {c}"),
-            Error::StreamClosed => write!(f, "Stream closed"),
-            Error::Connection(e) => write!(f, "Connection error: {e}"),
-            Error::Protocol(e) => write!(f, "Protocol error: {e}"),
-            Error::Timeout => write!(f, "Time out error"),
-            Error::CommonIo(e) => write!(f, "Common mod io error: {e}"),
-        }
-    }
-}
-
-impl From<connection::Error> for Error {
-    fn from(e: connection::Error) -> Self {
-        Self::Connection(e)
-    }
-}
-
-impl From<protocol::Error> for Error {
-    fn from(e: protocol::Error) -> Self {
-        Self::Protocol(e)
-    }
+    #[error("Common mod io error: {0}")]
+    CommonIo(#[from] bud_common::io::Error),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
@@ -93,12 +72,6 @@ impl From<oneshot::error::RecvError> for Error {
 impl From<tokio::time::error::Elapsed> for Error {
     fn from(_: tokio::time::error::Elapsed) -> Self {
         Self::Timeout
-    }
-}
-
-impl From<bud_common::io::Error> for Error {
-    fn from(e: bud_common::io::Error) -> Self {
-        Self::CommonIo(e)
     }
 }
 

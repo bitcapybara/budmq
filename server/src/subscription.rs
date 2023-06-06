@@ -23,27 +23,18 @@ use self::dispatcher::Dispatcher;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Subscribe on exclusive subscription")]
     SubscribeOnExclusive,
+    #[error("Unexpected subscription type")]
     SubTypeUnexpected,
+    #[error("Wait reply on dropped channel")]
     ReplyChannelClosed,
+    #[error("Send on dropped channel")]
     SendOnDroppedChannel,
-    Storage(storage::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::SubscribeOnExclusive => write!(f, "Subscribe on exclusive subscription"),
-            Error::SubTypeUnexpected => write!(f, "Unexpected subscription type"),
-            Error::ReplyChannelClosed => write!(f, "Wait reply on dropped channel"),
-            Error::SendOnDroppedChannel => write!(f, "Send on dropped channel"),
-            Error::Storage(e) => write!(f, "Storage error: {e}"),
-        }
-    }
+    #[error("Storage error: {0}")]
+    Storage(#[from] storage::Error),
 }
 
 impl From<oneshot::error::RecvError> for Error {
@@ -61,12 +52,6 @@ impl<T> From<mpsc::error::TrySendError<T>> for Error {
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(_: mpsc::error::SendError<T>) -> Self {
         Self::SendOnDroppedChannel
-    }
-}
-
-impl From<storage::Error> for Error {
-    fn from(e: storage::Error) -> Self {
-        Self::Storage(e)
     }
 }
 

@@ -30,61 +30,34 @@ const MAX_TOPIC_ID: u64 = 1024;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Reply channel closed")]
     ReplyChannelClosed,
+    #[error("Send on dropped channel")]
     SendOnDroppedChannel,
+    #[error("Consumer duplicate subscribe")]
     ConsumerDuplicateSubscribed,
+    #[error("Producer duplicated")]
     ProducerDuplicated,
+    #[error("Received ReturnCode: {0}")]
     ReturnCode(ReturnCode),
-    Subscription(subscription::Error),
-    Topic(topic::Error),
-    BrokerStorage(storage::Error),
+    #[error("Subscription error: {0}")]
+    Subscription(#[from] subscription::Error),
+    #[error("Topic error: {0}")]
+    Topic(#[from] topic::Error),
+    #[error("Broker storage error: {0}")]
+    BrokerStorage(#[from] storage::Error),
+    #[error("Unsupported packet: {0}")]
     UnsupportedPacket(PacketType),
     /// do not throw
+    #[error("Internal error: {0}")]
     Internal(String),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::ReplyChannelClosed => write!(f, "Reply channel closed"),
-            Error::SendOnDroppedChannel => write!(f, "Send on drrpped channel"),
-            Error::ConsumerDuplicateSubscribed => write!(f, "Consumer duplicate subscribe"),
-            Error::ReturnCode(c) => write!(f, "Receive ReturnCode {c}"),
-            Error::Subscription(e) => write!(f, "Subscription error: {e}"),
-            Error::Topic(e) => write!(f, "Topic error: {e}"),
-            Error::Internal(s) => write!(f, "Internal error: {s}"),
-            Error::UnsupportedPacket(t) => write!(f, "Unsupported packet type: {t:?}"),
-            Error::ProducerDuplicated => write!(f, "Producer duplicated"),
-            Error::BrokerStorage(e) => write!(f, "broker storage error: {e}"),
-        }
-    }
-}
-
-impl From<subscription::Error> for Error {
-    fn from(e: subscription::Error) -> Self {
-        Self::Subscription(e)
-    }
-}
-
-impl From<topic::Error> for Error {
-    fn from(e: topic::Error) -> Self {
-        Self::Topic(e)
-    }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
     fn from(_: mpsc::error::SendError<T>) -> Self {
         Self::SendOnDroppedChannel
-    }
-}
-
-impl From<storage::Error> for Error {
-    fn from(e: storage::Error) -> Self {
-        Self::BrokerStorage(e)
     }
 }
 

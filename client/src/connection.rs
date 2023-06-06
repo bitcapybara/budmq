@@ -28,43 +28,28 @@ use self::{reader::Reader, writer::Writer};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Disconnected")]
     Disconnect,
+    #[error("Canceled")]
     Canceled,
+    #[error("Internal error: {0}")]
     Internal(String),
+    #[error("Error from peer: {0}")]
     FromPeer(ReturnCode),
+    #[error("Unexpected packet")]
     UnexpectedPacket,
-    CommonIo(bud_common::io::Error),
+    #[error("Common mod io error: {0}")]
+    CommonIo(#[from] bud_common::io::Error),
+    #[error("Send error: {0}")]
     Send(String),
+    #[error("Recv error: {0}")]
     Recv(String),
-    Io(io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("QUIC error: {0}")]
     Quic(String),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Disconnect => write!(f, "Disconnected"),
-            Error::Canceled => write!(f, "Canceled"),
-            Error::Internal(e) => write!(f, "Internal error: {e}"),
-            Error::FromPeer(e) => write!(f, "Error from peer: {e}"),
-            Error::UnexpectedPacket => write!(f, "Unexpected packet"),
-            Error::CommonIo(e) => write!(f, "Common mod io error: {e}"),
-            Error::Send(e) => write!(f, "Send error: {e}"),
-            Error::Recv(e) => write!(f, "Recv error: {e}"),
-            Error::Io(e) => write!(f, "I/O error: {e}"),
-            Error::Quic(e) => write!(f, "QUIC error: {e}"),
-        }
-    }
-}
-
-impl From<bud_common::io::Error> for Error {
-    fn from(e: bud_common::io::Error) -> Self {
-        Self::CommonIo(e)
-    }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
@@ -76,12 +61,6 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
 impl From<oneshot::error::RecvError> for Error {
     fn from(e: oneshot::error::RecvError) -> Self {
         Self::Recv(e.to_string())
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
     }
 }
 

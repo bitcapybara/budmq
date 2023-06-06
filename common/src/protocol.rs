@@ -30,53 +30,26 @@ pub use self::{
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Io(io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Insufficient bytes")]
     InsufficientBytes,
+    #[error("Malformed packet")]
     MalformedPacket,
-    MalformedString(string::FromUtf8Error),
-    Codec(crate::codec::Error),
+    #[error("Malformed string: {0}")]
+    MalformedString(#[from] string::FromUtf8Error),
+    #[error("Protocol codec error: {0}")]
+    Codec(#[from] crate::codec::Error),
+    #[error("Unsupported initial postion")]
     UnsupportedInitPosition,
+    #[error("Unsupported subType")]
     UnsupportedSubType,
+    #[error("Unsupported ReturnCode")]
     UnsupportedReturnCode,
+    #[error("Unsupported producer AccessMode")]
     UnsupportedAccessMode,
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Io(e) => write!(f, "I/O error: {e}"),
-            Error::InsufficientBytes => write!(f, "Insufficient bytes"),
-            Error::MalformedPacket => write!(f, "Malformed packet"),
-            Error::MalformedString(e) => write!(f, "Malformed string: {e}"),
-            Error::UnsupportedInitPosition => write!(f, "Unsupported initial postion"),
-            Error::UnsupportedSubType => write!(f, "Unsupported subscribe type"),
-            Error::UnsupportedReturnCode => write!(f, "Unsupported return code"),
-            Error::UnsupportedAccessMode => write!(f, "Unsupported access mode"),
-            Error::Codec(e) => write!(f, "protocol codec error: {e}"),
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<string::FromUtf8Error> for Error {
-    fn from(e: string::FromUtf8Error) -> Self {
-        Self::MalformedString(e)
-    }
-}
-
-impl From<crate::codec::Error> for Error {
-    fn from(e: crate::codec::Error) -> Self {
-        Self::Codec(e)
-    }
 }
 
 pub struct PacketCodec;

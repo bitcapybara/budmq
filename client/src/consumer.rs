@@ -23,23 +23,14 @@ pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Receive from server: {0}")]
     FromServer(ReturnCode),
+    #[error("Internal error: {0}")]
     Internal(String),
+    #[error("Connection error: {0}")]
     Connection(connection::Error),
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::FromServer(code) => write!(f, "receive from server: {code}"),
-            Error::Internal(e) => write!(f, "internal error: {e}"),
-            Error::Connection(e) => write!(f, "connection error: {e}"),
-        }
-    }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
