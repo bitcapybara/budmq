@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use s2n_quic::connection;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex};
 
 use crate::protocol::{self, ReturnCode};
 
@@ -17,8 +17,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("Error from Peer: {0}")]
     FromPeer(ReturnCode),
-    #[error("Message send error: {0}")]
-    Send(String),
     #[error("Res tx dropped without send: {0}")]
     ResDropped(#[from] oneshot::error::RecvError),
     #[error("Wait fro message error")]
@@ -31,12 +29,6 @@ pub enum Error {
     StreamDisconnect,
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::Error),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        Self::Send(e.to_string())
-    }
 }
 
 #[derive(Clone)]

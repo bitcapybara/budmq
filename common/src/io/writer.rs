@@ -10,7 +10,13 @@
 //! 4. wait for response (not for PING/DISCONNECT packet)
 //! 5. send response to this stream
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use futures::{SinkExt, StreamExt};
 use log::error;
@@ -104,7 +110,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                     match res_tx {
                         Some(res_tx) =>  {
                             if let Err(e) = pooled.framed.send(packet).await {
-                                pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
+                                pooled.set_error().await;
                                 res_tx.send(Err(e.into())).ok();
                                 continue;
                             }
@@ -112,7 +118,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                         }
                         _ => {
                             if let Err(e) = pooled.framed.send(packet).await {
-                                pooled.set_error(Error::Send(format!("send packet error: {e}"))).await;
+                                pooled.set_error().await;
                                 error!("io::writer send packet error: {e}");
                             }
                         }
@@ -132,7 +138,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                 let stream = self.handle.open_bidirectional_stream().await?;
                 let (recv_stream, send_stream) = stream.split();
                 let framed = FramedWrite::new(send_stream, PacketCodec);
-                let error = SharedError::new();
+                let error = Arc::new(AtomicBool::new(false));
                 // TODO back pressure for max inflight requests
                 let (res_sender, res_receiver) = mpsc::channel(100);
                 tokio::spawn(start_recv(
@@ -155,7 +161,7 @@ impl<T: PoolRecycle> StreamPool<T> {
 async fn start_recv(
     mut res_receiver: mpsc::Receiver<oneshot::Sender<Result<Packet>>>,
     mut framed: FramedRead<ReceiveStream, PacketCodec>,
-    error: SharedError,
+    error: Arc<AtomicBool>,
     token: CancellationToken,
 ) {
     loop {
@@ -169,11 +175,11 @@ async fn start_recv(
                         res_tx.send(Ok(resp)).ok();
                     }
                     Some(Err(e)) => {
-                        error.set(Error::StreamDisconnect).await;
+                        error.store(true, Ordering::Release);
                         res_tx.send(Err(e.into())).ok();
                     }
                     None => {
-                        error.set(Error::StreamDisconnect).await;
+                        error.store(true, Ordering::Release);
                         res_tx.send(Err(Error::StreamDisconnect)).ok();
                     }
                 }
@@ -189,14 +195,14 @@ async fn start_recv(
 pub struct IdleStream {
     res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
     framed: FramedWrite<SendStream, PacketCodec>,
-    error: SharedError,
+    error: Arc<AtomicBool>,
 }
 
 impl IdleStream {
     fn new(
         res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
         framed: FramedWrite<SendStream, PacketCodec>,
-        error: SharedError,
+        error: Arc<AtomicBool>,
     ) -> Self {
         Self {
             framed,
@@ -217,7 +223,7 @@ impl<T: PoolRecycle> PooledStream<T> {
         pool: T,
         res_sender: mpsc::Sender<oneshot::Sender<Result<Packet>>>,
         framed: FramedWrite<SendStream, PacketCodec>,
-        error: SharedError,
+        error: Arc<AtomicBool>,
     ) -> Self {
         Self::new_idle(pool, IdleStream::new(res_sender, framed, error))
     }
@@ -229,11 +235,11 @@ impl<T: PoolRecycle> PooledStream<T> {
         }
     }
 
-    async fn set_error(&mut self, error: Error) {
+    async fn set_error(&mut self) {
         let Some(stream) = &mut self.stream else {
             return
         };
-        stream.error.set(error).await;
+        stream.error.store(true, Ordering::Release);
     }
 }
 

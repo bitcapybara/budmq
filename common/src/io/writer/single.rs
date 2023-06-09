@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use futures::SinkExt;
 use parking_lot::Mutex;
@@ -26,7 +26,7 @@ impl PoolRecycle for SingleInner {
 
     fn put(&self, mut idle_stream: IdleStream) {
         let mut stream = self.stream.lock();
-        if idle_stream.error.is_set() {
+        if idle_stream.error.load(Ordering::Relaxed) {
             tokio::spawn(async move {
                 idle_stream.framed.close().await.ok();
             });

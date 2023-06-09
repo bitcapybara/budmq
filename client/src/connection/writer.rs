@@ -62,8 +62,8 @@ impl Writer {
                                 trace!("connector::writer: receive none, exit");
                                 return;
                             };
-                            if let Err(e) = self.sender.send(msg).await {
-                                self.error.set(e.into()).await;
+                            if self.sender.send(msg).await.is_err() {
+                                self.error.set(Error::ConnectionClosed).await;
                                 return
                             }
                         }
