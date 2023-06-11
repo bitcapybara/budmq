@@ -53,11 +53,11 @@ impl Reader {
                     let stream = match res {
                         Ok(Some(stream)) => stream,
                         Ok(None) => {
-                            self.error.set(Error::ConnectionClosed).await;
+                            self.error.set(Error::ConnectionDisconnect).await;
                             return
                         }
                         Err(e) => {
-                            self.error.set(Error::Connection(e)).await;
+                            self.error.set(Error::ConnectionDisconnect).await;
                             error!("no stream could be accepted due to an error: {e}");
                             return
                         }

@@ -51,7 +51,7 @@ impl Writer {
             select! {
                 res = self.client_rx.recv() => {
                     let Some(message) = res else {
-                        self.error.set(Error::ConnectionClosed).await;
+                        self.error.set(Error::ConnectionDisconnect).await;
                         return
                     };
                     trace!("client:writer: receive a new packet task, open stream");
@@ -85,7 +85,7 @@ impl Writer {
             select! {
                 res = sender.send(Request { packet , res_tx: Some(res_tx)}) => {
                     if let Err(_e) = res {
-                        error.set(Error::ConnectionClosed).await;
+                        error.set(Error::ConnectionDisconnect).await;
                     }
                 }
                 _ = token.cancelled() => {}

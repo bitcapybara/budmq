@@ -95,18 +95,20 @@ impl<T: PoolRecycle> StreamPool<T> {
         loop {
             select! {
                 res = self.request_rx.recv() => {
-                    let Some(request) = res else {
+                    let Some(Request { packet, res_tx }) = res else {
                         return
                     };
                     // framed will recycled after send packet
                     let mut pooled = match self.create().await {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            self.error.set(e).await;
+                        Some(stream) => stream,
+                        None => {
+                            self.error.set(Error::ConnectionDisconnect).await;
+                            if let Some(res_tx) = res_tx {
+                                res_tx.send(Err(Error::ConnectionDisconnect)).ok();
+                            }
                             return
                         }
                     };
-                    let Request { packet, res_tx } = request;
                     match res_tx {
                         Some(res_tx) =>  {
                             if let Err(e) = pooled.framed.send(packet).await {
@@ -131,11 +133,17 @@ impl<T: PoolRecycle> StreamPool<T> {
         }
     }
 
-    async fn create(&mut self) -> Result<PooledStream<T>> {
+    async fn create(&mut self) -> Option<PooledStream<T>> {
         match self.inner.get() {
-            Some(stream) => Ok(PooledStream::new_idle(self.inner.clone(), stream)),
+            Some(stream) => Some(PooledStream::new_idle(self.inner.clone(), stream)),
             None => {
-                let stream = self.handle.open_bidirectional_stream().await?;
+                let stream = match self.handle.open_bidirectional_stream().await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Open QUIC stream error: {e}");
+                        return None;
+                    }
+                };
                 let (recv_stream, send_stream) = stream.split();
                 let framed = FramedWrite::new(send_stream, PacketCodec);
                 let error = Arc::new(AtomicBool::new(false));
@@ -147,7 +155,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                     error.clone(),
                     self.token.child_token(),
                 ));
-                Ok(PooledStream::new(
+                Some(PooledStream::new(
                     self.inner.clone(),
                     res_sender,
                     framed,

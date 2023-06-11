@@ -257,12 +257,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     return;
                 }
                 Ok(Ok(Err(e))) => {
-                    if let bud_common::io::Error::FromPeer(ReturnCode::ConsumerDuplicated) = e {
-                        if event.res_tx.send(true).is_err() {
-                            error!("broker reply ok to send event error")
-                        }
-                        return;
-                    }
+                    error!("send SEND packet to client error: {e}")
                 }
                 Ok(Err(e)) => {
                     error!("recving SEND reply from client error: {e}")

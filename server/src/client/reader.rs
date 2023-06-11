@@ -69,13 +69,13 @@ impl Reader {
                     match res {
                         Ok(Some(request)) => {
                             if let Err(_e) = self.process_request(request).await {
-                                self.error.set(Error::ConnectionClosed).await;
+                                self.error.set(Error::ConnectionDisconnect).await;
                                 return
                             }
                         },
                         Ok(None) => {
                             error!("server connection closed");
-                            self.error.set(Error::ConnectionClosed).await;
+                            self.error.set(Error::ConnectionDisconnect).await;
                             return;
                         }
                         Err(_) => {
@@ -89,7 +89,7 @@ impl Reader {
                             }) {
                                 error!("wait for PING timeout, send DISCONNECT packet to broker error: {e}")
                             }
-                            self.error.set(Error::ConnectionClosed).await;
+                            self.error.set(Error::ConnectionDisconnect).await;
                             return
                         }
                     }
@@ -164,7 +164,7 @@ impl Reader {
                 res_tx: Some(broker_res_tx),
                 client_tx: None,
             })
-            .map_err(|_| Error::ConnectionClosed)?;
+            .map_err(|_| Error::ConnectionDisconnect)?;
         // wait for response in coroutine
         let local = self.local_addr.clone();
         let token = self.token.child_token();

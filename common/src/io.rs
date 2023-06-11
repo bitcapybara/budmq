@@ -3,10 +3,9 @@ use std::sync::{
     Arc,
 };
 
-use s2n_quic::connection;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 
-use crate::protocol::{self, ReturnCode};
+use crate::protocol;
 
 pub mod reader;
 pub mod writer;
@@ -15,18 +14,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Error from Peer: {0}")]
-    FromPeer(ReturnCode),
-    #[error("Res tx dropped without send: {0}")]
-    ResDropped(#[from] oneshot::error::RecvError),
-    #[error("Wait fro message error")]
-    Timeout,
-    #[error("Connection error: {0}")]
-    Connection(#[from] connection::Error),
+    /// set in SharedError, indicate Connection Disconnect
     #[error("Connection closed")]
-    ConnectionClosed,
+    ConnectionDisconnect,
+    /// send to senders(client/server), indicate Stream Disconnect
     #[error("Stream disconnect")]
     StreamDisconnect,
+    // send to senders(client/server), indicate Protocol error
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::Error),
 }
