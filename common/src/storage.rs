@@ -2,8 +2,8 @@ use async_trait::async_trait;
 
 use crate::types::{MessageId, TopicMessage};
 
+pub mod bonsaidb;
 pub mod memory;
-pub mod persist;
 
 #[async_trait]
 pub trait MetaStorage: Clone + Send + Sync + 'static {
