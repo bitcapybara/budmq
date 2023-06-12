@@ -2,13 +2,9 @@ pub(crate) mod broker;
 pub(crate) mod cursor;
 pub(crate) mod topic;
 
-use std::{
-    array, io,
-    ops::{Bound, RangeBounds, RangeInclusive},
-    string,
-};
+use std::{array, io, string};
 
-use bud_common::{codec, storage};
+use bud_common::codec;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -23,30 +19,7 @@ pub enum Error {
     #[error("Decode string error: {0}")]
     DecodeString(#[from] string::FromUtf8Error),
     #[error("Storage error: {0}")]
-    Storage(#[from] storage::Error),
+    Storage(String),
     #[error("Protocol Codec error: {0}")]
     Codec(#[from] codec::Error),
-}
-
-fn get_range<R>(range: R) -> Result<RangeInclusive<u64>>
-where
-    R: RangeBounds<u64>,
-{
-    let start = match range.start_bound() {
-        Bound::Included(&i) => i,
-        Bound::Excluded(&u64::MAX) => return Err(Error::InvalidRange),
-        Bound::Excluded(&i) => i + 1,
-        Bound::Unbounded => 0,
-    };
-    let end = match range.end_bound() {
-        Bound::Included(&i) => i,
-        Bound::Excluded(&0) => return Err(Error::InvalidRange),
-        Bound::Excluded(&i) => i - 1,
-        Bound::Unbounded => u64::MAX,
-    };
-    if end < start {
-        return Err(Error::InvalidRange);
-    }
-
-    Ok(start..=end)
 }

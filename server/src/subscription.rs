@@ -55,12 +55,6 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
     }
 }
 
-impl From<bud_common::storage::Error> for Error {
-    fn from(e: bud_common::storage::Error) -> Self {
-        Self::Storage(e.into())
-    }
-}
-
 pub struct SendEvent {
     pub client_id: u64,
     pub topic_name: String,

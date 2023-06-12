@@ -1,4 +1,7 @@
-use std::{ops::RangeBounds, sync::atomic::AtomicU64};
+use std::{
+    ops::{Bound, RangeBounds, RangeInclusive},
+    sync::atomic::AtomicU64,
+};
 
 use bud_common::{
     codec::Codec,
@@ -7,7 +10,7 @@ use bud_common::{
 };
 use bytes::{Bytes, BytesMut};
 
-use super::{get_range, Result};
+use super::{Error, Result};
 
 pub struct TopicStorage<M, S> {
     topic_name: String,
@@ -39,24 +42,41 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
 
     pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
         let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let id = self.meta_storage.inc_u64(&id_key, 1).await?;
+        let id = self
+            .meta_storage
+            .inc_u64(&id_key, 1)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, id));
         let mut buf = BytesMut::new();
         sub.encode(&mut buf);
-        self.meta_storage.put(&id_key, &buf).await?;
+        self.meta_storage
+            .put(&id_key, &buf)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
         let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let Some(max_id)= self.meta_storage.get_u64(&id_key).await? else {
+        let max_id = self
+            .meta_storage
+            .get_u64(&id_key)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let Some(max_id)= max_id else {
             return Ok(vec![]);
         };
 
         let mut subs = Vec::with_capacity(max_id as usize + 1);
         for i in 0..=max_id {
             let key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, i));
-            let Some(sub) = self.meta_storage.get(&key).await? else {
+            let sub = self
+                .meta_storage
+                .get(&key)
+                .await
+                .map_err(|e| Error::Storage(e.to_string()))?;
+            let Some(sub) = sub else {
                 continue;
             };
             let mut buf = Bytes::copy_from_slice(&sub);
@@ -66,44 +86,83 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     }
 
     pub async fn add_message(&self, message: &TopicMessage) -> Result<()> {
-        self.message_storage.put_message(message).await?;
+        self.message_storage
+            .put_message(message)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
     }
 
     pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {
-        Ok(self.message_storage.get_message(message_id).await?)
+        self.message_storage
+            .get_message(message_id)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn delete_range<R>(&self, topic_id: u64, cursor_range: R) -> Result<()>
     where
         R: RangeBounds<u64>,
     {
-        for i in get_range(cursor_range)? {
+        for i in Self::get_range(cursor_range).ok_or(Error::InvalidRange)? {
             self.message_storage
                 .del_message(&MessageId {
                     topic_id,
                     cursor_id: i,
                 })
-                .await?;
+                .await
+                .map_err(|e| Error::Storage(e.to_string()))?;
         }
         Ok(())
+    }
+
+    fn get_range<R>(range: R) -> Option<RangeInclusive<u64>>
+    where
+        R: RangeBounds<u64>,
+    {
+        let start = match range.start_bound() {
+            Bound::Included(&i) => i,
+            Bound::Excluded(&u64::MAX) => return None,
+            Bound::Excluded(&i) => i + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&i) => i,
+            Bound::Excluded(&0) => return None,
+            Bound::Excluded(&i) => i - 1,
+            Bound::Unbounded => u64::MAX,
+        };
+        if end < start {
+            return None;
+        }
+
+        Some(start..=end)
     }
 
     pub async fn get_sequence_id(&self, producer_name: &str) -> Result<Option<u64>> {
         let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
         let key = self.key(&key);
-        Ok(self.meta_storage.get_u64(&key).await?)
+        self.meta_storage
+            .get_u64(&key)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn set_sequence_id(&self, producer_name: &str, seq_id: u64) -> Result<()> {
         let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
         let key = self.key(&key);
-        Ok(self.meta_storage.set_u64(&key, seq_id).await?)
+        self.meta_storage
+            .set_u64(&key, seq_id)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn get_new_cursor_id(&self) -> Result<u64> {
         let key = self.key(Self::LATEST_CURSOR_ID_KEY);
-        Ok(self.meta_storage.inc_u64(&key, 1).await?)
+        self.meta_storage
+            .inc_u64(&key, 1)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     fn key(&self, s: &str) -> String {

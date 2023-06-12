@@ -12,11 +12,33 @@ use bytes::{Bytes, BytesMut};
 use tokio::sync::RwLock;
 
 use crate::{
-    codec::Codec,
+    codec::{self, Codec},
     types::{MessageId, TopicMessage},
 };
 
-use super::{MessageStorage, MetaStorage, Result};
+use super::{MessageStorage, MetaStorage};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Persistent database error: {0}")]
+    PersistDb(String),
+    #[error("Protocol codec error: {0}")]
+    Codec(#[from] codec::Error),
+}
+
+impl From<bonsaidb::local::Error> for Error {
+    fn from(e: bonsaidb::local::Error) -> Self {
+        Self::PersistDb(e.to_string())
+    }
+}
+
+impl From<bonsaidb::core::Error> for Error {
+    fn from(e: bonsaidb::core::Error) -> Self {
+        Self::PersistDb(e.to_string())
+    }
+}
 
 #[derive(Clone)]
 pub struct PersistStorage {
@@ -27,6 +49,8 @@ pub struct PersistStorage {
 
 #[async_trait]
 impl MetaStorage for PersistStorage {
+    type Error = Error;
+
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         self.metas.set_binary_key(k, v).await?;
         Ok(())
@@ -72,6 +96,8 @@ impl MetaStorage for PersistStorage {
 
 #[async_trait]
 impl MessageStorage for PersistStorage {
+    type Error = Error;
+
     async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
         let MessageId {
             topic_id,

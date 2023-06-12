@@ -1,11 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{array, collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use crate::types::{MessageId, TopicMessage};
 
-use super::{MessageStorage, MetaStorage, Result};
+use super::{MessageStorage, MetaStorage};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Decode slice error: {0}")]
+    DecodeSlice(#[from] array::TryFromSliceError),
+}
 
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
@@ -33,6 +41,8 @@ impl Default for MemoryStorage {
 
 #[async_trait]
 impl MetaStorage for MemoryStorage {
+    type Error = Error;
+
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         let mut inner = self.metas.write().await;
         inner.insert(k.to_string(), v.to_vec());
@@ -48,6 +58,18 @@ impl MetaStorage for MemoryStorage {
         let mut inner = self.metas.write().await;
         inner.remove(k);
         Ok(())
+    }
+
+    async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
+        Ok(self
+            .get(k)
+            .await?
+            .map(|b| b.as_slice().try_into())
+            .transpose()?
+            .map(u64::from_be_bytes))
+    }
+    async fn set_u64(&self, k: &str, v: u64) -> Result<()> {
+        Ok(self.put(k, v.to_be_bytes().as_slice()).await?)
     }
 
     async fn inc_u64(&self, k: &str, v: u64) -> Result<u64> {
@@ -69,6 +91,8 @@ impl MetaStorage for MemoryStorage {
 
 #[async_trait]
 impl MessageStorage for MemoryStorage {
+    type Error = Error;
+
     async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
         let MessageId {
             topic_id,
