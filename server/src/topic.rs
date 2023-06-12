@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bud_common::{
     protocol::{Publish, ReturnCode, Subscribe},
     storage::{MessageStorage, MetaStorage},
-    types::{AccessMode, InitialPostion, MessageId, TopicMessage},
+    types::{AccessMode, MessageId, SubscriptionInfo, TopicMessage},
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -170,7 +170,6 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn add_subscription(
         &mut self,
         topic_id: u64,
@@ -178,26 +177,33 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         consumer_id: u64,
         sub: &Subscribe,
         send_tx: mpsc::Sender<SendEvent>,
-        init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<()> {
-        let sub = Subscription::from_subscribe(
+        self.storage
+            .add_subscription(&SubscriptionInfo {
+                topic: self.name.clone(),
+                name: sub.sub_name.clone(),
+                sub_type: sub.sub_type,
+                init_position: sub.initial_position,
+            })
+            .await?;
+        let sp = Subscription::from_subscribe(
             topic_id,
             client_id,
             consumer_id,
             sub,
             send_tx,
             self.storage.inner(),
-            init_position,
             token,
         )
         .await?;
-        self.subscriptions.insert(sub.name.clone(), sub);
+        self.subscriptions.insert(sub.sub_name.clone(), sp);
         Ok(())
     }
 
-    pub fn del_subscription(&mut self, sub_name: &str) -> Option<Subscription<M>> {
-        self.subscriptions.remove(sub_name)
+    pub async fn del_subscription(&mut self, sub_name: &str) -> Result<Option<Subscription<M>>> {
+        self.storage.del_subscription(sub_name).await?;
+        Ok(self.subscriptions.remove(sub_name))
     }
 
     pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<M>> {
@@ -259,7 +265,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             }
         }
 
-        if lowest_mark - self.delete_position <= 1 {
+        if lowest_mark - self.delete_position < 1 {
             return Ok(());
         }
 

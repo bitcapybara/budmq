@@ -220,7 +220,6 @@ impl<M: MetaStorage> Subscription<M> {
         sub: &Subscribe,
         send_tx: mpsc::Sender<SendEvent>,
         storage: M,
-        init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {
         // start dispatch
@@ -230,7 +229,7 @@ impl<M: MetaStorage> Subscription<M> {
             topic_id,
             consumer,
             storage,
-            init_position,
+            sub.initial_position,
             send_tx,
             token.child_token(),
         )

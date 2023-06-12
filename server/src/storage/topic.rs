@@ -9,6 +9,7 @@ use bud_common::{
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
 use bytes::{Bytes, BytesMut};
+use log::warn;
 
 use super::{Error, Result};
 
@@ -55,6 +56,10 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
+    }
+
+    pub async fn del_subscription(&self, _sub_name: &str) -> Result<()> {
+        todo!()
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
@@ -104,7 +109,11 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     where
         R: RangeBounds<u64>,
     {
-        for i in Self::get_range(cursor_range).ok_or(Error::InvalidRange)? {
+        let Some(range) = Self::get_range(cursor_range) else {
+            warn!("delete message with invalid range");
+            return Ok(());
+        };
+        for i in range {
             self.message_storage
                 .del_message(&MessageId {
                     topic_id,

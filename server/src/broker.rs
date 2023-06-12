@@ -495,7 +495,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                                     sub.consumer_id,
                                     &sub,
                                     send_tx.clone(),
-                                    sub.initial_position,
                                     self.token.child_token(),
                                 )
                                 .await?;
@@ -521,7 +520,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                                 sub.consumer_id,
                                 &sub,
                                 send_tx.clone(),
-                                sub.initial_position,
                                 self.token.child_token(),
                             )
                             .await?;
@@ -545,7 +543,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
                     trace!("broker::process_packets: remove subscription from topic");
-                    tp.del_subscription(&info.sub_name);
+                    tp.del_subscription(&info.sub_name).await?;
                 }
                 trace!("broker::process_packets: remove consumer from session");
                 session.del_consumer(consumer_id);
