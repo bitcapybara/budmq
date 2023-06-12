@@ -251,21 +251,22 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         sp.consume_ack(message_id.cursor_id).await?;
 
         // remove acked messages
-        const DELETE_BATCH: u64 = 100;
         let mut lowest_mark = u64::MAX;
         for sub in self.subscriptions.values() {
             let delete_position = sub.delete_position().await;
             if delete_position < lowest_mark {
                 lowest_mark = delete_position;
             }
-            if delete_position - self.delete_position <= DELETE_BATCH {
-                break;
-            }
         }
 
-        if lowest_mark - self.delete_position > DELETE_BATCH {
-            self.storage.delete_range(self.id, ..lowest_mark).await?;
+        if lowest_mark - self.delete_position <= 1 {
+            return Ok(());
         }
+
+        self.storage
+            .delete_range(self.id, self.delete_position..lowest_mark)
+            .await?;
+        self.delete_position = lowest_mark;
         Ok(())
     }
 
