@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use futures::{SinkExt, StreamExt};
 use log::error;
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
 };
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
@@ -78,9 +76,11 @@ async fn listen_on_stream(
     token: CancellationToken,
 ) {
     let (recv, send) = stream.split();
-    let (mut recv_framed, send_framed) = (
+    let (mut recv_framed, mut send_framed) = (
+        // read packet from server
         FramedRead::new(recv, PacketCodec),
-        Arc::new(Mutex::new(FramedWrite::new(send, PacketCodec))),
+        // send response packet to server
+        FramedWrite::new(send, PacketCodec),
     );
     loop {
         select! {
@@ -94,31 +94,28 @@ async fn listen_on_stream(
                     None => return
                 };
                 let (res_tx, res_rx) = oneshot::channel();
-                // async wait for response
-                let send_framed = send_framed.clone();
+                // send packet to client
                 let token = token.clone();
-                tokio::spawn(async move {
-                    select! {
-                        // TODO timeout?
-                        res = res_rx => {
-                            match res {
-                                Ok(Some(packet)) => {
-                                    let mut framed = send_framed.lock().await;
-                                    if let Err(e) = framed.send(packet).await {
-                                        error!("io::reader send response error: {e}")
-                                    }
-                                }
-                                Err(_) => {
-                                    error!("io::reader res_tx dropped without send");
-                                }
-                                Ok(None) => {/* no need to send response */}
-                            }
-                        }
-                        _ = token.cancelled() => {}
-                    }
-                });
                 if let Err(e) = tx.send(Request { packet, res_tx }).await {
                     error!("io::reader send packet error: {e}");
+                }
+                // wait for reply and send to server
+                select! {
+                    // TODO timeout?
+                    res = res_rx => {
+                        match res {
+                            Ok(Some(packet)) => {
+                                if let Err(e) = send_framed.send(packet).await {
+                                    error!("io::reader send response error: {e}")
+                                }
+                            }
+                            Err(_) => {
+                                error!("io::reader res_tx dropped without send");
+                            }
+                            Ok(None) => {/* no need to send response */}
+                        }
+                    }
+                    _ = token.cancelled() => {}
                 }
             }
             _ = token.cancelled() => {

@@ -30,38 +30,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// connection disconnected
     #[error("Disconnected")]
     Disconnect,
+    /// get connection failed
     #[error("Canceled")]
     Canceled,
-    #[error("Internal error: {0}")]
-    Internal(String),
+    /// error returned by server
     #[error("Error from peer: {0}")]
     FromPeer(ReturnCode),
-    #[error("Unexpected packet")]
-    UnexpectedPacket,
-    #[error("Common mod io error: {0}")]
+    /// error from common io
+    #[error("Error from bud_common: {0}")]
     CommonIo(#[from] bud_common::io::Error),
-    #[error("Send error: {0}")]
-    Send(String),
-    #[error("Recv error: {0}")]
-    Recv(String),
+    /// error when create new client
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    /// s2n quic errors
     #[error("QUIC error: {0}")]
     Quic(String),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        Self::Send(e.to_string())
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::Recv(e.to_string())
-    }
 }
 
 impl From<s2n_quic::provider::StartError> for Error {
@@ -189,7 +175,7 @@ impl Connection {
             .await?
         {
             Packet::ProducerReceipt(ProducerReceipt { sequence_id }) => Ok(sequence_id),
-            _ => Err(Error::UnexpectedPacket),
+            _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
     }
 
@@ -220,7 +206,8 @@ impl Connection {
             .await?;
         self.register_tx
             .send(Event::DelConsumer { consumer_id })
-            .await?;
+            .await
+            .map_err(|_| Error::Disconnect)?;
         Ok(())
     }
 
@@ -245,7 +232,8 @@ impl Connection {
                 consumer_id,
                 sender: tx,
             })
-            .await?;
+            .await
+            .map_err(|_| Error::Disconnect)?;
         Ok(())
     }
 
@@ -256,7 +244,8 @@ impl Connection {
         .await?;
         self.register_tx
             .send(Event::DelConsumer { consumer_id })
-            .await?;
+            .await
+            .map_err(|_| Error::Disconnect)?;
         Ok(())
     }
 
@@ -282,7 +271,7 @@ impl Connection {
                 ReturnCode::Success => Ok(()),
                 code => Err(Error::FromPeer(code)),
             },
-            _ => Err(Error::UnexpectedPacket),
+            _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
     }
 
@@ -296,7 +285,8 @@ impl Connection {
             .map_err(|_| Error::Disconnect)?;
         match res_rx.await {
             Ok(Ok(packet)) => Ok(packet),
-            Ok(Err(_)) => Err(Error::Internal("send request error: {e}".to_string())),
+            Ok(Err(bud_common::io::Error::ConnectionDisconnect)) => Err(Error::Disconnect),
+            Ok(Err(e)) => Err(e)?,
             Err(_) => Err(Error::Disconnect)?,
         }
     }

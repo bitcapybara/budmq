@@ -101,8 +101,9 @@ impl Writer {
                 packet: Packet::Ping,
                 res_tx: Some(res_tx),
             })
-            .await?;
-        match res_rx.await? {
+            .await
+            .map_err(|_| Error::ConnectionDisconnect)?;
+        match res_rx.await.map_err(|_| Error::ConnectionDisconnect)? {
             Ok(Packet::Pong) => Ok(Some(())),
             Ok(_) => Ok(None),
             Err(e) => Err(e)?,

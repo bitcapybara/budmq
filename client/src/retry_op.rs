@@ -44,6 +44,7 @@ pub async fn consumer_reconnect(
                     }
                 }
             }
+            Err(e @ connection::Error::Canceled) => return Err(e),
             Err(e) => {
                 handle_error(e, retry_opts.max_retry_count, &mut count, &mut delay).await?;
             }
@@ -75,6 +76,7 @@ pub async fn producer_reconnect(
                     handle_error(e, retry_opts.max_retry_count, &mut count, &mut delay).await?;
                 }
             },
+            Err(e @ connection::Error::Canceled) => return Err(e),
             Err(e) => {
                 handle_error(e, retry_opts.max_retry_count, &mut count, &mut delay).await?;
             }
