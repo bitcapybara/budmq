@@ -8,12 +8,12 @@ mod send;
 mod subscribe;
 mod unsubscribe;
 
-use std::{io, slice::Iter, string};
+use std::{io, slice::Iter};
 
 use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::codec::Codec;
+use crate::codec::{self, Codec};
 
 pub use self::{
     connect::Connect,
@@ -32,24 +32,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// read/write packet from io
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
-    #[error("Insufficient bytes")]
-    InsufficientBytes,
-    #[error("Malformed packet")]
-    MalformedPacket,
-    #[error("Malformed string: {0}")]
-    MalformedString(#[from] string::FromUtf8Error),
+    /// protocol codec error
     #[error("Protocol codec error: {0}")]
     Codec(#[from] crate::codec::Error),
-    #[error("Unsupported initial postion")]
-    UnsupportedInitPosition,
-    #[error("Unsupported subType")]
-    UnsupportedSubType,
-    #[error("Unsupported ReturnCode")]
-    UnsupportedReturnCode,
-    #[error("Unsupported producer AccessMode")]
-    UnsupportedAccessMode,
 }
 
 pub struct PacketCodec;
@@ -250,7 +238,10 @@ impl Header {
         }
     }
     fn read(mut buf: Iter<u8>) -> Result<(Self, usize)> {
-        let type_byte = buf.next().ok_or(Error::InsufficientBytes)?.to_owned();
+        let type_byte = buf
+            .next()
+            .ok_or(Error::Codec(codec::Error::InsufficientBytes))?
+            .to_owned();
 
         let mut remain_len = 0usize;
         let mut header_len = 1; // init with type_byte bit
@@ -268,12 +259,12 @@ impl Header {
             shift += 7;
 
             if shift > 21 {
-                return Err(Error::MalformedPacket);
+                return Err(codec::Error::InsufficientBytes.into());
             }
         }
 
         if !done {
-            return Err(Error::InsufficientBytes);
+            return Err(codec::Error::InsufficientBytes.into());
         }
 
         Ok((
@@ -322,7 +313,7 @@ impl Header {
             13 => PacketType::Disconnect,
             14 => PacketType::CloseProducer,
             15 => PacketType::CloseConsumer,
-            _ => return Err(Error::MalformedPacket),
+            _ => return Err(codec::Error::Malformed.into()),
         })
     }
 }
