@@ -5,8 +5,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bud_common::{mtls::MtlsProvider, storage::memory::MemoryStorage};
-use bud_server::Server;
+use bud_server::{
+    common::{mtls::MtlsProvider, storage::memory::MemoryStorage},
+    Server,
+};
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
