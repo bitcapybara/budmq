@@ -15,6 +15,6 @@ s2n-quic.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 bud-derive = { version = "0.1.0", path = "../derive" }
-bonsaidb = { version = "0.4.1", features = ["local", "local-async"] }
+bonsaidb = { version = "0.4.1", features = ["local", "local-async"], optional = true }
 chrono.workspace = true
 thiserror.workspace = true

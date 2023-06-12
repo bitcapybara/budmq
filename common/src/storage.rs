@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use crate::types::{MessageId, TopicMessage};
 
+#[cfg(feature = "bonsaidb")]
 pub mod bonsaidb;
 pub mod memory;
 

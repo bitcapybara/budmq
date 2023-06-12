@@ -27,3 +27,6 @@ signal-hook-tokio.workspace = true
 signal-hook.workspace = true
 futures.workspace = true
 
+[features]
+bonsaidb = ["bud-common/bonsaidb"]
+
