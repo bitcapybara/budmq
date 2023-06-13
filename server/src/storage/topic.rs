@@ -23,7 +23,7 @@ pub struct TopicStorage<M, S> {
 impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
     const PRODUCER_SEQUENCE_ID_KEY: &str = "PRODUCER_SEQUENCE_ID";
-    const MAX_SUBSCRIPTION_ID_KEY: &str = "MAX_SUBSCRIPTION_ID";
+    const SUBSCRIPTION_NAMES_KEY: &str = "SUBSCRIPTION_NAMES";
     const SUBSCRIPTION_KEY: &str = "SUBSCRIPTION";
     const LATEST_CURSOR_ID_KEY: &str = "LATEST_CURSOR_ID";
     const MESSAGE_KEY: &str = "MESSAGE";
@@ -42,13 +42,37 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
     }
 
     pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
-        let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let id = self
+        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
+        let names = self
             .meta_storage
-            .inc_u64(&id_key, 1)
+            .get(&id_key)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
-        let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, id));
+        match names {
+            Some(names) => {
+                let mut names = {
+                    let mut buf = Bytes::copy_from_slice(&names);
+                    String::decode(&mut buf)?
+                };
+                names.push(',');
+                names.push_str(&sub.name);
+                let mut buf = BytesMut::new();
+                names.encode(&mut buf);
+                self.meta_storage
+                    .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
+                    .await
+                    .map_err(|e| Error::Storage(e.to_string()))?;
+            }
+            None => {
+                let mut buf = BytesMut::new();
+                sub.name.clone().encode(&mut buf);
+                self.meta_storage
+                    .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
+                    .await
+                    .map_err(|e| Error::Storage(e.to_string()))?;
+            }
+        }
+        let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, &sub.name));
         let mut buf = BytesMut::new();
         sub.encode(&mut buf);
         self.meta_storage
@@ -58,23 +82,64 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
         Ok(())
     }
 
-    pub async fn del_subscription(&self, _sub_name: &str) -> Result<()> {
-        todo!()
+    pub async fn del_subscription(&self, sub_name: &str) -> Result<()> {
+        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
+        let names = self
+            .meta_storage
+            .get(&id_key)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        let Some(names) = names else {
+            return Ok(())
+        };
+        let names = {
+            let mut buf = Bytes::copy_from_slice(&names);
+            String::decode(&mut buf)?
+                .split(',')
+                .filter_map(|s| {
+                    if s != sub_name {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(",")
+        };
+        let mut buf = BytesMut::new();
+        names.encode(&mut buf);
+        self.meta_storage
+            .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
+
+        self.meta_storage
+            .del(&format!("{}-{}", Self::SUBSCRIPTION_KEY, &sub_name))
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))?;
+        Ok(())
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
-        let id_key = self.key(Self::MAX_SUBSCRIPTION_ID_KEY);
-        let max_id = self
+        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
+        let names = self
             .meta_storage
-            .get_u64(&id_key)
+            .get(&id_key)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
-        let Some(max_id)= max_id else {
-            return Ok(vec![]);
+        let Some(names) = names else {
+            return Ok(vec![])
         };
 
-        let mut subs = Vec::with_capacity(max_id as usize + 1);
-        for i in 0..=max_id {
+        let names = {
+            let mut buf = Bytes::copy_from_slice(&names);
+            String::decode(&mut buf)?
+                .split(',')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+        };
+        let mut subs = Vec::with_capacity(names.len());
+        for i in names {
             let key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, i));
             let sub = self
                 .meta_storage
