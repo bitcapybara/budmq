@@ -30,7 +30,7 @@ pub enum Error {
     #[error("Internal error: {0}")]
     Internal(String),
     #[error("Connection error: {0}")]
-    Connection(connection::Error),
+    Connection(#[from] connection::Error),
 }
 
 impl<T> From<mpsc::error::SendError<T>> for Error {
@@ -42,12 +42,6 @@ impl<T> From<mpsc::error::SendError<T>> for Error {
 impl From<oneshot::error::RecvError> for Error {
     fn from(e: oneshot::error::RecvError) -> Self {
         Self::Internal(e.to_string())
-    }
-}
-
-impl From<connection::Error> for Error {
-    fn from(e: connection::Error) -> Self {
-        Self::Connection(e)
     }
 }
 

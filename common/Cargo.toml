@@ -12,9 +12,11 @@ openssl.workspace = true
 parking_lot = "0.12.1"
 rustls-pemfile.workspace = true
 s2n-quic.workspace = true
+serde = "1.0.164"
 tokio.workspace = true
 tokio-util.workspace = true
 bud-derive = { version = "0.1.0", path = "../derive" }
 bonsaidb = { version = "0.4.1", features = ["local", "local-async"], optional = true }
-chrono.workspace = true
+mongodb = { version = "2.5.0", features = ["bson-chrono-0_4"], optional = true }
+chrono = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
