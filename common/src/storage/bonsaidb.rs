@@ -23,32 +23,55 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Persistent database error: {0}")]
-    PersistDb(String),
+    BonsaiDB(String),
     #[error("Protocol codec error: {0}")]
     Codec(#[from] codec::Error),
 }
 
 impl From<bonsaidb::local::Error> for Error {
     fn from(e: bonsaidb::local::Error) -> Self {
-        Self::PersistDb(e.to_string())
+        Self::BonsaiDB(e.to_string())
     }
 }
 
 impl From<bonsaidb::core::Error> for Error {
     fn from(e: bonsaidb::core::Error) -> Self {
-        Self::PersistDb(e.to_string())
+        Self::BonsaiDB(e.to_string())
     }
 }
 
 #[derive(Clone)]
-pub struct PersistStorage {
+pub struct BonsaiDB {
     metas: AsyncDatabase,
     /// topic_id -> database(cursor_id -> message)
     message_dbs: Arc<RwLock<HashMap<u64, AsyncDatabase>>>,
 }
 
+impl BonsaiDB {
+    async fn new() -> Result<Self> {
+        let config = StorageConfiguration::new("data/meta.db");
+        Ok(Self {
+            metas: AsyncDatabase::open::<()>(config).await?,
+            message_dbs: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    async fn get_db(&self, topic_id: u64) -> Result<AsyncDatabase> {
+        let mut dbs = self.message_dbs.write().await;
+        let db = match dbs.get(&topic_id) {
+            Some(db) => db.clone(),
+            None => {
+                let db = new_database(topic_id).await?;
+                dbs.insert(topic_id, db.clone());
+                db
+            }
+        };
+        Ok(db)
+    }
+}
+
 #[async_trait]
-impl MetaStorage for PersistStorage {
+impl MetaStorage for BonsaiDB {
     type Error = Error;
 
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
@@ -95,7 +118,7 @@ impl MetaStorage for PersistStorage {
 }
 
 #[async_trait]
-impl MessageStorage for PersistStorage {
+impl MessageStorage for BonsaiDB {
     type Error = Error;
 
     async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
@@ -103,15 +126,7 @@ impl MessageStorage for PersistStorage {
             topic_id,
             cursor_id,
         } = msg.message_id;
-        let mut messages = self.message_dbs.write().await;
-        let db = match messages.get(&topic_id) {
-            Some(db) => db,
-            None => {
-                let db = new_database(topic_id).await?;
-                messages.entry(topic_id).or_insert(db)
-            }
-        };
-
+        let db = self.get_db(topic_id).await?;
         let mut bytes = BytesMut::new();
         msg.encode(&mut bytes);
         db.set_binary_key(cursor_id.to_string(), &bytes).await?;
@@ -123,15 +138,18 @@ impl MessageStorage for PersistStorage {
             topic_id,
             cursor_id,
         } = id;
-        let mut dbs = self.message_dbs.write().await;
-        let db = match dbs.get(topic_id) {
-            Some(db) => db,
-            None => {
-                let db = new_database(*topic_id).await?;
-                dbs.entry(*topic_id).or_insert(db)
-            }
-        };
-        get_message(db, *cursor_id).await
+        let db = self.get_db(*topic_id).await?;
+        Ok(db
+            .get_key(cursor_id.to_string())
+            .await?
+            .and_then(|v| match v {
+                Value::Bytes(b) => {
+                    let mut buf = Bytes::copy_from_slice(&b);
+                    Some(TopicMessage::decode(&mut buf))
+                }
+                Value::Numeric(_) => None,
+            })
+            .transpose()?)
     }
 
     async fn del_message(&self, id: &MessageId) -> Result<()> {
@@ -139,14 +157,7 @@ impl MessageStorage for PersistStorage {
             topic_id,
             cursor_id,
         } = id;
-        let mut dbs = self.message_dbs.write().await;
-        let db = match dbs.get(topic_id) {
-            Some(db) => db,
-            None => {
-                let db = new_database(*topic_id).await?;
-                dbs.entry(*topic_id).or_insert(db)
-            }
-        };
+        let db = self.get_db(*topic_id).await?;
         db.delete_key(cursor_id.to_string()).await?;
         Ok(())
     }
@@ -155,18 +166,4 @@ impl MessageStorage for PersistStorage {
 async fn new_database(topic_id: u64) -> Result<AsyncDatabase> {
     let config = StorageConfiguration::new(format!("data/{topic_id}.db"));
     Ok(AsyncDatabase::open::<()>(config).await?)
-}
-
-async fn get_message(db: &AsyncDatabase, cursor_id: u64) -> Result<Option<TopicMessage>> {
-    Ok(db
-        .get_key(cursor_id.to_string())
-        .await?
-        .and_then(|v| match v {
-            Value::Bytes(b) => {
-                let mut buf = Bytes::copy_from_slice(&b);
-                Some(TopicMessage::decode(&mut buf))
-            }
-            Value::Numeric(_) => None,
-        })
-        .transpose()?)
 }
