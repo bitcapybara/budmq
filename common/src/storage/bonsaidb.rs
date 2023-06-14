@@ -106,7 +106,7 @@ impl MetaStorage for BonsaiDB {
         }
     }
 
-    async fn set_u64(&self, k: &str, v: u64) -> Result<()> {
+    async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
         self.metas.set_numeric_key(k, v).await?;
         Ok(())
     }

@@ -22,7 +22,7 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
 
     async fn get_u64(&self, k: &str) -> Result<Option<u64>, Self::Error>;
 
-    async fn set_u64(&self, k: &str, v: u64) -> Result<(), Self::Error>;
+    async fn put_u64(&self, k: &str, v: u64) -> Result<(), Self::Error>;
 
     async fn inc_u64(&self, k: &str, v: u64) -> Result<u64, Self::Error>;
 }

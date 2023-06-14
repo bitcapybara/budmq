@@ -68,7 +68,7 @@ impl MetaStorage for MemoryStorage {
             .transpose()?
             .map(u64::from_be_bytes))
     }
-    async fn set_u64(&self, k: &str, v: u64) -> Result<()> {
+    async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
         Ok(self.put(k, v.to_be_bytes().as_slice()).await?)
     }
 

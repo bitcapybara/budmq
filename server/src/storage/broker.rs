@@ -43,7 +43,7 @@ impl<M: MetaStorage> BrokerStorage<M> {
     async fn set_topic_id(&self, topic_name: &str, topic_id: u64) -> Result<()> {
         let key = format!("{}-{}", Self::TOPIC_ID_KEY, topic_name);
         self.storage
-            .put(&key, topic_id.to_be_bytes().as_slice())
+            .put_u64(&key, topic_id)
             .await
             .map_err(|e| Error::Storage(e.to_string()))
     }

@@ -226,7 +226,7 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
         let key = format!("{}-{}", Self::PRODUCER_SEQUENCE_ID_KEY, producer_name);
         let key = self.key(&key);
         self.meta_storage
-            .set_u64(&key, seq_id)
+            .put_u64(&key, seq_id)
             .await
             .map_err(|e| Error::Storage(e.to_string()))
     }

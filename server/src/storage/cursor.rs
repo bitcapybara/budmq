@@ -32,7 +32,7 @@ impl<S: MetaStorage> CursorStorage<S> {
     pub async fn set_read_position(&self, pos: u64) -> Result<()> {
         let key = self.key(Self::READ_POSITION_KEY);
         self.storage
-            .put(&key, pos.to_be_bytes().as_slice())
+            .put_u64(&key, pos)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
@@ -49,7 +49,7 @@ impl<S: MetaStorage> CursorStorage<S> {
     pub async fn set_latest_cursor_id(&self, message_id: u64) -> Result<()> {
         let key = self.key(Self::LATEST_MESSAGE_ID_KEY);
         self.storage
-            .put(&key, message_id.to_be_bytes().as_slice())
+            .put_u64(&key, message_id)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())

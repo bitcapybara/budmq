@@ -54,7 +54,7 @@ impl MetaStorage for Redis {
             .await?)
     }
 
-    async fn set_u64(&self, k: &str, v: u64) -> Result<()> {
+    async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         Ok(redis::Cmd::set(k, v).query_async(&mut conn).await?)
     }
