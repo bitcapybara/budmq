@@ -7,10 +7,7 @@ use bud_common::{
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::warn;
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-};
+use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -25,24 +22,12 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// error from server
     #[error("Receive from server: {0}")]
     FromServer(ReturnCode),
-    #[error("Internal error: {0}")]
-    Internal(String),
+    /// error from connection underline
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        Self::Internal(e.to_string())
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::Internal(e.to_string())
-    }
 }
 
 #[derive(Clone)]
@@ -165,7 +150,8 @@ impl ConsumeEngine {
                         return Ok(());
                     };
                     self.remain_permits -= 1;
-                    self.consumer_tx.send(message).await?;
+                    self.consumer_tx.send(message).await
+                        .map_err(|_| connection::Error::Disconnect)?;
                 }
                 res = self.event_rx.recv() => {
                     let Some(event) = res else {
@@ -239,17 +225,26 @@ impl Consumer {
     }
 
     pub async fn ack(&self, message_id: &MessageId) -> Result<()> {
-        self.event_tx.send(ConsumerEvent::Ack(*message_id)).await?;
+        self.event_tx
+            .send(ConsumerEvent::Ack(*message_id))
+            .await
+            .map_err(|_| connection::Error::Disconnect)?;
         Ok(())
     }
 
     pub async fn unsubscribe(&self) -> Result<()> {
-        self.event_tx.send(ConsumerEvent::Unsubscribe).await?;
+        self.event_tx
+            .send(ConsumerEvent::Unsubscribe)
+            .await
+            .map_err(|_| connection::Error::Disconnect)?;
         Ok(())
     }
 
     pub async fn close(self) -> Result<()> {
-        self.event_tx.send(ConsumerEvent::Close).await?;
+        self.event_tx
+            .send(ConsumerEvent::Close)
+            .await
+            .map_err(|_| connection::Error::Disconnect)?;
         self.token.cancel();
         Ok(())
     }
