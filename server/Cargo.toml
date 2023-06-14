@@ -28,4 +28,5 @@ futures.workspace = true
 
 [features]
 bonsaidb = ["bud-common/bonsaidb"]
-
+mongodb = ["bud-common/mongodb"]
+redis = ["bud-common/redis"]

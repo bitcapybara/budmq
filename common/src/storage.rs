@@ -7,6 +7,8 @@ pub mod bonsaidb;
 pub mod memory;
 #[cfg(feature = "mongodb")]
 pub mod mongodb;
+#[cfg(feature = "redis")]
+pub mod redis;
 
 #[async_trait]
 pub trait MetaStorage: Clone + Send + Sync + 'static {
