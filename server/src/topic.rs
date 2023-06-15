@@ -13,22 +13,16 @@ use crate::{
     subscription::{self, SendEvent, Subscription},
 };
 
-type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Response code: {0}")]
     Response(ReturnCode),
     #[error("Storage error: {0}")]
-    Storage(storage::Error),
+    Storage(#[from] storage::Error),
     #[error("Subscription error: {0}")]
     Subscription(#[from] subscription::Error),
-}
-
-impl From<storage::Error> for Error {
-    fn from(e: storage::Error) -> Self {
-        Self::Storage(e)
-    }
 }
 
 #[derive(Clone)]
@@ -297,7 +291,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             access_mode,
             sequence_id,
         })?;
-        Ok(0)
+        Ok(sequence_id)
     }
 
     pub fn del_producer(&mut self, producer_id: u64) {

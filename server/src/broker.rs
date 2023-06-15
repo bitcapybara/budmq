@@ -46,6 +46,20 @@ pub enum Error {
     UnsupportedPacket(PacketType),
 }
 
+trait ResultConv {
+    fn conv(self) -> Result<Packet>;
+}
+
+impl ResultConv for topic::Result<()> {
+    fn conv(self) -> Result<Packet> {
+        match self {
+            Ok(_) => Ok(Packet::ok_response()),
+            Err(topic::Error::Response(code)) => Ok(Packet::err_response(code)),
+            Err(e) => Err(e)?,
+        }
+    }
+}
+
 /// messages from client to broker
 pub struct ClientMessage {
     pub client_id: u64,
@@ -433,9 +447,16 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                         if topic.get_producer(&producer_name).await.is_some() {
                             return Ok(Packet::err_response(ReturnCode::ProducerDuplicated));
                         }
-                        topic
+                        match topic
                             .add_producer(producer_id, &producer_name, access_mode)
-                            .await?
+                            .await
+                        {
+                            Ok(sequence_id) => sequence_id,
+                            Err(topic::Error::Response(code)) => {
+                                return Ok(Packet::err_response(code))
+                            }
+                            Err(e) => Err(e)?,
+                        }
                     }
                     None => {
                         let topic_id = self
@@ -451,9 +472,16 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                             self.token.child_token(),
                         )
                         .await?;
-                        let sequence_id = topic
+                        let sequence_id = match topic
                             .add_producer(producer_id, &producer_name, access_mode)
-                            .await?;
+                            .await
+                        {
+                            Ok(sequence_id) => sequence_id,
+                            Err(topic::Error::Response(code)) => {
+                                return Ok(Packet::err_response(code))
+                            }
+                            Err(e) => Err(e)?,
+                        };
                         topics.insert(topic_name.clone(), topic);
                         sequence_id
                     }
@@ -489,7 +517,8 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                                     send_tx.clone(),
                                     self.token.child_token(),
                                 )
-                                .await?;
+                                .await
+                                .conv()?;
                         }
                     },
                     None => {
@@ -514,7 +543,8 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                                 send_tx.clone(),
                                 self.token.child_token(),
                             )
-                            .await?;
+                            .await
+                            .conv()?;
                         topics.insert(sub.topic.clone(), topic);
                     }
                 }
@@ -556,7 +586,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 match topics.get_mut(&topic) {
                     Some(topic) => {
                         trace!("broker::process_packets: add message to topic");
-                        topic.add_message(&p).await?;
+                        topic.add_message(&p).await.conv()?;
                     }
                     None => return Ok(Packet::err_response(ReturnCode::TopicNotExists)),
                 }
@@ -601,7 +631,10 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     return Ok(Packet::err_response(ReturnCode::AckTopicMissMatch));
                 }
                 trace!("broker::process_packets: ack message in topic");
-                topic.consume_ack(&info.sub_name, &c.message_id).await?;
+                topic
+                    .consume_ack(&info.sub_name, &c.message_id)
+                    .await
+                    .conv()?;
                 Ok(Packet::ok_response())
             }
             p => Err(Error::UnsupportedPacket(p.packet_type())),
