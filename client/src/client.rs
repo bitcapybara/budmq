@@ -1,9 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
-use bud_common::{
-    io::writer::Request, mtls::MtlsProvider, protocol::ReturnCode, types::AccessMode,
-};
-use tokio::sync::{mpsc, oneshot};
+use bud_common::{io::writer::Request, mtls::MtlsProvider, types::AccessMode};
+use tokio::sync::mpsc;
 
 use crate::{
     connection::ConnectionHandle,
@@ -15,26 +13,12 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Receive server error: {0}")]
-    FromServer(ReturnCode),
-    #[error("internal error: {0}")]
-    Internal(String),
+    /// error from producer
     #[error("consumer error: {0}")]
     Producer(#[from] producer::Error),
+    /// error from consumer
     #[error("producer error: {0}")]
     Consumer(#[from] consumer::Error),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        Self::Internal(e.to_string())
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::Internal(e.to_string())
-    }
 }
 
 #[derive(Clone)]

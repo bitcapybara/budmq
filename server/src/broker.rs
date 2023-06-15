@@ -60,6 +60,16 @@ impl ResultConv for topic::Result<()> {
     }
 }
 
+impl ResultConv for subscription::Result<()> {
+    fn conv(self) -> Result<Packet> {
+        match self {
+            Ok(_) => Ok(Packet::ok_response()),
+            Err(subscription::Error::Response(code)) => Ok(Packet::err_response(code)),
+            Err(e) => Err(e)?,
+        }
+    }
+}
+
 /// messages from client to broker
 pub struct ClientMessage {
     pub client_id: u64,
@@ -504,7 +514,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     Some(topic) => match topic.get_subscription(&sub.sub_name) {
                         Some(sp) => {
                             trace!("broker::process_packets: add consumer to subscription");
-                            sp.add_consumer(client_id, &sub).await?;
+                            sp.add_consumer(client_id, &sub).await.conv()?;
                         }
                         None => {
                             trace!("broker::process_packets: add subscription to topic");

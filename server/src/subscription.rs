@@ -19,12 +19,14 @@ use crate::storage;
 
 use self::dispatcher::Dispatcher;
 
-type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// error return to client
     #[error("Response error: {0}")]
     Response(ReturnCode),
+    /// error from storage
     #[error("Storage error: {0}")]
     Storage(#[from] storage::Error),
 }
