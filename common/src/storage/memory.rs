@@ -11,6 +11,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// error when decode slice to u64
     #[error("Decode slice error: {0}")]
     DecodeSlice(#[from] array::TryFromSliceError),
 }

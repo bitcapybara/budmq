@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bud_common::{protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
 use log::warn;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::{
     client::RetryOptions,
@@ -15,24 +15,9 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Receive from server: {0}")]
-    FromServer(ReturnCode),
-    #[error("Internal error: {0}")]
-    Internal(String),
+    /// error from connection
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(e: mpsc::error::SendError<T>) -> Self {
-        Self::Internal(e.to_string())
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(e: oneshot::error::RecvError) -> Self {
-        Self::Internal(e.to_string())
-    }
 }
 
 pub struct ProducerMessage {

@@ -22,8 +22,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// error from bonsaidb
     #[error("Persistent database error: {0}")]
     BonsaiDB(String),
+    /// data structure codec error
     #[error("Protocol codec error: {0}")]
     Codec(#[from] codec::Error),
 }

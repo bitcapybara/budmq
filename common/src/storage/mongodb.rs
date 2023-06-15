@@ -16,6 +16,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// error from mongodb
     #[error("MongoDB error: {0}")]
     MongoDB(#[from] mongodb::error::Error),
 }
