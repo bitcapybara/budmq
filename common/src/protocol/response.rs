@@ -22,6 +22,8 @@ pub enum ReturnCode {
     ProducerAccessModeConflict,
     ProducerNotFound,
     AckTopicMissMatch,
+    SubscriptionNotFound,
+    ProducerDuplicated,
 }
 
 impl std::fmt::Display for ReturnCode {
@@ -43,6 +45,8 @@ impl std::fmt::Display for ReturnCode {
             ReturnCode::ProducerAccessModeConflict => write!(f, "Producer access mode conflict"),
             ReturnCode::ProducerNotFound => write!(f, "Producer not found"),
             ReturnCode::AckTopicMissMatch => write!(f, "Ack topic miss match"),
+            ReturnCode::SubscriptionNotFound => write!(f, "Subscription not found"),
+            ReturnCode::ProducerDuplicated => write!(f, "Producer duplicated"),
         }
     }
 }
@@ -68,6 +72,8 @@ impl TryFrom<u8> for ReturnCode {
             13 => Self::ProducerAccessModeConflict,
             14 => Self::ProducerNotFound,
             15 => Self::AckTopicMissMatch,
+            16 => Self::SubscriptionNotFound,
+            17 => Self::ProducerDuplicated,
             _ => return Err(Self::Error::Malformed),
         })
     }
