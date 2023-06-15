@@ -20,10 +20,13 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// io error
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    /// error on server start up
     #[error("QUIC start up error: {0}")]
     StartUp(String),
+    /// error on connecting
     #[error("QUIC connection error: {0}")]
     Connection(#[from] connection::Error),
 }

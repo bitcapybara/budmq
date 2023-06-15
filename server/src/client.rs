@@ -27,12 +27,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("")]
-    HandshakeTimeout,
     #[error("Miss Connect packet")]
     MissConnectPacket,
-    #[error("Unexpected packet")]
-    UnexpectedPacket,
     #[error("Client has disconnected")]
     ClientDisconnect,
     #[error("Client idle time out")]
@@ -101,7 +97,7 @@ impl Client {
         trace!("client::handshake: waiting for the first framed packet");
         let handshake = timeout(HANDSHAKE_TIMOUT, framed.next())
             .await
-            .map_err(|_| Error::HandshakeTimeout)?
+            .map_err(|_| Error::Timeout)?
             .ok_or(Error::StreamClosed)??;
         match handshake {
             Packet::Connect(connect) => {

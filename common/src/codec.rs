@@ -5,8 +5,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// want more bytes
     #[error("Insufficient bytes")]
     InsufficientBytes,
+    /// meet wrong bytes
     #[error("Malformed packet")]
     Malformed,
 }
