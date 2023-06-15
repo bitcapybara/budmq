@@ -611,7 +611,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 };
                 trace!("broker::process_packets: add permits to subscription");
                 sp.additional_permits(client_id, c.consumer_id, c.permits)
-                    .await?;
+                    .await;
                 Ok(Packet::ok_response())
             }
             Packet::ConsumeAck(c) => {

@@ -17,10 +17,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Server response error
     #[error("Response code: {0}")]
     Response(ReturnCode),
+    /// Storage error
     #[error("Storage error: {0}")]
     Storage(#[from] storage::Error),
+    /// Subscription error
     #[error("Subscription error: {0}")]
     Subscription(#[from] subscription::Error),
 }
@@ -233,7 +236,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             .set_sequence_id(&producer_name, sequence_id)
             .await?;
         for sub in self.subscriptions.values() {
-            sub.message_notify()?;
+            sub.message_notify();
         }
         Ok(())
     }

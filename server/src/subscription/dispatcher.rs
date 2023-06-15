@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use bud_common::{
+    protocol::ReturnCode,
     storage::MetaStorage,
     types::{InitialPostion, MessageId},
 };
-use log::trace;
+use log::{error, trace};
 use tokio::{
     select,
     sync::{mpsc, oneshot, RwLock},
@@ -78,9 +79,11 @@ impl<S: MetaStorage> Dispatcher<S> {
         let mut consumers = self.consumers.write().await;
         match consumers.as_mut() {
             Some(cms) => match cms {
-                Consumers::Exclusive(_) => return Err(Error::SubscribeOnExclusive),
+                Consumers::Exclusive(_) => return Err(Error::Response(ReturnCode::SubOnExlusive)),
                 Consumers::Shared(shared) => match consumer.sub_type {
-                    SubType::Exclusive => return Err(Error::SubTypeUnexpected),
+                    SubType::Exclusive => {
+                        return Err(Error::Response(ReturnCode::UnexpectedSubType))
+                    }
                     SubType::Shared => {
                         shared.insert(consumer.client_id, consumer);
                     }
@@ -197,13 +200,13 @@ impl<S: MetaStorage> Dispatcher<S> {
     }
 
     /// notify_rx receive event from subscription
-    pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) -> Result<()> {
+    pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) {
         trace!("dispatcher::run: start dispatcher task loop");
         loop {
             select! {
                 res = notify_rx.recv() => {
                     if res.is_none() {
-                        return Ok(());
+                        return;
                     }
                     let mut cursor = self.cursor.write().await;
                     trace!("dispatcher::run cursor peek a message");
@@ -224,26 +227,33 @@ impl<S: MetaStorage> Dispatcher<S> {
                         };
                         select!{
                             res = self.send_tx.send(event) => {
-                                res?;
+                                if res.is_err() {
+                                    return;
+                                }
                             }
                             _ = self.token.cancelled() => {
-                                return Ok(());
+                                return;
                             }
                         }
                         trace!("dispatcher::run: waiting for replay");
                         select! {
                             res = res_rx => {
-                                if res? {
-                                    cursor.read_advance().await?;
+                                if res.is_ok() {
+                                    if let Err(e) = cursor.read_advance().await {
+                                        error!("cursor read advance error: {e}")
+                                    }
                                     let (client_id, consumer_id) = (consumer.client_id, consumer.id);
                                     self.decrease_consumer_permits(client_id, consumer_id, 1).await;
                                 }
+                            }
+                            _ = self.token.cancelled() => {
+                                return;
                             }
                         }
                     }
                 }
                 _ = self.token.cancelled() => {
-                    return Ok(());
+                    return;
                 }
             }
         }
