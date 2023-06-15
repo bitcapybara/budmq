@@ -63,7 +63,7 @@ impl Writer {
                                 return;
                             };
                             if self.sender.send(msg).await.is_err() {
-                                self.error.set(Error::ConnectionDisconnect).await;
+                                self.error.set_disconnect().await;
                                 return
                             }
                         }
@@ -78,7 +78,7 @@ impl Writer {
                                     }
                                 },
                                 Err(_) => {
-                                    self.error.set(Error::ConnectionDisconnect).await;
+                                    self.error.set_disconnect().await;
                                     return
                                 },
                             }

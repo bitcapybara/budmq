@@ -52,10 +52,9 @@ impl SharedError {
         error
     }
 
-    /// used by stream writer, set when error occurs in writing packets
-    pub async fn set(&self, error: Error) {
+    pub async fn set_disconnect(&self) {
         let mut lock = self.error.lock().await;
-        *lock = Some(error);
+        *lock = Some(Error::ConnectionDisconnect);
         self.error_set.store(true, Ordering::Release);
     }
 }

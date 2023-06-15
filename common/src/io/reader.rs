@@ -10,10 +10,7 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use crate::{
-    io::Error,
-    protocol::{Packet, PacketCodec},
-};
+use crate::protocol::{Packet, PacketCodec};
 
 use super::SharedError;
 
@@ -51,11 +48,11 @@ impl Reader {
                     let stream = match res {
                         Ok(Some(stream)) => stream,
                         Ok(None) => {
-                            self.error.set(Error::ConnectionDisconnect).await;
+                            self.error.set_disconnect().await;
                             return
                         }
                         Err(e) => {
-                            self.error.set(Error::ConnectionDisconnect).await;
+                            self.error.set_disconnect().await;
                             error!("no stream could be accepted due to an error: {e}");
                             return
                         }

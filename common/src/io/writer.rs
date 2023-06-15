@@ -102,7 +102,7 @@ impl<T: PoolRecycle> StreamPool<T> {
                     let mut pooled = match self.create().await {
                         Some(stream) => stream,
                         None => {
-                            self.error.set(Error::ConnectionDisconnect).await;
+                            self.error.set_disconnect().await;
                             if let Some(res_tx) = res_tx {
                                 res_tx.send(Err(Error::ConnectionDisconnect)).ok();
                             }

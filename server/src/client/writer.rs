@@ -1,6 +1,6 @@
 use bud_common::io::{
     writer::{new_pool, Request},
-    Error, SharedError,
+    SharedError,
 };
 use log::trace;
 use s2n_quic::connection;
@@ -51,7 +51,7 @@ impl Writer {
             select! {
                 res = self.client_rx.recv() => {
                     let Some(message) = res else {
-                        self.error.set(Error::ConnectionDisconnect).await;
+                        self.error.set_disconnect().await;
                         return
                     };
                     trace!("client:writer: receive a new packet task, open stream");
@@ -85,7 +85,7 @@ impl Writer {
             select! {
                 res = sender.send(Request { packet , res_tx: Some(res_tx)}) => {
                     if let Err(_e) = res {
-                        error.set(Error::ConnectionDisconnect).await;
+                        error.set_disconnect().await;
                     }
                 }
                 _ = token.cancelled() => {}

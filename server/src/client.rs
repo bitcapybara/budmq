@@ -27,42 +27,21 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// miss handshake packet
     #[error("Miss Connect packet")]
     MissConnectPacket,
+    /// connection or broker disconnect
     #[error("Client has disconnected")]
-    ClientDisconnect,
-    #[error("Client idle time out")]
-    ClientIdleTimeout,
-    #[error("Send on dropped channel")]
-    SendOnDroppedChannel,
-    #[error("Wait reply on dropped channel")]
-    WaitOnDroppedChannel,
-    #[error("Server ReturnCode: {0}")]
-    Server(ReturnCode),
-    #[error("Client ReturnCode: {0}")]
-    Client(ReturnCode),
-    #[error("Stream closed")]
-    StreamClosed,
+    Disconnect,
+    /// error from quic connection
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
+    /// error when reading from stream
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::Error),
+    /// wait for packet timeout
     #[error("Time out error")]
     Timeout,
-    #[error("Common mod io error: {0}")]
-    CommonIo(#[from] bud_common::io::Error),
-}
-
-impl<T> From<mpsc::error::SendError<T>> for Error {
-    fn from(_: mpsc::error::SendError<T>) -> Self {
-        Self::SendOnDroppedChannel
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        Self::WaitOnDroppedChannel
-    }
 }
 
 impl From<tokio::time::error::Elapsed> for Error {
@@ -92,13 +71,12 @@ impl Client {
         let stream = conn
             .accept_bidirectional_stream()
             .await?
-            .ok_or(Error::StreamClosed)?;
+            .ok_or(Error::Disconnect)?;
         let mut framed = Framed::new(stream, PacketCodec);
         trace!("client::handshake: waiting for the first framed packet");
         let handshake = timeout(HANDSHAKE_TIMOUT, framed.next())
-            .await
-            .map_err(|_| Error::Timeout)?
-            .ok_or(Error::StreamClosed)??;
+            .await?
+            .ok_or(Error::Disconnect)??;
         match handshake {
             Packet::Connect(connect) => {
                 trace!("client::handshake: receive CONNECT packet");
@@ -106,15 +84,17 @@ impl Client {
                 let (client_tx, client_rx) = mpsc::unbounded_channel();
                 // send to broker
                 trace!("client::handshake: send packet to broker");
-                broker_tx.send(ClientMessage {
-                    client_id: id,
-                    packet: Packet::Connect(connect),
-                    res_tx: Some(res_tx),
-                    client_tx: Some(client_tx),
-                })?;
+                broker_tx
+                    .send(ClientMessage {
+                        client_id: id,
+                        packet: Packet::Connect(connect),
+                        res_tx: Some(res_tx),
+                        client_tx: Some(client_tx),
+                    })
+                    .map_err(|_| Error::Disconnect)?;
                 // wait for reply
                 trace!("client::handshake: waiting for response from broker");
-                let packet = res_rx.await?;
+                let packet = res_rx.await.map_err(|_| Error::Disconnect)?;
                 trace!("client::handshake: send response to client");
                 framed.send(packet).await?;
                 trace!("client::handshake: build new Client");
@@ -126,7 +106,12 @@ impl Client {
                     keepalive: connect.keepalive,
                 })
             }
-            _ => Err(Error::MissConnectPacket),
+            _ => {
+                framed
+                    .send(Packet::err_response(ReturnCode::UnexpectedPacket))
+                    .await?;
+                Err(Error::MissConnectPacket)
+            }
         }
     }
 

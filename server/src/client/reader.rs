@@ -3,7 +3,7 @@ use std::time::Duration;
 use bud_common::{
     io::{
         reader::{self, Request},
-        Error, SharedError,
+        SharedError,
     },
     protocol::{Packet, Response, ReturnCode},
 };
@@ -17,7 +17,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::Result;
-use crate::{broker, client, WAIT_REPLY_TIMEOUT};
+use crate::{
+    broker,
+    client::{self, Error},
+    WAIT_REPLY_TIMEOUT,
+};
 
 pub struct Reader {
     client_id: u64,
@@ -69,13 +73,13 @@ impl Reader {
                     match res {
                         Ok(Some(request)) => {
                             if let Err(_e) = self.process_request(request).await {
-                                self.error.set(Error::ConnectionDisconnect).await;
+                                self.error.set_disconnect().await;
                                 return
                             }
                         },
                         Ok(None) => {
                             error!("server connection closed");
-                            self.error.set(Error::ConnectionDisconnect).await;
+                            self.error.set_disconnect().await;
                             return;
                         }
                         Err(_) => {
@@ -89,7 +93,7 @@ impl Reader {
                             }) {
                                 error!("wait for PING timeout, send DISCONNECT packet to broker error: {e}")
                             }
-                            self.error.set(Error::ConnectionDisconnect).await;
+                            self.error.set_disconnect().await;
                             return
                         }
                     }
@@ -139,7 +143,7 @@ impl Reader {
                 }) {
                     error!("send DISCONNECT to broker error: {e}");
                 }
-                return Err(client::Error::ClientDisconnect);
+                return Err(client::Error::Disconnect);
             }
             p => {
                 error!("received unsupported packet: {}", p.packet_type());
@@ -164,7 +168,7 @@ impl Reader {
                 res_tx: Some(broker_res_tx),
                 client_tx: None,
             })
-            .map_err(|_| Error::ConnectionDisconnect)?;
+            .map_err(|_| Error::Disconnect)?;
         // wait for response in coroutine
         let local = self.local_addr.clone();
         let token = self.token.child_token();
