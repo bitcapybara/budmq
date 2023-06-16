@@ -20,6 +20,8 @@ pub trait NewMetaStorage {
 
     async fn unregister_broker(&self, id: &str) -> Result<(), Self::Error>;
 
+    async fn all_brokers(&self) -> Result<Vec<SocketAddr>, Self::Error>;
+
     async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
 
     async fn unregister_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
@@ -30,7 +32,7 @@ pub trait NewMetaStorage {
 
     async fn all_subscription(&self) -> Result<Vec<SubscriptionInfo>, Self::Error>;
 
-    async fn del_subscription(&self) -> Result<(), Self::Error>;
+    async fn del_subscription(&self, name: &str) -> Result<(), Self::Error>;
 }
 
 #[async_trait]

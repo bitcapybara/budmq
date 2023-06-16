@@ -107,7 +107,7 @@ impl TopicMessage {
     }
 }
 
-#[derive(bud_derive::Codec)]
+#[derive(Debug, Clone, bud_derive::Codec)]
 pub struct SubscriptionInfo {
     pub topic: String,
     pub name: String,
