@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use async_trait::async_trait;
 
-use crate::types::{MessageId, TopicMessage};
+use crate::types::{MessageId, SubscriptionInfo, TopicMessage};
 
 #[cfg(feature = "bonsaidb")]
 pub mod bonsaidb;
@@ -9,6 +11,36 @@ pub mod memory;
 pub mod mongodb;
 #[cfg(feature = "redis")]
 pub mod redis;
+
+#[async_trait]
+pub trait NewMetaStorage {
+    type Error: std::error::Error;
+
+    async fn register_broker(&self, id: &str, addr: &SocketAddr) -> Result<(), Self::Error>;
+
+    async fn unregister_broker(&self, id: &str) -> Result<(), Self::Error>;
+
+    async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
+
+    async fn unregister_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
+
+    async fn get_topic_owner(&self, topic_id: u64) -> Result<SocketAddr, Self::Error>;
+
+    async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<(), Self::Error>;
+
+    async fn all_subscription(&self) -> Result<Vec<SubscriptionInfo>, Self::Error>;
+
+    async fn del_subscription(&self) -> Result<(), Self::Error>;
+}
+
+#[async_trait]
+pub trait NewMessageStorage {
+    type Error: std::error::Error;
+
+    async fn save_cursor(&self, bytes: &[u8]) -> Result<(), Self::Error>;
+
+    async fn load_cursor(&self) -> Result<Vec<u8>, Self::Error>;
+}
 
 #[async_trait]
 pub trait MetaStorage: Clone + Send + Sync + 'static {
