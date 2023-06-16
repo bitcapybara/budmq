@@ -24,24 +24,33 @@ pub trait NewMetaStorage {
 
     async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
 
-    async fn unregister_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
+    async fn unregister_topic(&self, topic_id: u64) -> Result<(), Self::Error>;
 
-    async fn get_topic_owner(&self, topic_id: u64) -> Result<SocketAddr, Self::Error>;
+    async fn get_topic_owner(&self, topic_id: u64) -> Result<Option<SocketAddr>, Self::Error>;
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<(), Self::Error>;
 
     async fn all_subscription(&self) -> Result<Vec<SubscriptionInfo>, Self::Error>;
 
-    async fn del_subscription(&self, name: &str) -> Result<(), Self::Error>;
+    async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<(), Self::Error>;
 }
 
 #[async_trait]
 pub trait NewMessageStorage {
     type Error: std::error::Error;
 
-    async fn save_cursor(&self, bytes: &[u8]) -> Result<(), Self::Error>;
+    async fn save_cursor(
+        &self,
+        topic_name: &str,
+        sub_name: &str,
+        bytes: &[u8],
+    ) -> Result<(), Self::Error>;
 
-    async fn load_cursor(&self) -> Result<Vec<u8>, Self::Error>;
+    async fn load_cursor(
+        &self,
+        topic_name: &str,
+        sub_name: &str,
+    ) -> Result<Option<Vec<u8>>, Self::Error>;
 }
 
 #[async_trait]

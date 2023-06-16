@@ -68,7 +68,7 @@ impl MemoryStorage {
         Ok(())
     }
 
-    async fn unregister_topic(&self, _topic_id: u64, _broker_id: &str) -> Result<()> {
+    async fn unregister_topic(&self, _topic_id: u64) -> Result<()> {
         Ok(())
     }
 
