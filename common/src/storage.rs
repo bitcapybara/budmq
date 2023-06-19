@@ -18,13 +18,9 @@ pub trait NewMetaStorage {
 
     async fn register_broker(&self, id: &str, addr: &SocketAddr) -> Result<(), Self::Error>;
 
-    async fn unregister_broker(&self, id: &str) -> Result<(), Self::Error>;
-
     async fn all_brokers(&self) -> Result<Vec<SocketAddr>, Self::Error>;
 
     async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
-
-    async fn unregister_topic(&self, topic_id: u64) -> Result<(), Self::Error>;
 
     async fn get_topic_owner(&self, topic_id: u64) -> Result<Option<SocketAddr>, Self::Error>;
 
