@@ -1,4 +1,4 @@
-FROM docker.io/library/rust:1.69-alpine
+FROM docker.io/library/rust:1.70-alpine
 
-RUN apk update && apk add --no-cache build-base perl cmake && \
+RUN apk add --no-cache build-base perl cmake && \
     rustup component add rustfmt clippy
