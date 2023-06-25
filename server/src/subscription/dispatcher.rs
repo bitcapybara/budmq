@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bud_common::{
     protocol::ReturnCode,
-    storage::MetaStorage,
+    storage::{MessageStorage, MetaStorage},
     types::{InitialPostion, MessageId},
 };
 use log::{error, trace};
@@ -20,24 +20,29 @@ use super::{
 /// 1. receive consumer add/remove cmd
 /// 2. dispatch messages to consumers
 #[derive(Clone)]
-pub struct Dispatcher<S> {
+pub struct Dispatcher<S1, S2> {
     /// topic id
     topic_id: u64,
+    /// topic_name
+    topic_name: String,
     /// save all consumers in memory
     consumers: Arc<RwLock<TopicConsumers>>,
     /// cursor
-    cursor: Arc<RwLock<Cursor<S>>>,
+    cursor: Arc<RwLock<Cursor<S1, S2>>>,
     send_tx: mpsc::Sender<SendEvent>,
     /// token
     token: CancellationToken,
 }
 
-impl<S: MetaStorage> Dispatcher<S> {
+impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
     /// load from storage
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         topic_id: u64,
+        topic_name: &str,
         sub_name: &str,
-        storage: S,
+        meta_storage: S1,
+        message_storage: S2,
         init_position: InitialPostion,
         send_tx: mpsc::Sender<SendEvent>,
         token: CancellationToken,
@@ -45,18 +50,29 @@ impl<S: MetaStorage> Dispatcher<S> {
         Ok(Self {
             consumers: Arc::new(RwLock::new(TopicConsumers::empty())),
             cursor: Arc::new(RwLock::new(
-                Cursor::new(sub_name, storage, init_position).await?,
+                Cursor::new(
+                    topic_name,
+                    sub_name,
+                    meta_storage,
+                    message_storage,
+                    init_position,
+                )
+                .await?,
             )),
             send_tx,
             token,
             topic_id,
+            topic_name: topic_name.to_string(),
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn with_consumer(
         topic_id: u64,
+        topic_name: &str,
         consumer: Consumer,
-        storage: S,
+        meta_storage: S1,
+        message_storage: S2,
         init_position: InitialPostion,
         send_tx: mpsc::Sender<SendEvent>,
         token: CancellationToken,
@@ -64,7 +80,14 @@ impl<S: MetaStorage> Dispatcher<S> {
         let sub_name = consumer.sub_name.clone();
         let consumers = Arc::new(RwLock::new(TopicConsumers::from_consumer(consumer)));
         let cursor = Arc::new(RwLock::new(
-            Cursor::new(&sub_name, storage, init_position).await?,
+            Cursor::new(
+                topic_name,
+                &sub_name,
+                meta_storage,
+                message_storage,
+                init_position,
+            )
+            .await?,
         ));
         Ok(Self {
             consumers,
@@ -72,6 +95,7 @@ impl<S: MetaStorage> Dispatcher<S> {
             send_tx,
             token,
             topic_id,
+            topic_name: topic_name.to_string(),
         })
     }
 

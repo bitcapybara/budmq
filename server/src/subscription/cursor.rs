@@ -1,4 +1,7 @@
-use bud_common::{storage::MetaStorage, types::InitialPostion};
+use bud_common::{
+    storage::{MessageStorage, MetaStorage},
+    types::InitialPostion,
+};
 use roaring::RoaringTreemap;
 
 use crate::storage::cursor::CursorStorage;
@@ -9,7 +12,7 @@ use super::Result;
 /// persistent
 /// memory
 #[derive(Clone)]
-pub struct Cursor<S> {
+pub struct Cursor<S1, S2> {
     /// current read cursor position
     /// init by init_position arg
     read_position: u64,
@@ -20,12 +23,18 @@ pub struct Cursor<S> {
     /// message ack info
     acked: RoaringTreemap,
     /// storage
-    storage: CursorStorage<S>,
+    storage: CursorStorage<S1, S2>,
 }
 
-impl<S: MetaStorage> Cursor<S> {
-    pub async fn new(sub_name: &str, storage: S, init_position: InitialPostion) -> Result<Self> {
-        let storage = CursorStorage::new(sub_name, storage)?;
+impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
+    pub async fn new(
+        topic_name: &str,
+        sub_name: &str,
+        meta_storage: S1,
+        message_storage: S2,
+        init_position: InitialPostion,
+    ) -> Result<Self> {
+        let storage = CursorStorage::new(topic_name, sub_name, meta_storage, message_storage)?;
         let latest_message_id = storage.get_latest_cursor_id().await?.unwrap_or_default();
         let acked = storage.get_ack_bits().await?.unwrap_or_default();
         let delete_position = acked.min().unwrap_or_default();
@@ -103,9 +112,15 @@ mod tests {
 
     #[tokio::test]
     async fn cursor_works() {
-        let mut cursor = Cursor::new("test-sub", MemoryStorage::new(), InitialPostion::Latest)
-            .await
-            .unwrap();
+        let mut cursor = Cursor::new(
+            "test-topic",
+            "test-sub",
+            MemoryStorage::new(),
+            MemoryStorage::new(),
+            InitialPostion::Latest,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(cursor.peek_message(), None);
         cursor.new_message(1).await.unwrap();

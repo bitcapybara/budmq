@@ -116,34 +116,6 @@ impl MongoDB {
             }
         }
     }
-
-    async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
-        let cursor = MongoCursor {
-            topic_name: topic_name.to_string(),
-            sub_naem: sub_name.to_string(),
-            bytes: bytes.to_vec(),
-        };
-        self.cursor.insert_one(cursor, None).await?;
-        Ok(())
-    }
-
-    async fn load_cursor(&self, topic_name: &str, sub_name: &str) -> Result<Option<Vec<u8>>> {
-        let filter = doc! {
-            "topic_name": topic_name,
-            "sub_name": sub_name,
-        };
-        let opts = FindOneOptions::builder()
-            .projection(Some(doc! {
-                "bytes": 1
-            }))
-            .build();
-        let bytes = self
-            .cursor
-            .find_one(Some(filter), Some(opts))
-            .await?
-            .map(|c| c.bytes);
-        Ok(bytes)
-    }
 }
 
 #[async_trait]
@@ -184,5 +156,33 @@ impl MessageStorage for MongoDB {
         };
         collection.delete_one(filter, None).await?;
         Ok(())
+    }
+
+    async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
+        let cursor = MongoCursor {
+            topic_name: topic_name.to_string(),
+            sub_naem: sub_name.to_string(),
+            bytes: bytes.to_vec(),
+        };
+        self.cursor.insert_one(cursor, None).await?;
+        Ok(())
+    }
+
+    async fn load_cursor(&self, topic_name: &str, sub_name: &str) -> Result<Option<Vec<u8>>> {
+        let filter = doc! {
+            "topic_name": topic_name,
+            "sub_name": sub_name,
+        };
+        let opts = FindOneOptions::builder()
+            .projection(Some(doc! {
+                "bytes": 1
+            }))
+            .build();
+        let bytes = self
+            .cursor
+            .find_one(Some(filter), Some(opts))
+            .await?
+            .map(|c| c.bytes);
+        Ok(bytes)
     }
 }

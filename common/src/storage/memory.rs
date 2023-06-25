@@ -25,8 +25,8 @@ pub struct MemoryStorage {
     metas: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     /// broker
     broker_addr: Arc<RwLock<Option<SocketAddr>>>,
-    /// subscription
-    subs: Arc<RwLock<HashMap<String, SubscriptionInfo>>>,
+    /// topic_name -> sub_name -> subscription
+    subs: Arc<RwLock<HashMap<String, HashMap<String, SubscriptionInfo>>>>,
     /// cursor
     cursor: Arc<RwLock<Option<Vec<u8>>>>,
     /// topic_id -> cursor_id -> message
@@ -44,84 +44,6 @@ impl MemoryStorage {
         }
     }
 
-    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
-        let mut broker = self.broker_addr.write().await;
-        *broker = Some(*addr);
-        Ok(())
-    }
-
-    async fn unregister_broker(&self, _id: &str) -> Result<()> {
-        let mut broker = self.broker_addr.write().await;
-        *broker = None;
-        Ok(())
-    }
-
-    async fn all_brokers(&self) -> Result<Vec<SocketAddr>> {
-        let broker = self.broker_addr.read().await;
-        match *broker {
-            Some(addr) => Ok(vec![addr]),
-            None => Ok(vec![]),
-        }
-    }
-
-    async fn register_topic(&self, _topic_id: u64, _broker_id: &str) -> Result<()> {
-        Ok(())
-    }
-
-    async fn unregister_topic(&self, _topic_id: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn get_topic_owner(&self, _topic_id: u64) -> Result<Option<SocketAddr>> {
-        let broker = self.broker_addr.read().await;
-        match *broker {
-            Some(addr) => Ok(Some(addr)),
-            None => Ok(None),
-        }
-    }
-
-    async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {
-        let mut subs = self.subs.write().await;
-        subs.insert(info.name.clone(), info.clone());
-        Ok(())
-    }
-
-    async fn all_subscription(&self) -> Result<Vec<SubscriptionInfo>> {
-        let subs = self.subs.read().await;
-        Ok(subs.values().cloned().collect())
-    }
-
-    async fn del_subscription(&self, name: &str) -> Result<()> {
-        let mut subs = self.subs.write().await;
-        subs.remove(name);
-        Ok(())
-    }
-
-    async fn save_cursor(&self, bytes: &[u8]) -> Result<()> {
-        let mut cursor = self.cursor.write().await;
-        *cursor = Some(bytes.to_vec());
-        Ok(())
-    }
-
-    async fn load_cursor(&self) -> Result<Option<Vec<u8>>> {
-        let cursor = self.cursor.read().await;
-        match cursor.clone() {
-            Some(cursor) => Ok(Some(cursor)),
-            None => Ok(None),
-        }
-    }
-}
-
-impl Default for MemoryStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl MetaStorage for MemoryStorage {
-    type Error = Error;
-
     async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
         let mut inner = self.metas.write().await;
         inner.insert(k.to_string(), v.to_vec());
@@ -138,6 +60,74 @@ impl MetaStorage for MemoryStorage {
         inner.remove(k);
         Ok(())
     }
+}
+
+impl Default for MemoryStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl MetaStorage for MemoryStorage {
+    type Error = Error;
+
+    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
+        let mut broker = self.broker_addr.write().await;
+        *broker = Some(*addr);
+        Ok(())
+    }
+
+    async fn all_brokers(&self) -> Result<Vec<SocketAddr>> {
+        let broker = self.broker_addr.read().await;
+        match *broker {
+            Some(addr) => Ok(vec![addr]),
+            None => Ok(vec![]),
+        }
+    }
+
+    async fn register_topic(&self, _topic_id: u64, _broker_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn get_topic_owner(&self, _topic_id: u64) -> Result<Option<SocketAddr>> {
+        let broker = self.broker_addr.read().await;
+        match *broker {
+            Some(addr) => Ok(Some(addr)),
+            None => Ok(None),
+        }
+    }
+
+    async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {
+        let mut topic = self.subs.write().await;
+        match topic.get_mut(&info.topic) {
+            Some(subs) => {
+                subs.insert(info.name.clone(), info.clone());
+            }
+            None => {
+                let mut subs = HashMap::new();
+                subs.insert(info.name.clone(), info.clone());
+                topic.insert(info.topic.clone(), subs);
+            }
+        }
+        Ok(())
+    }
+
+    async fn all_subscription(&self, topic_name: &str) -> Result<Vec<SubscriptionInfo>> {
+        let topic = self.subs.read().await;
+        Ok(topic
+            .get(topic_name)
+            .map(|subs| subs.values().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<()> {
+        let mut topic = self.subs.write().await;
+        if let Some(subs) = topic.get_mut(topic_name) {
+            subs.remove(name);
+        }
+        Ok(())
+    }
 
     async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
         Ok(self
@@ -147,6 +137,7 @@ impl MetaStorage for MemoryStorage {
             .transpose()?
             .map(u64::from_be_bytes))
     }
+
     async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
         Ok(self.put(k, v.to_be_bytes().as_slice()).await?)
     }
@@ -205,5 +196,13 @@ impl MessageStorage for MemoryStorage {
             msgs.remove(&id.cursor_id);
         }
         Ok(())
+    }
+
+    async fn save_cursor(&self, _topic_name: &str, _sub_name: &str, _bytes: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
+    async fn load_cursor(&self, _topic_name: &str, _sub_name: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
     }
 }

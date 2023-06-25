@@ -4,11 +4,9 @@ use std::{
 };
 
 use bud_common::{
-    codec::Codec,
     storage::{MessageStorage, MetaStorage},
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
-use bytes::{Bytes, BytesMut};
 use log::warn;
 
 use super::{Error, Result};
@@ -37,122 +35,35 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
         })
     }
 
-    pub fn inner(&self) -> M {
+    pub fn inner_meta(&self) -> M {
         self.meta_storage.clone()
     }
 
+    pub fn inner_message(&self) -> S {
+        self.message_storage.clone()
+    }
+
     pub async fn add_subscription(&self, sub: &SubscriptionInfo) -> Result<()> {
-        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
-        let names = self
-            .meta_storage
-            .get(&id_key)
-            .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-        match names {
-            Some(names) => {
-                let mut names = {
-                    let mut buf = Bytes::copy_from_slice(&names);
-                    String::decode(&mut buf)?
-                };
-                names.push(',');
-                names.push_str(&sub.name);
-                let mut buf = BytesMut::new();
-                names.encode(&mut buf);
-                self.meta_storage
-                    .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
-                    .await
-                    .map_err(|e| Error::Storage(e.to_string()))?;
-            }
-            None => {
-                let mut buf = BytesMut::new();
-                sub.name.clone().encode(&mut buf);
-                self.meta_storage
-                    .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
-                    .await
-                    .map_err(|e| Error::Storage(e.to_string()))?;
-            }
-        }
-        let id_key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, &sub.name));
-        let mut buf = BytesMut::new();
-        sub.encode(&mut buf);
         self.meta_storage
-            .put(&id_key, &buf)
+            .add_subscription(sub)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
     }
 
     pub async fn del_subscription(&self, sub_name: &str) -> Result<()> {
-        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
-        let names = self
-            .meta_storage
-            .get(&id_key)
-            .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-        let Some(names) = names else {
-            return Ok(())
-        };
-        let names = {
-            let mut buf = Bytes::copy_from_slice(&names);
-            String::decode(&mut buf)?
-                .split(',')
-                .filter_map(|s| {
-                    if s != sub_name {
-                        Some(s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(",")
-        };
-        let mut buf = BytesMut::new();
-        names.encode(&mut buf);
         self.meta_storage
-            .put(Self::SUBSCRIPTION_NAMES_KEY, &buf)
-            .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-
-        self.meta_storage
-            .del(&format!("{}-{}", Self::SUBSCRIPTION_KEY, &sub_name))
+            .del_subscription(&self.topic_name, sub_name)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?;
         Ok(())
     }
 
     pub async fn all_aubscriptions(&self) -> Result<Vec<SubscriptionInfo>> {
-        let id_key = self.key(Self::SUBSCRIPTION_NAMES_KEY);
-        let names = self
-            .meta_storage
-            .get(&id_key)
+        self.meta_storage
+            .all_subscription(&self.topic_name)
             .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-        let Some(names) = names else {
-            return Ok(vec![])
-        };
-
-        let names = {
-            let mut buf = Bytes::copy_from_slice(&names);
-            String::decode(&mut buf)?
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>()
-        };
-        let mut subs = Vec::with_capacity(names.len());
-        for i in names {
-            let key = self.key(&format!("{}-{}", Self::SUBSCRIPTION_KEY, i));
-            let sub = self
-                .meta_storage
-                .get(&key)
-                .await
-                .map_err(|e| Error::Storage(e.to_string()))?;
-            let Some(sub) = sub else {
-                continue;
-            };
-            let mut buf = Bytes::copy_from_slice(&sub);
-            subs.push(SubscriptionInfo::decode(&mut buf)?);
-        }
-        Ok(subs)
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn add_message(&self, message: &TopicMessage) -> Result<()> {

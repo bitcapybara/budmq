@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use bud_common::{
     protocol::{ReturnCode, Subscribe},
-    storage::MetaStorage,
+    storage::{MessageStorage, MetaStorage},
     types::{InitialPostion, MessageId, SubType},
 };
 use log::error;
@@ -145,31 +145,35 @@ impl From<Consumer> for Consumers {
 
 /// save cursor in persistent
 /// save consumers in memory
-pub struct Subscription<M> {
+pub struct Subscription<S1, S2> {
     pub topic_id: u64,
     pub topic: String,
     pub name: String,
-    dispatcher: Dispatcher<M>,
+    dispatcher: Dispatcher<S1, S2>,
     token: CancellationToken,
     notify_tx: mpsc::Sender<()>,
 }
 
-impl<M: MetaStorage> Subscription<M> {
+impl<S1: MetaStorage, S2: MessageStorage> Subscription<S1, S2> {
     /// load from storage
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         topic_id: u64,
         topic: &str,
         sub_name: &str,
         send_tx: mpsc::Sender<SendEvent>,
-        storage: M,
+        meta_storage: S1,
+        message_storage: S2,
         init_position: InitialPostion,
         token: CancellationToken,
     ) -> Result<Self> {
         let (notify_tx, notify_rx) = mpsc::channel(1);
         let dispatcher = Dispatcher::new(
             topic_id,
+            topic,
             sub_name,
-            storage,
+            meta_storage,
+            message_storage,
             init_position,
             send_tx,
             token.child_token(),
@@ -193,7 +197,8 @@ impl<M: MetaStorage> Subscription<M> {
         consumer_id: u64,
         sub: &Subscribe,
         send_tx: mpsc::Sender<SendEvent>,
-        storage: M,
+        meta_storage: S1,
+        message_storage: S2,
         token: CancellationToken,
     ) -> Result<Self> {
         // start dispatch
@@ -201,8 +206,10 @@ impl<M: MetaStorage> Subscription<M> {
         let consumer = Consumer::new(client_id, consumer_id, sub);
         let dispatcher = Dispatcher::with_consumer(
             topic_id,
+            &sub.topic,
             consumer,
-            storage,
+            meta_storage,
+            message_storage,
             sub.initial_position,
             send_tx,
             token.child_token(),
@@ -260,7 +267,7 @@ impl<M: MetaStorage> Subscription<M> {
     }
 }
 
-impl<S> Drop for Subscription<S> {
+impl<S1, S2> Drop for Subscription<S1, S2> {
     fn drop(&mut self) {
         self.token.cancel();
     }

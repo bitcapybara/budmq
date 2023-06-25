@@ -113,7 +113,7 @@ pub struct Topic<M, S> {
     /// topic name
     pub name: String,
     /// key = sub_name
-    subscriptions: HashMap<String, Subscription<M>>,
+    subscriptions: HashMap<String, Subscription<M, S>>,
     /// producer
     producers: TopicProducers,
     /// message storage
@@ -131,7 +131,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         message_storage: S,
         token: CancellationToken,
     ) -> Result<Self> {
-        let storage = TopicStorage::new(topic, meta_storage.clone(), message_storage)?;
+        let storage = TopicStorage::new(topic, meta_storage.clone(), message_storage.clone())?;
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
         let mut delete_position = if loaded_subscriptions.is_empty() {
@@ -147,6 +147,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
                 &sub.name,
                 send_tx.clone(),
                 meta_storage.clone(),
+                message_storage.clone(),
                 sub.init_position,
                 token.child_token(),
             )
@@ -190,7 +191,8 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             consumer_id,
             sub,
             send_tx,
-            self.storage.inner(),
+            self.storage.inner_meta(),
+            self.storage.inner_message(),
             token,
         )
         .await?;
@@ -198,12 +200,12 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         Ok(())
     }
 
-    pub async fn del_subscription(&mut self, sub_name: &str) -> Result<Option<Subscription<M>>> {
+    pub async fn del_subscription(&mut self, sub_name: &str) -> Result<Option<Subscription<M, S>>> {
         self.storage.del_subscription(sub_name).await?;
         Ok(self.subscriptions.remove(sub_name))
     }
 
-    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<M>> {
+    pub fn get_subscription(&self, sub_name: &str) -> Option<&Subscription<M, S>> {
         self.subscriptions.get(sub_name)
     }
 

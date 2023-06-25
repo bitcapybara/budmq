@@ -62,12 +62,34 @@ impl BonsaiDB {
         })
     }
 
-    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
-        self.metas.set_key(CURRENT_BROKER_KEY, addr).await?;
+    async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
+        self.metas.set_binary_key(k, v).await?;
         Ok(())
     }
 
-    async fn unregister_broker(&self, _id: &str) -> Result<()> {
+    async fn get(&self, k: &str) -> Result<Option<Vec<u8>>> {
+        let Some(v) = self.metas.get_key(k).await? else {
+            return Ok(None);
+        };
+
+        match v {
+            Value::Bytes(b) => Ok(Some(b.to_vec())),
+            Value::Numeric(Numeric::UnsignedInteger(n)) => Ok(Some(n.to_be_bytes().to_vec())),
+            _ => Ok(None),
+        }
+    }
+
+    async fn del(&self, k: &str) -> Result<()> {
+        self.metas.delete_key(k).await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl MetaStorage for BonsaiDB {
+    type Error = Error;
+    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
+        self.metas.set_key(CURRENT_BROKER_KEY, addr).await?;
         Ok(())
     }
 
@@ -78,15 +100,9 @@ impl BonsaiDB {
         }
     }
 
-    async fn register_topic(&self, topic_id: u64, addr: &SocketAddr) -> Result<()> {
+    async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<()> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_id);
-        self.metas.set_key(key, addr).await?;
-        Ok(())
-    }
-
-    async fn unregister_topic(&self, topic_id: u64) -> Result<()> {
-        let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_id);
-        self.metas.delete_key(key).await?;
+        self.metas.set_key(key, &broker_id).await?;
         Ok(())
     }
 
@@ -172,44 +188,6 @@ impl BonsaiDB {
         Ok(())
     }
 
-    async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
-        let key = format!("{}-{}-{}", CURSOR_KEY, topic_name, sub_name);
-        self.put(&key, bytes).await?;
-        Ok(())
-    }
-
-    async fn load_cursor(&self, topic_name: &str, sub_name: &str) -> Result<Option<Vec<u8>>> {
-        let key = format!("{}-{}-{}", CURSOR_KEY, topic_name, sub_name);
-        self.get(&key).await
-    }
-}
-
-#[async_trait]
-impl MetaStorage for BonsaiDB {
-    type Error = Error;
-
-    async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
-        self.metas.set_binary_key(k, v).await?;
-        Ok(())
-    }
-
-    async fn get(&self, k: &str) -> Result<Option<Vec<u8>>> {
-        let Some(v) = self.metas.get_key(k).await? else {
-            return Ok(None);
-        };
-
-        match v {
-            Value::Bytes(b) => Ok(Some(b.to_vec())),
-            Value::Numeric(Numeric::UnsignedInteger(n)) => Ok(Some(n.to_be_bytes().to_vec())),
-            _ => Ok(None),
-        }
-    }
-
-    async fn del(&self, k: &str) -> Result<()> {
-        self.metas.delete_key(k).await?;
-        Ok(())
-    }
-
     async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
         let Some(v) = self.metas.get_key(k).await? else {
             return Ok(None)
@@ -274,6 +252,17 @@ impl MessageStorage for BonsaiDB {
         let db = self.messages.with_key_namespace(&ns(*topic_id));
         db.delete_key(cursor_id.to_string()).await?;
         Ok(())
+    }
+
+    async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
+        let key = format!("{}-{}-{}", CURSOR_KEY, topic_name, sub_name);
+        self.put(&key, bytes).await?;
+        Ok(())
+    }
+
+    async fn load_cursor(&self, topic_name: &str, sub_name: &str) -> Result<Option<Vec<u8>>> {
+        let key = format!("{}-{}-{}", CURSOR_KEY, topic_name, sub_name);
+        self.get(&key).await
     }
 }
 

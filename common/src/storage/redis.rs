@@ -48,6 +48,11 @@ impl Redis {
             token: CancellationToken::new(),
         }
     }
+}
+
+#[async_trait]
+impl MetaStorage for Redis {
+    type Error = Error;
 
     async fn register_broker(&self, id: &str, addr: &SocketAddr) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
@@ -238,30 +243,6 @@ impl Redis {
         redis::Cmd::hdel(format!("BUDMQ_SUBSCRIPTIONS:{topic_name}"), name)
             .query_async(&mut conn)
             .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl MetaStorage for Redis {
-    type Error = Error;
-
-    async fn put(&self, k: &str, v: &[u8]) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
-        redis::Cmd::set(k, v.to_vec())
-            .query_async(&mut conn)
-            .await?;
-        Ok(())
-    }
-
-    async fn get(&self, k: &str) -> Result<Option<Vec<u8>>> {
-        let mut conn = self.client.get_async_connection().await?;
-        Ok(redis::Cmd::get(k).query_async(&mut conn).await?)
-    }
-
-    async fn del(&self, k: &str) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
-        redis::Cmd::del(k).query_async(&mut conn).await?;
         Ok(())
     }
 
