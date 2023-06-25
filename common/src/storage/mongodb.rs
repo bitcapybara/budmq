@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use mongodb::{
     bson::{doc, DateTime},
+    options::FindOneOptions,
     Collection, Database,
 };
 use tokio::sync::RwLock;
@@ -78,18 +79,29 @@ impl From<MongoTopicMessage> for TopicMessage {
     }
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct MongoCursor {
+    pub topic_name: String,
+    pub sub_naem: String,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MongoDB {
     database: Database,
     /// topic_id -> collection
     message_dbs: Arc<RwLock<HashMap<u64, Collection<MongoTopicMessage>>>>,
+    /// cursor collection
+    cursor: Collection<MongoCursor>,
 }
 
 impl MongoDB {
     fn new(database: Database) -> Self {
+        let cursor = database.collection("corsor");
         Self {
             database,
             message_dbs: Arc::new(RwLock::new(HashMap::new())),
+            cursor,
         }
     }
 
@@ -103,6 +115,34 @@ impl MongoDB {
                 collection
             }
         }
+    }
+
+    async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
+        let cursor = MongoCursor {
+            topic_name: topic_name.to_string(),
+            sub_naem: sub_name.to_string(),
+            bytes: bytes.to_vec(),
+        };
+        self.cursor.insert_one(cursor, None).await?;
+        Ok(())
+    }
+
+    async fn load_cursor(&self, topic_name: &str, sub_name: &str) -> Result<Option<Vec<u8>>> {
+        let filter = doc! {
+            "topic_name": topic_name,
+            "sub_name": sub_name,
+        };
+        let opts = FindOneOptions::builder()
+            .projection(Some(doc! {
+                "bytes": 1
+            }))
+            .build();
+        let bytes = self
+            .cursor
+            .find_one(Some(filter), Some(opts))
+            .await?
+            .map(|c| c.bytes);
+        Ok(bytes)
     }
 }
 
