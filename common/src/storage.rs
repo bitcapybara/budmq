@@ -26,7 +26,10 @@ pub trait NewMetaStorage {
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<(), Self::Error>;
 
-    async fn all_subscription(&self) -> Result<Vec<SubscriptionInfo>, Self::Error>;
+    async fn all_subscription(
+        &self,
+        topic_name: &str,
+    ) -> Result<Vec<SubscriptionInfo>, Self::Error>;
 
     async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<(), Self::Error>;
 }

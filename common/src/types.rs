@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
-#[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, bud_derive::Codec,
+)]
 #[repr(u8)]
 pub enum SubType {
     /// Each subscription is only allowed to contain one client
@@ -22,7 +24,9 @@ impl TryFrom<u8> for SubType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, bud_derive::Codec,
+)]
 #[repr(u8)]
 pub enum InitialPostion {
     Latest = 1,
@@ -107,7 +111,7 @@ impl TopicMessage {
     }
 }
 
-#[derive(Debug, Clone, bud_derive::Codec)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bud_derive::Codec)]
 pub struct SubscriptionInfo {
     pub topic: String,
     pub name: String,
