@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::AddrParseError, sync::Arc};
 
 use bud_common::{protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
@@ -18,6 +18,9 @@ pub enum Error {
     /// error from connection
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
+    /// parse SocketAddr
+    #[error("Parse socket addr error: {0}")]
+    SocketAddr(#[from] AddrParseError),
 }
 
 pub struct ProducerMessage {
@@ -51,7 +54,7 @@ impl Producer {
         retry_opts: Option<RetryOptions>,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
-        let (conn, sequence_id) = match conn_handle.get_connection(ordered).await {
+        let (conn, sequence_id) = match conn_handle.lookup_topic(topic, ordered).await {
             Ok(conn) => match conn.create_producer(name, id, topic, access_mode).await {
                 Ok(sequence_id) => (conn, sequence_id),
                 Err(connection::Error::Disconnect) => {

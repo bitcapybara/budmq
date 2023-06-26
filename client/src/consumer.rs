@@ -86,7 +86,7 @@ impl ConsumeEngine {
         retry_opts: Option<RetryOptions>,
         token: CancellationToken,
     ) -> Result<Self> {
-        let conn = conn_handle.get_connection(false).await?;
+        let conn = conn_handle.lookup_topic(&sub_message.topic, false).await?;
         let (server_tx, server_rx) = mpsc::unbounded_channel();
         conn.subscribe(id, name, sub_message, server_tx).await?;
         conn.control_flow(id, CONSUME_CHANNEL_CAPACITY).await?;

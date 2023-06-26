@@ -520,7 +520,6 @@ mod tests {
     #[test]
     fn codec_lookup_topic_resp() {
         codec_works(Packet::LookupTopicResponse(LookupTopicResponse {
-            broker_id: "broker_1".to_string(),
             broker_addr: "127.0.0.1:9998".to_string(),
         }))
     }

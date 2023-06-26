@@ -1,14 +1,19 @@
 pub mod reader;
 pub mod writer;
 
-use std::{io, net::SocketAddr, ops::DerefMut, sync::Arc};
+use std::{
+    collections::HashMap,
+    io,
+    net::{AddrParseError, SocketAddr},
+    sync::Arc,
+};
 
 use bud_common::{
     io::{writer::Request, SharedError},
     mtls::MtlsProvider,
     protocol::{
-        CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer, Packet,
-        ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
+        topic::LookupTopic, CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer,
+        Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
     types::{AccessMode, MessageId},
 };
@@ -48,6 +53,9 @@ pub enum Error {
     /// s2n quic errors
     #[error("QUIC error: {0}")]
     Quic(String),
+    /// parse socket addr
+    #[error("Parse socket addr error: {0}")]
+    SocketAddr(#[from] AddrParseError),
 }
 
 impl From<s2n_quic::provider::StartError> for Error {
@@ -265,6 +273,18 @@ impl Connection {
         .await
     }
 
+    pub async fn lookup_topic(&self, topic_name: &str) -> Result<SocketAddr> {
+        match self
+            .send(Packet::LookupTopic(LookupTopic {
+                topic_name: topic_name.to_string(),
+            }))
+            .await?
+        {
+            Packet::LookupTopicResponse(p) => Ok(p.broker_addr.parse()?),
+            _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
+        }
+    }
+
     async fn send_ok(&self, packet: Packet) -> Result<()> {
         match self.send(packet).await? {
             Packet::Response(Response { code, .. }) => match code {
@@ -307,7 +327,8 @@ pub struct ConnectionHandle {
     addr: SocketAddr,
     server_name: String,
     provider: MtlsProvider,
-    conn: Arc<Mutex<Option<ConnectionState>>>,
+    /// broker_addr -> connection
+    conns: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
     keepalive: u16,
 }
 
@@ -322,16 +343,22 @@ impl ConnectionHandle {
             addr: addr.to_owned(),
             server_name: server_name.to_string(),
             provider,
-            conn: Arc::new(Mutex::new(None)),
+            conns: Arc::new(Mutex::new(HashMap::new())),
             keepalive,
         }
     }
 
+    pub async fn lookup_topic(&self, topic_name: &str, ordered: bool) -> Result<Arc<Connection>> {
+        let conn = self.get_connection(&self.addr, ordered).await?;
+        let broker_addr = conn.lookup_topic(topic_name).await?;
+        self.get_connection(&broker_addr, ordered).await
+    }
+
     /// get the connection in manager, setup a new writer
-    pub async fn get_connection(&self, ordered: bool) -> Result<Arc<Connection>> {
+    async fn get_connection(&self, addr: &SocketAddr, ordered: bool) -> Result<Arc<Connection>> {
         let rx = {
-            let mut conn = self.conn.lock().await;
-            match conn.deref_mut() {
+            let mut conn = self.conns.lock().await;
+            match conn.get_mut(addr) {
                 Some(ConnectionState::Connected(c)) => {
                     if c.is_valid() {
                         let cloned = c.clone_one(ordered);
@@ -354,16 +381,16 @@ impl ConnectionHandle {
                 Ok(conn) => conn,
                 Err(_) => Err(Error::Canceled),
             },
-            None => self.connect(ordered).await,
+            None => self.connect(addr, ordered).await,
         }
     }
 
-    async fn connect(&self, ordered: bool) -> Result<Arc<Connection>> {
+    async fn connect(&self, addr: &SocketAddr, ordered: bool) -> Result<Arc<Connection>> {
         let new_conn = match self.connect_inner(ordered).await {
             Ok(c) => c,
             Err(e) => {
-                let mut conn = self.conn.lock().await;
-                if let Some(ConnectionState::Connecting(waiters)) = conn.deref_mut() {
+                let mut conn = self.conns.lock().await;
+                if let Some(ConnectionState::Connecting(waiters)) = conn.get_mut(addr) {
                     for tx in waiters.drain(..) {
                         tx.send(Err(Error::Canceled)).ok();
                     }
@@ -371,15 +398,17 @@ impl ConnectionHandle {
                 return Err(e);
             }
         };
-        let mut conn = self.conn.lock().await;
-        match conn.deref_mut() {
+        let mut conns = self.conns.lock().await;
+        match conns.get_mut(addr) {
             Some(ConnectionState::Connected(c)) => *c = new_conn.clone(),
             Some(ConnectionState::Connecting(waiters)) => {
                 for tx in waiters.drain(..) {
                     tx.send(Ok(new_conn.clone())).ok();
                 }
             }
-            None => *conn = Some(ConnectionState::Connected(new_conn.clone())),
+            None => {
+                conns.insert(*addr, ConnectionState::Connected(new_conn.clone()));
+            }
         }
         Ok(new_conn)
     }

@@ -22,7 +22,7 @@ pub async fn consumer_reconnect(
     let mut delay = retry_opts.min_retry_delay;
     let mut count = 0;
     loop {
-        match conn_handle.get_connection(false).await {
+        match conn_handle.lookup_topic(&sub_message.topic, false).await {
             Ok(conn) => {
                 let (tx, rx) = mpsc::unbounded_channel();
                 match conn
@@ -69,7 +69,7 @@ pub async fn producer_reconnect(
     let mut delay = retry_opts.min_retry_delay;
     let mut count = 0;
     loop {
-        match conn_handle.get_connection(ordered).await {
+        match conn_handle.lookup_topic(topic, ordered).await {
             Ok(conn) => match conn.create_producer(name, id, topic, access_mode).await {
                 Ok(seq_id) => return Ok((conn, seq_id)),
                 Err(e) => {
