@@ -6,6 +6,7 @@ mod publish;
 mod response;
 mod send;
 mod subscribe;
+pub mod topic;
 mod unsubscribe;
 
 use std::{io, slice::Iter};
@@ -15,6 +16,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::codec::{self, Codec};
 
+use self::topic::{LookupTopic, LookupTopicResponse};
 pub use self::{
     connect::Connect,
     consume_ack::ConsumeAck,
@@ -74,6 +76,10 @@ impl Decoder for PacketCodec {
             PacketType::Disconnect => Packet::Disconnect,
             PacketType::CloseProducer => Packet::CloseProducer(CloseProducer::decode(&mut bytes)?),
             PacketType::CloseConsumer => Packet::CloseConsumer(CloseConsumer::decode(&mut bytes)?),
+            PacketType::LookupTopic => Packet::LookupTopic(LookupTopic::decode(&mut bytes)?),
+            PacketType::LookupTopicResponse => {
+                Packet::LookupTopicResponse(LookupTopicResponse::decode(&mut bytes)?)
+            }
         }))
     }
 }
@@ -106,6 +112,8 @@ pub enum PacketType {
     Disconnect,
     CloseProducer,
     CloseConsumer,
+    LookupTopic,
+    LookupTopicResponse,
 }
 
 impl std::fmt::Display for PacketType {
@@ -126,6 +134,8 @@ impl std::fmt::Display for PacketType {
             PacketType::Disconnect => "DISCONNECT",
             PacketType::CloseProducer => "CLOSE_PRODUCER",
             PacketType::CloseConsumer => "CLOSE_CONSUMER",
+            PacketType::LookupTopic => "LOOKUP_TOPIC",
+            PacketType::LookupTopicResponse => "LOOKUP_TOPIC_RESPONSE",
         };
         write!(f, "{s}")
     }
@@ -148,6 +158,8 @@ pub enum Packet {
     Disconnect,
     CloseProducer(CloseProducer),
     CloseConsumer(CloseConsumer),
+    LookupTopic(LookupTopic),
+    LookupTopicResponse(LookupTopicResponse),
 }
 
 impl Packet {
@@ -168,6 +180,8 @@ impl Packet {
             Packet::Disconnect => Header::new(PacketType::Disconnect, 0),
             Packet::CloseProducer(p) => p.header(),
             Packet::CloseConsumer(p) => p.header(),
+            Packet::LookupTopic(p) => p.header(),
+            Packet::LookupTopicResponse(p) => p.header(),
         }
     }
 
@@ -188,6 +202,8 @@ impl Packet {
             Packet::Disconnect => {}
             Packet::CloseProducer(p) => p.encode(buf),
             Packet::CloseConsumer(p) => p.encode(buf),
+            Packet::LookupTopic(p) => p.encode(buf),
+            Packet::LookupTopicResponse(p) => p.encode(buf),
         }
     }
 
@@ -208,6 +224,8 @@ impl Packet {
             Packet::Disconnect => PacketType::Disconnect,
             Packet::CloseProducer(_) => PacketType::CloseProducer,
             Packet::CloseConsumer(_) => PacketType::CloseConsumer,
+            Packet::LookupTopic(_) => PacketType::LookupTopic,
+            Packet::LookupTopicResponse(_) => PacketType::LookupTopicResponse,
         }
     }
 
@@ -313,6 +331,8 @@ impl Header {
             13 => PacketType::Disconnect,
             14 => PacketType::CloseProducer,
             15 => PacketType::CloseConsumer,
+            16 => PacketType::LookupTopic,
+            17 => PacketType::LookupTopicResponse,
             _ => return Err(codec::Error::Malformed.into()),
         })
     }
@@ -488,6 +508,21 @@ mod tests {
     #[test]
     fn codec_close_consumer() {
         codec_works(Packet::CloseConsumer(CloseConsumer { consumer_id: 55 }))
+    }
+
+    #[test]
+    fn codec_lookup_topic() {
+        codec_works(Packet::LookupTopic(LookupTopic {
+            topic_name: "test-topic".to_string(),
+        }))
+    }
+
+    #[test]
+    fn codec_lookup_topic_resp() {
+        codec_works(Packet::LookupTopicResponse(LookupTopicResponse {
+            broker_id: "broker_1".to_string(),
+            broker_addr: "127.0.0.1:9998".to_string(),
+        }))
     }
 
     fn codec_works(packet: Packet) {

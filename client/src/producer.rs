@@ -33,7 +33,9 @@ pub struct Producer {
     topic: String,
     access_mode: AccessMode,
     sequence_id: u64,
+    /// connect to broker holding current topic
     conn: Arc<Connection>,
+    /// use to get connection by broker addr
     conn_handle: ConnectionHandle,
     ordered: bool,
     retry_opts: Option<RetryOptions>,
