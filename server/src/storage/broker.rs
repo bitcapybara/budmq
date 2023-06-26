@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use bud_common::storage::MetaStorage;
 
 use super::{Error, Result};
@@ -44,6 +46,13 @@ impl<M: MetaStorage> BrokerStorage<M> {
         let key = format!("{}-{}", Self::TOPIC_ID_KEY, topic_name);
         self.storage
             .put_u64(&key, topic_id)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
+    }
+
+    pub async fn get_topic_broker_addr(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
+        self.storage
+            .get_topic_owner(topic_name)
             .await
             .map_err(|e| Error::Storage(e.to_string()))
     }

@@ -4,8 +4,8 @@ use bud_common::{
     helper::wait,
     id::SerialId,
     protocol::{
-        self, CloseConsumer, CloseProducer, Connect, CreateProducer, Packet, PacketType,
-        ProducerReceipt, ReturnCode, Send, Unsubscribe,
+        self, topic::LookupTopicResponse, CloseConsumer, CloseProducer, Connect, CreateProducer,
+        Packet, PacketType, ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
     storage::{MessageStorage, MetaStorage},
 };
@@ -154,7 +154,7 @@ impl Session {
 #[derive(Clone)]
 pub struct Broker<M, S> {
     /// meta storage
-    meta_storage: BrokerStorage<M>,
+    broker_storage: BrokerStorage<M>,
     /// topic storage
     message_storage: S,
     /// request id
@@ -170,7 +170,7 @@ pub struct Broker<M, S> {
 impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
     pub fn new(meta_storage: M, message_storage: S, token: CancellationToken) -> Self {
         Self {
-            meta_storage: BrokerStorage::new(meta_storage),
+            broker_storage: BrokerStorage::new(meta_storage),
             clients: Arc::new(RwLock::new(HashMap::new())),
             topics: Arc::new(RwLock::new(HashMap::new())),
             token,
@@ -470,14 +470,14 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     }
                     None => {
                         let topic_id = self
-                            .meta_storage
+                            .broker_storage
                             .get_or_create_topic_id(&topic_name)
                             .await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &topic_name,
                             send_tx.clone(),
-                            self.meta_storage.inner(),
+                            self.broker_storage.inner(),
                             self.message_storage.clone(),
                             self.token.child_token(),
                         )
@@ -533,12 +533,15 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     },
                     None => {
                         trace!("broker::process_packets: create new topic");
-                        let topic_id = self.meta_storage.get_or_create_topic_id(&sub.topic).await?;
+                        let topic_id = self
+                            .broker_storage
+                            .get_or_create_topic_id(&sub.topic)
+                            .await?;
                         let mut topic = Topic::new(
                             topic_id,
                             &sub.topic,
                             send_tx.clone(),
-                            self.meta_storage.inner(),
+                            self.broker_storage.inner(),
                             self.message_storage.clone(),
                             self.token.child_token(),
                         )
@@ -646,6 +649,18 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     .await
                     .conv()?;
                 Ok(Packet::ok_response())
+            }
+            Packet::LookupTopic(p) => {
+                match self
+                    .broker_storage
+                    .get_topic_broker_addr(&p.topic_name)
+                    .await?
+                {
+                    Some(addr) => Ok(Packet::LookupTopicResponse(LookupTopicResponse {
+                        broker_addr: addr.to_string(),
+                    })),
+                    None => Ok(Packet::err_response(ReturnCode::TopicNotExists)),
+                }
             }
             p => Err(Error::UnsupportedPacket(p.packet_type())),
         }

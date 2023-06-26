@@ -86,11 +86,11 @@ impl MetaStorage for MemoryStorage {
         }
     }
 
-    async fn register_topic(&self, _topic_id: u64, _broker_id: &str) -> Result<()> {
+    async fn register_topic(&self, _topic_name: &str, _broker_id: &str) -> Result<()> {
         Ok(())
     }
 
-    async fn get_topic_owner(&self, _topic_id: u64) -> Result<Option<SocketAddr>> {
+    async fn get_topic_owner(&self, _topic_name: &str) -> Result<Option<SocketAddr>> {
         let broker = self.broker_addr.read().await;
         match *broker {
             Some(addr) => Ok(Some(addr)),

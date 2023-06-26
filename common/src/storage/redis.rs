@@ -127,12 +127,12 @@ impl MetaStorage for Redis {
         Ok(res)
     }
 
-    async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<()> {
+    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         // SET EX NX
         let res: Option<String> = redis::Cmd::new()
             .arg("SET")
-            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_id}")) // key
+            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
             .arg(broker_id) // value
             .arg("NX")
             .arg("EX")
@@ -145,7 +145,7 @@ impl MetaStorage for Redis {
         // spawn SET EX
         let client = self.client.clone();
         let token = self.token.child_token();
-        let topic_id = topic_id;
+        let topic_name = topic_name.to_string();
         let broker_id = broker_id.to_owned();
         tokio::spawn(async move {
             loop {
@@ -160,7 +160,7 @@ impl MetaStorage for Redis {
                         };
                         if let Err(e) = redis::Cmd::new()
                             .arg("SET")
-                            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_id}")) // key
+                            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
                             .arg(&broker_id) // value
                             .arg("EX")
                             .arg(10)
@@ -179,11 +179,11 @@ impl MetaStorage for Redis {
         Ok(())
     }
 
-    async fn get_topic_owner(&self, topic_id: u64) -> Result<Option<SocketAddr>> {
+    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
         let mut conn = self.client.get_async_connection().await?;
         // GET broker id
         let broker_id: String = {
-            match redis::Cmd::get(format!("BUDMQ_TOPIC_BROKER:{topic_id}"))
+            match redis::Cmd::get(format!("BUDMQ_TOPIC_BROKER:{topic_name}"))
                 .query_async(&mut conn)
                 .await?
             {

@@ -100,14 +100,14 @@ impl MetaStorage for BonsaiDB {
         }
     }
 
-    async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<()> {
-        let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_id);
+    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<()> {
+        let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
         self.metas.set_key(key, &broker_id).await?;
         Ok(())
     }
 
-    async fn get_topic_owner(&self, topic_id: u64) -> Result<Option<SocketAddr>> {
-        let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_id);
+    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
+        let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
         Ok(self.metas.get_key(key).into().await?)
     }
 

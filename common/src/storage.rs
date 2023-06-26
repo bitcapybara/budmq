@@ -20,9 +20,9 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
 
     async fn all_brokers(&self) -> Result<Vec<SocketAddr>, Self::Error>;
 
-    async fn register_topic(&self, topic_id: u64, broker_id: &str) -> Result<(), Self::Error>;
+    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<(), Self::Error>;
 
-    async fn get_topic_owner(&self, topic_id: u64) -> Result<Option<SocketAddr>, Self::Error>;
+    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>, Self::Error>;
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<(), Self::Error>;
 
