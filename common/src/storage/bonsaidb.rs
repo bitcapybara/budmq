@@ -88,17 +88,6 @@ impl BonsaiDB {
 #[async_trait]
 impl MetaStorage for BonsaiDB {
     type Error = Error;
-    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
-        self.metas.set_key(CURRENT_BROKER_KEY, addr).await?;
-        Ok(())
-    }
-
-    async fn all_brokers(&self) -> Result<Vec<SocketAddr>> {
-        match self.metas.get_key(CURRENT_BROKER_KEY).into().await? {
-            Some(addr) => Ok(vec![addr]),
-            _ => Ok(vec![]),
-        }
-    }
 
     async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<()> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);

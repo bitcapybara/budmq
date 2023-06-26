@@ -72,20 +72,6 @@ impl Default for MemoryStorage {
 impl MetaStorage for MemoryStorage {
     type Error = Error;
 
-    async fn register_broker(&self, _id: &str, addr: &SocketAddr) -> Result<()> {
-        let mut broker = self.broker_addr.write().await;
-        *broker = Some(*addr);
-        Ok(())
-    }
-
-    async fn all_brokers(&self) -> Result<Vec<SocketAddr>> {
-        let broker = self.broker_addr.read().await;
-        match *broker {
-            Some(addr) => Ok(vec![addr]),
-            None => Ok(vec![]),
-        }
-    }
-
     async fn register_topic(&self, _topic_name: &str, _broker_id: &str) -> Result<()> {
         Ok(())
     }
