@@ -72,16 +72,13 @@ impl Default for MemoryStorage {
 impl MetaStorage for MemoryStorage {
     type Error = Error;
 
-    async fn register_topic(&self, _topic_name: &str, _broker_id: &str) -> Result<()> {
+    async fn register_topic(&self, _topic_name: &str, _broker_addr: &SocketAddr) -> Result<()> {
         Ok(())
     }
 
     async fn get_topic_owner(&self, _topic_name: &str) -> Result<Option<SocketAddr>> {
         let broker = self.broker_addr.read().await;
-        match *broker {
-            Some(addr) => Ok(Some(addr)),
-            None => Ok(None),
-        }
+        Ok(*broker)
     }
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {

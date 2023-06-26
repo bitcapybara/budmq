@@ -54,40 +54,8 @@ impl Producer {
         retry_opts: Option<RetryOptions>,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
-        let (conn, sequence_id) = match conn_handle.lookup_topic(topic, ordered).await {
-            Ok(conn) => match conn.create_producer(name, id, topic, access_mode).await {
-                Ok(sequence_id) => (conn, sequence_id),
-                Err(connection::Error::Disconnect) => {
-                    if let Err(e) = conn.close_producer(id).await {
-                        warn!("client CLOSE_PRODUCER error: {e}")
-                    }
-                    producer_reconnect(
-                        &retry_opts,
-                        ordered,
-                        &conn_handle,
-                        name,
-                        id,
-                        topic,
-                        access_mode,
-                    )
-                    .await?
-                }
-                Err(e) => return Err(e.into()),
-            },
-            Err(connection::Error::Disconnect) => {
-                producer_reconnect(
-                    &retry_opts,
-                    ordered,
-                    &conn_handle,
-                    name,
-                    id,
-                    topic,
-                    access_mode,
-                )
-                .await?
-            }
-            Err(e) => return Err(e.into()),
-        };
+        let conn = conn_handle.lookup_topic(topic, ordered).await?;
+        let sequence_id = conn.create_producer(name, id, topic, access_mode).await?;
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,

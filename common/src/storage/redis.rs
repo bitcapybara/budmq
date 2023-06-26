@@ -54,13 +54,13 @@ impl Redis {
 impl MetaStorage for Redis {
     type Error = Error;
 
-    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<()> {
+    async fn register_topic(&self, topic_name: &str, broker_addr: &SocketAddr) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         // SET EX NX
         let res: Option<String> = redis::Cmd::new()
             .arg("SET")
             .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
-            .arg(broker_id) // value
+            .arg(broker_addr.to_string()) // value
             .arg("NX")
             .arg("EX")
             .arg(10)
@@ -73,7 +73,7 @@ impl MetaStorage for Redis {
         let client = self.client.clone();
         let token = self.token.child_token();
         let topic_name = topic_name.to_string();
-        let broker_id = broker_id.to_owned();
+        let broker_addr = broker_addr.to_owned();
         tokio::spawn(async move {
             loop {
                 select! {
@@ -88,7 +88,7 @@ impl MetaStorage for Redis {
                         if let Err(e) = redis::Cmd::new()
                             .arg("SET")
                             .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
-                            .arg(&broker_id) // value
+                            .arg(&broker_addr.to_string()) // value
                             .arg("EX")
                             .arg(10)
                             .query_async::<_, String>(&mut conn)

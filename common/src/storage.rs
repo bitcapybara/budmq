@@ -16,7 +16,11 @@ pub mod redis;
 pub trait MetaStorage: Clone + Send + Sync + 'static {
     type Error: std::error::Error;
 
-    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<(), Self::Error>;
+    async fn register_topic(
+        &self,
+        topic_name: &str,
+        broker_addr: &SocketAddr,
+    ) -> Result<(), Self::Error>;
 
     async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>, Self::Error>;
 

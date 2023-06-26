@@ -89,9 +89,9 @@ impl BonsaiDB {
 impl MetaStorage for BonsaiDB {
     type Error = Error;
 
-    async fn register_topic(&self, topic_name: &str, broker_id: &str) -> Result<()> {
+    async fn register_topic(&self, topic_name: &str, broker_addr: &SocketAddr) -> Result<()> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
-        self.metas.set_key(key, &broker_id).await?;
+        self.metas.set_key(key, &broker_addr).await?;
         Ok(())
     }
 

@@ -273,14 +273,15 @@ impl Connection {
         .await
     }
 
-    pub async fn lookup_topic(&self, topic_name: &str) -> Result<SocketAddr> {
+    pub async fn lookup_topic(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
         match self
             .send(Packet::LookupTopic(LookupTopic {
                 topic_name: topic_name.to_string(),
             }))
             .await?
         {
-            Packet::LookupTopicResponse(p) => Ok(p.broker_addr.parse()?),
+            Packet::LookupTopicResponse(p) => Ok(Some(p.broker_addr.parse()?)),
+            Packet::Response(Response { code }) if code == ReturnCode::TopicNotExists => Ok(None),
             _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
     }
@@ -348,10 +349,16 @@ impl ConnectionHandle {
         }
     }
 
+    pub async fn get_base_connection(&self, ordered: bool) -> Result<Arc<Connection>> {
+        self.get_connection(&self.addr, ordered).await
+    }
+
     pub async fn lookup_topic(&self, topic_name: &str, ordered: bool) -> Result<Arc<Connection>> {
         let conn = self.get_connection(&self.addr, ordered).await?;
-        let broker_addr = conn.lookup_topic(topic_name).await?;
-        self.get_connection(&broker_addr, ordered).await
+        match conn.lookup_topic(topic_name).await? {
+            Some(addr) => self.get_connection(&addr, ordered).await,
+            None => self.get_base_connection(ordered).await,
+        }
     }
 
     /// get the connection in manager, setup a new writer

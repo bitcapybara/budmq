@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use bud_common::{
     helper::wait,
@@ -153,6 +153,8 @@ impl Session {
 
 #[derive(Clone)]
 pub struct Broker<M, S> {
+    /// broker addr
+    addr: SocketAddr,
     /// meta storage
     broker_storage: BrokerStorage<M>,
     /// topic storage
@@ -168,7 +170,12 @@ pub struct Broker<M, S> {
 }
 
 impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
-    pub fn new(meta_storage: M, message_storage: S, token: CancellationToken) -> Self {
+    pub fn new(
+        addr: &SocketAddr,
+        meta_storage: M,
+        message_storage: S,
+        token: CancellationToken,
+    ) -> Self {
         Self {
             broker_storage: BrokerStorage::new(meta_storage),
             clients: Arc::new(RwLock::new(HashMap::new())),
@@ -176,6 +183,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             token,
             request_id: SerialId::new(),
             message_storage,
+            addr: *addr,
         }
     }
 
@@ -482,6 +490,9 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                             self.token.child_token(),
                         )
                         .await?;
+                        self.broker_storage
+                            .register_topic(&topic_name, &self.addr)
+                            .await?;
                         let sequence_id = match topic
                             .add_producer(producer_id, &producer_name, access_mode)
                             .await
@@ -546,6 +557,9 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                             self.token.child_token(),
                         )
                         .await?;
+                        self.broker_storage
+                            .register_topic(&sub.topic, &self.addr)
+                            .await?;
                         trace!("broker::process_packets: add subscription to topic");
                         topic
                             .add_subscription(

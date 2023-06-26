@@ -65,7 +65,8 @@ impl Server {
         // start broker loop
         trace!("server::start: start broker task");
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new(meta_storage, message_storage, token.clone()).run(broker_rx);
+        let broker_task =
+            Broker::new(&self.addr, meta_storage, message_storage, token.clone()).run(broker_rx);
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
