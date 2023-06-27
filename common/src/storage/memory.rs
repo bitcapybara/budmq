@@ -1,12 +1,12 @@
 //! Memory Storage
 //! Only used for standalone, non-durable server
 
-use std::{array, collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{array, collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use crate::types::{MessageId, SubscriptionInfo, TopicMessage};
+use crate::types::{BrokerAddress, MessageId, SubscriptionInfo, TopicMessage};
 
 use super::{MessageStorage, MetaStorage};
 
@@ -24,7 +24,7 @@ pub struct MemoryStorage {
     /// str_key -> bytes_value
     metas: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     /// broker
-    broker_addr: Arc<RwLock<Option<SocketAddr>>>,
+    broker_addr: Arc<RwLock<Option<BrokerAddress>>>,
     /// topic_name -> sub_name -> subscription
     subs: Arc<RwLock<HashMap<String, HashMap<String, SubscriptionInfo>>>>,
     /// cursor
@@ -72,13 +72,15 @@ impl Default for MemoryStorage {
 impl MetaStorage for MemoryStorage {
     type Error = Error;
 
-    async fn register_topic(&self, _topic_name: &str, _broker_addr: &SocketAddr) -> Result<()> {
+    async fn register_topic(&self, _topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
+        let mut broker = self.broker_addr.write().await;
+        *broker = Some(broker_addr.clone());
         Ok(())
     }
 
-    async fn get_topic_owner(&self, _topic_name: &str) -> Result<Option<SocketAddr>> {
+    async fn get_topic_owner(&self, _topic_name: &str) -> Result<Option<BrokerAddress>> {
         let broker = self.broker_addr.read().await;
-        Ok(*broker)
+        Ok((*broker).clone())
     }
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {

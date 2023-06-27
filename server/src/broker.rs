@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use bud_common::{
     helper::wait,
@@ -8,6 +8,7 @@ use bud_common::{
         Packet, PacketType, ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
     storage::{MessageStorage, MetaStorage},
+    types::BrokerAddress,
 };
 use chrono::Utc;
 use futures::future;
@@ -154,7 +155,7 @@ impl Session {
 #[derive(Clone)]
 pub struct Broker<M, S> {
     /// broker addr
-    addr: SocketAddr,
+    addr: BrokerAddress,
     /// meta storage
     broker_storage: BrokerStorage<M>,
     /// topic storage
@@ -171,7 +172,7 @@ pub struct Broker<M, S> {
 
 impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
     pub fn new(
-        addr: &SocketAddr,
+        addr: &BrokerAddress,
         meta_storage: M,
         message_storage: S,
         token: CancellationToken,
@@ -183,7 +184,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             token,
             request_id: SerialId::new(),
             message_storage,
-            addr: *addr,
+            addr: addr.clone(),
         }
     }
 
@@ -356,7 +357,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 trace!("broker::process_packets: add new client: {}", client_id);
             }
             Packet::Disconnect => {
-                // TODO close producers and consumers
                 trace!("broker::process_packets: broker receive DISCONNECT packet");
                 let mut clients = self.clients.write().await;
                 let Some(mut session) = clients.remove(&client_id) else {
@@ -671,7 +671,8 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     .await?
                 {
                     Some(addr) => Ok(Packet::LookupTopicResponse(LookupTopicResponse {
-                        broker_addr: addr.to_string(),
+                        broker_addr: addr.socket_addr.to_string(),
+                        server_name: addr.server_name,
                     })),
                     None => Ok(Packet::err_response(ReturnCode::TopicNotExists)),
                 }

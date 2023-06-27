@@ -15,7 +15,7 @@ use bud_common::{
         topic::LookupTopic, CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer,
         Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
-    types::{AccessMode, MessageId},
+    types::{AccessMode, BrokerAddress, MessageId},
 };
 use bytes::Bytes;
 use chrono::Utc;
@@ -273,14 +273,17 @@ impl Connection {
         .await
     }
 
-    pub async fn lookup_topic(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
+    pub async fn lookup_topic(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         match self
             .send(Packet::LookupTopic(LookupTopic {
                 topic_name: topic_name.to_string(),
             }))
             .await?
         {
-            Packet::LookupTopicResponse(p) => Ok(Some(p.broker_addr.parse()?)),
+            Packet::LookupTopicResponse(p) => Ok(Some(BrokerAddress {
+                socket_addr: p.broker_addr.parse()?,
+                server_name: p.server_name,
+            })),
             Packet::Response(Response { code }) if code == ReturnCode::TopicNotExists => Ok(None),
             _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
@@ -350,24 +353,29 @@ impl ConnectionHandle {
     }
 
     pub async fn get_base_connection(&self, ordered: bool) -> Result<Arc<Connection>> {
-        self.get_connection(&self.addr, ordered).await
+        let addr = &BrokerAddress {
+            socket_addr: self.addr,
+            server_name: self.server_name.clone(),
+        };
+        self.get_connection(addr, ordered).await
     }
 
     pub async fn lookup_topic(&self, topic_name: &str, ordered: bool) -> Result<Arc<Connection>> {
-        let conn = self.get_connection(&self.addr, ordered).await?;
+        let conn = self.get_base_connection(ordered).await?;
         match conn.lookup_topic(topic_name).await? {
             Some(addr) => self.get_connection(&addr, ordered).await,
-            None => self.get_base_connection(ordered).await,
+            None => Ok(conn),
         }
     }
 
     /// get the connection in manager, setup a new writer
-    async fn get_connection(&self, addr: &SocketAddr, ordered: bool) -> Result<Arc<Connection>> {
+    async fn get_connection(&self, addr: &BrokerAddress, ordered: bool) -> Result<Arc<Connection>> {
         let rx = {
             let mut conn = self.conns.lock().await;
-            match conn.get_mut(addr) {
+            match conn.get_mut(&addr.socket_addr) {
                 Some(ConnectionState::Connected(c)) => {
                     if c.is_valid() {
+                        trace!("get connected connection, addr: {}", addr.socket_addr);
                         let cloned = c.clone_one(ordered);
                         return Ok(Arc::new(cloned));
                     } else {
@@ -392,12 +400,13 @@ impl ConnectionHandle {
         }
     }
 
-    async fn connect(&self, addr: &SocketAddr, ordered: bool) -> Result<Arc<Connection>> {
-        let new_conn = match self.connect_inner(ordered).await {
+    async fn connect(&self, addr: &BrokerAddress, ordered: bool) -> Result<Arc<Connection>> {
+        let new_conn = match self.connect_inner(addr, ordered).await {
             Ok(c) => c,
             Err(e) => {
                 let mut conn = self.conns.lock().await;
-                if let Some(ConnectionState::Connecting(waiters)) = conn.get_mut(addr) {
+                if let Some(ConnectionState::Connecting(waiters)) = conn.get_mut(&addr.socket_addr)
+                {
                     for tx in waiters.drain(..) {
                         tx.send(Err(Error::Canceled)).ok();
                     }
@@ -406,7 +415,7 @@ impl ConnectionHandle {
             }
         };
         let mut conns = self.conns.lock().await;
-        match conns.get_mut(addr) {
+        match conns.get_mut(&addr.socket_addr) {
             Some(ConnectionState::Connected(c)) => *c = new_conn.clone(),
             Some(ConnectionState::Connecting(waiters)) => {
                 for tx in waiters.drain(..) {
@@ -414,13 +423,16 @@ impl ConnectionHandle {
                 }
             }
             None => {
-                conns.insert(*addr, ConnectionState::Connected(new_conn.clone()));
+                conns.insert(
+                    addr.socket_addr,
+                    ConnectionState::Connected(new_conn.clone()),
+                );
             }
         }
         Ok(new_conn)
     }
 
-    async fn connect_inner(&self, ordered: bool) -> Result<Arc<Connection>> {
+    async fn connect_inner(&self, addr: &BrokerAddress, ordered: bool) -> Result<Arc<Connection>> {
         // TODO loop retry backoff
         // unwrap safe: with_tls error is infallible
         trace!("connector::connect: create client and connect");
@@ -429,8 +441,8 @@ impl ConnectionHandle {
             .unwrap()
             .with_io("0.0.0.0:0")?
             .start()?;
-        let connector =
-            s2n_quic::client::Connect::new(self.addr).with_server_name(self.server_name.as_str());
+        let connector = s2n_quic::client::Connect::new(addr.socket_addr)
+            .with_server_name(addr.server_name.as_str());
         let mut connection = client.connect(connector).await?;
         connection.keep_alive(true)?;
         Ok(Arc::new(Connection::new(

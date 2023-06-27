@@ -1,8 +1,6 @@
-use std::net::SocketAddr;
-
 use async_trait::async_trait;
 
-use crate::types::{MessageId, SubscriptionInfo, TopicMessage};
+use crate::types::{BrokerAddress, MessageId, SubscriptionInfo, TopicMessage};
 
 #[cfg(feature = "bonsaidb")]
 pub mod bonsaidb;
@@ -19,10 +17,11 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
     async fn register_topic(
         &self,
         topic_name: &str,
-        broker_addr: &SocketAddr,
+        broker_addr: &BrokerAddress,
     ) -> Result<(), Self::Error>;
 
-    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>, Self::Error>;
+    async fn get_topic_owner(&self, topic_name: &str)
+        -> Result<Option<BrokerAddress>, Self::Error>;
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<(), Self::Error>;
 

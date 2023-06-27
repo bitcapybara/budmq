@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use async_trait::async_trait;
 use bonsaidb::{
     core::keyvalue::{AsyncKeyValue, Numeric, Value},
@@ -12,7 +10,7 @@ use bytes::{Bytes, BytesMut};
 
 use crate::{
     codec::{self, Codec},
-    types::{MessageId, SubscriptionInfo, TopicMessage},
+    types::{BrokerAddress, MessageId, SubscriptionInfo, TopicMessage},
 };
 
 use super::{MessageStorage, MetaStorage};
@@ -89,13 +87,13 @@ impl BonsaiDB {
 impl MetaStorage for BonsaiDB {
     type Error = Error;
 
-    async fn register_topic(&self, topic_name: &str, broker_addr: &SocketAddr) -> Result<()> {
+    async fn register_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
         self.metas.set_key(key, &broker_addr).await?;
         Ok(())
     }
 
-    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
+    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
         Ok(self.metas.get_key(key).into().await?)
     }

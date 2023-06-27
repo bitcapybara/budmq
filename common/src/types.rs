@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
@@ -117,4 +119,10 @@ pub struct SubscriptionInfo {
     pub name: String,
     pub sub_type: SubType,
     pub init_position: InitialPostion,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BrokerAddress {
+    pub socket_addr: SocketAddr,
+    pub server_name: String,
 }

@@ -1,7 +1,4 @@
-use std::{
-    net::{AddrParseError, SocketAddr},
-    time::Duration,
-};
+use std::{net::AddrParseError, time::Duration};
 
 use async_trait::async_trait;
 use log::error;
@@ -9,7 +6,7 @@ use redis::{AsyncCommands, Client};
 use tokio::{select, time};
 use tokio_util::sync::CancellationToken;
 
-use crate::types::SubscriptionInfo;
+use crate::types::{BrokerAddress, SubscriptionInfo};
 
 use super::MetaStorage;
 
@@ -54,13 +51,14 @@ impl Redis {
 impl MetaStorage for Redis {
     type Error = Error;
 
-    async fn register_topic(&self, topic_name: &str, broker_addr: &SocketAddr) -> Result<()> {
+    async fn register_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         // SET EX NX
+        let broker_addr = serde_json::to_string(broker_addr)?;
         let res: Option<String> = redis::Cmd::new()
             .arg("SET")
             .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
-            .arg(broker_addr.to_string()) // value
+            .arg(&broker_addr) // value
             .arg("NX")
             .arg("EX")
             .arg(10)
@@ -73,7 +71,6 @@ impl MetaStorage for Redis {
         let client = self.client.clone();
         let token = self.token.child_token();
         let topic_name = topic_name.to_string();
-        let broker_addr = broker_addr.to_owned();
         tokio::spawn(async move {
             loop {
                 select! {
@@ -88,7 +85,7 @@ impl MetaStorage for Redis {
                         if let Err(e) = redis::Cmd::new()
                             .arg("SET")
                             .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
-                            .arg(&broker_addr.to_string()) // value
+                            .arg(&broker_addr) // value
                             .arg("EX")
                             .arg(10)
                             .query_async::<_, String>(&mut conn)
@@ -106,7 +103,7 @@ impl MetaStorage for Redis {
         Ok(())
     }
 
-    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<SocketAddr>> {
+    async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         let mut conn = self.client.get_async_connection().await?;
         // GET broker id
         let broker_id: String = {
@@ -128,7 +125,7 @@ impl MetaStorage for Redis {
                 None => return Ok(None),
             }
         };
-        Ok(Some(addr.parse()?))
+        Ok(Some(serde_json::from_str(&addr)?))
     }
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {

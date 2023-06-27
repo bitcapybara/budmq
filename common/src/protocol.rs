@@ -521,6 +521,7 @@ mod tests {
     fn codec_lookup_topic_resp() {
         codec_works(Packet::LookupTopicResponse(LookupTopicResponse {
             broker_addr: "127.0.0.1:9998".to_string(),
+            server_name: "localhost".to_string(),
         }))
     }
 

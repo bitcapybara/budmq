@@ -1,9 +1,10 @@
-use std::{io, net::SocketAddr};
+use std::io;
 
 use bud_common::{
     helper::wait,
     mtls::MtlsProvider,
     storage::{MessageStorage, MetaStorage},
+    types::BrokerAddress,
 };
 use futures::future;
 use log::{error, trace};
@@ -39,18 +40,18 @@ impl From<provider::StartError> for Error {
 
 pub struct Server {
     provider: MtlsProvider,
-    addr: SocketAddr,
+    addr: BrokerAddress,
     token: CancellationToken,
 }
 
 impl Server {
-    pub fn new(provider: MtlsProvider, addr: SocketAddr) -> (CancellationToken, Self) {
+    pub fn new(provider: MtlsProvider, addr: &BrokerAddress) -> (CancellationToken, Self) {
         let token = CancellationToken::new();
         (
             token.clone(),
             Self {
                 provider,
-                addr,
+                addr: addr.clone(),
                 token,
             },
         )
@@ -75,7 +76,7 @@ impl Server {
         let server = s2n_quic::Server::builder()
             .with_tls(self.provider)
             .unwrap()
-            .with_io(self.addr)?
+            .with_io(self.addr.socket_addr)?
             .start()?;
         let server_task = Self::handle_accept(server, broker_tx, token.clone());
         let server_handle = tokio::spawn(server_task);

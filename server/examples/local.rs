@@ -1,10 +1,10 @@
 use std::{
     fs,
     io::Read,
-    net::SocketAddr,
     path::{Path, PathBuf},
 };
 
+use bud_common::types::BrokerAddress;
 use bud_server::{
     common::{mtls::MtlsProvider, storage::memory::MemoryStorage},
     Server,
@@ -20,8 +20,8 @@ use tokio_util::sync::CancellationToken;
 struct Args {
     #[arg(short, long, default_value = "./certs", env = "BUD_SERVER_CERTS_DIR")]
     cert_dir: PathBuf,
-    #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_ADDR")]
-    addr: String,
+    #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_IP")]
+    ip: String,
     #[arg(short, long, default_value_t = 9080, env = "BUD_SERVER_PORT")]
     port: u16,
     #[arg(short, long, default_value = "info", env = "BUD_SERVER_LOG_LEVEL")]
@@ -44,7 +44,11 @@ fn main() -> anyhow::Result<()> {
     let server_cert = read_file(&args.cert_dir.join("server-cert.pem"))?;
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
-    let (token, server) = Server::new(provider, SocketAddr::new(args.addr.parse()?, args.port));
+    let broker_addr = BrokerAddress {
+        socket_addr: format!("{}:{}", args.ip, args.port).parse()?,
+        server_name: "localhost".to_string(),
+    };
+    let (token, server) = Server::new(provider, &broker_addr);
     run(token, server)?;
     Ok(())
 }
