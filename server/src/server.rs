@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     broker::{self, Broker},
-    client::Client,
+    client,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -134,16 +134,11 @@ impl Server {
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     ) {
         trace!("server::handle_conn: waiting for handshake");
-        match Client::handshake(client_id, conn, broker_tx).await {
-            Ok(client) => {
-                trace!("server::handle_conn: start client");
-                if let Err(e) = client.start().await {
-                    error!("handle connection from {local} error: {e}");
-                }
-            }
-            Err(e) => {
-                error!("connection from {local} handshake error: {e}");
-            }
+        if let Err(e) = client::Client::new(client_id, conn, broker_tx)
+            .start()
+            .await
+        {
+            error!("handle connection from {local} error: {e}");
         }
     }
 }

@@ -68,6 +68,7 @@ impl Writer {
                             }
                         }
                         Err(_) => {
+                            trace!("client send PING to server");
                             match self.ping().await {
                                 Ok(Some(_)) => {},
                                 Ok(None) => {

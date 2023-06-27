@@ -5,23 +5,28 @@ use bud_common::{
         reader::{self, Request},
         SharedError,
     },
-    protocol::{Packet, Response, ReturnCode},
+    protocol::{Connect, Packet, Response, ReturnCode},
 };
 use log::{error, trace, warn};
 use s2n_quic::connection::StreamAcceptor;
 use tokio::{
     select,
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, UnboundedSender},
+        oneshot,
+    },
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
 
 use super::Result;
 use crate::{
-    broker,
+    broker::{self, BrokerMessage},
     client::{self, Error},
     WAIT_REPLY_TIMEOUT,
 };
+
+const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
 
 pub struct Reader {
     client_id: u64,
@@ -30,7 +35,6 @@ pub struct Reader {
     broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
     /// receive message from io stream
     receiver: mpsc::Receiver<Request>,
-    keepalive: u16,
     error: SharedError,
     token: CancellationToken,
 }
@@ -41,7 +45,6 @@ impl Reader {
         local_addr: &str,
         broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
         acceptor: StreamAcceptor,
-        keepalive: u16,
         error: SharedError,
         token: CancellationToken,
     ) -> Self {
@@ -52,7 +55,6 @@ impl Reader {
             local_addr: local_addr.to_string(),
             broker_tx,
             receiver,
-            keepalive,
             token,
             error,
         }
@@ -60,9 +62,16 @@ impl Reader {
 
     /// accept new stream to read a packet
     /// TODO impl Future trait
-    pub async fn run(mut self) {
+    pub async fn run(mut self, client_tx: UnboundedSender<BrokerMessage>) {
+        let keepalive = match self.handshake(client_tx).await {
+            Ok(keepalive) => keepalive,
+            Err(e) => {
+                error!("waiting for handshake packet error: {e}");
+                return;
+            }
+        };
         // 1.5 times keepalive value
-        let keepalive = Duration::from_millis((self.keepalive + self.keepalive / 2) as u64);
+        let keepalive = Duration::from_millis((keepalive + keepalive / 2) as u64);
         loop {
             if self.error.is_set() {
                 self.token.cancel();
@@ -105,6 +114,27 @@ impl Reader {
         }
     }
 
+    async fn handshake(&mut self, client_tx: UnboundedSender<BrokerMessage>) -> Result<u16> {
+        let request = timeout(HANDSHAKE_TIMOUT, self.receiver.recv())
+            .await?
+            .ok_or(Error::Disconnect)?;
+        let Request { packet, res_tx } = request;
+        match packet {
+            Packet::Connect(Connect { keepalive }) => {
+                self.send(packet, res_tx, Some(client_tx)).await?;
+                Ok(keepalive)
+            }
+            _ => {
+                res_tx
+                    .send(Some(Packet::Response(Response {
+                        code: ReturnCode::UnexpectedPacket,
+                    })))
+                    .map_err(|_| Error::Disconnect)?;
+                Err(Error::MissConnectPacket)
+            }
+        }
+    }
+
     async fn process_request(&self, request: Request) -> Result<()> {
         trace!("client::reader: waiting for framed packet");
         let Request { packet, res_tx } = request;
@@ -123,7 +153,7 @@ impl Reader {
             | Packet::ControlFlow(_)
             | Packet::LookupTopic(_)) => {
                 trace!("client::reader: receive {} packet", p.packet_type());
-                if let Err(e) = self.send(p, res_tx).await {
+                if let Err(e) = self.send(p, res_tx, None).await {
                     error!("send packet to broker error: {e}");
                     return Err(e);
                 }
@@ -158,7 +188,13 @@ impl Reader {
         Ok(())
     }
 
-    async fn send(&self, packet: Packet, res_tx: oneshot::Sender<Option<Packet>>) -> Result<()> {
+    /// send packet to broker, waiting for response
+    async fn send(
+        &self,
+        packet: Packet,
+        res_tx: oneshot::Sender<Option<Packet>>,
+        client_tx: Option<UnboundedSender<BrokerMessage>>,
+    ) -> Result<()> {
         let (broker_res_tx, broker_res_rx) = oneshot::channel();
         // send to broker
         trace!("client::reader: send packet to broker");
@@ -167,7 +203,7 @@ impl Reader {
                 client_id: self.client_id,
                 packet,
                 res_tx: Some(broker_res_tx),
-                client_tx: None,
+                client_tx,
             })
             .map_err(|_| Error::Disconnect)?;
         // wait for response in coroutine
