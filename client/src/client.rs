@@ -14,10 +14,10 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// error from producer
-    #[error("consumer error: {0}")]
+    #[error("producer error: {0}")]
     Producer(#[from] producer::Error),
     /// error from consumer
-    #[error("producer error: {0}")]
+    #[error("consumer error: {0}")]
     Consumer(#[from] consumer::Error),
 }
 

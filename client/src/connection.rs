@@ -12,14 +12,14 @@ use bud_common::{
     io::{writer::Request, SharedError},
     mtls::MtlsProvider,
     protocol::{
-        topic::LookupTopic, CloseConsumer, CloseProducer, ConsumeAck, ControlFlow, CreateProducer,
-        Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
+        topic::LookupTopic, CloseConsumer, CloseProducer, Connect, ConsumeAck, ControlFlow,
+        CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
     types::{AccessMode, BrokerAddress, MessageId},
 };
 use bytes::Bytes;
 use chrono::Utc;
-use log::trace;
+use log::{error, trace};
 use s2n_quic::{
     client,
     connection::{self, Handle},
@@ -166,6 +166,13 @@ impl Connection {
         self.error.remove().await
     }
 
+    pub async fn connect(&self) -> Result<()> {
+        self.send_ok(Packet::Connect(Connect {
+            keepalive: self.keepalive,
+        }))
+        .await
+    }
+
     pub async fn create_producer(
         &self,
         name: &str,
@@ -183,6 +190,7 @@ impl Connection {
             .await?
         {
             Packet::ProducerReceipt(ProducerReceipt { sequence_id }) => Ok(sequence_id),
+            Packet::Response(Response { code }) => Err(Error::FromPeer(code)),
             _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
     }
@@ -414,6 +422,8 @@ impl ConnectionHandle {
                 return Err(e);
             }
         };
+        // handshake first
+        new_conn.connect().await?;
         let mut conns = self.conns.lock().await;
         match conns.get_mut(&addr.socket_addr) {
             Some(ConnectionState::Connected(c)) => *c = new_conn.clone(),

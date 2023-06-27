@@ -9,7 +9,7 @@ use bud_common::{
     protocol::{self, Packet, PacketCodec, ReturnCode},
 };
 use futures::{future, SinkExt, StreamExt};
-use log::trace;
+use log::{error, trace};
 use s2n_quic::{connection, Connection};
 use tokio::{
     sync::{mpsc, oneshot},

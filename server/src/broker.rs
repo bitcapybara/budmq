@@ -665,6 +665,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 Ok(Packet::ok_response())
             }
             Packet::LookupTopic(p) => {
+                trace!("broker::process_packets: receive LOOKUP_TOPIC packet");
                 match self
                     .broker_storage
                     .get_topic_broker_addr(&p.topic_name)

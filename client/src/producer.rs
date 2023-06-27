@@ -2,7 +2,7 @@ use std::{net::AddrParseError, sync::Arc};
 
 use bud_common::{protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
-use log::warn;
+use log::{trace, warn};
 use tokio::sync::oneshot;
 
 use crate::{
@@ -54,7 +54,9 @@ impl Producer {
         retry_opts: Option<RetryOptions>,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
+        trace!("get connection from lookup topic");
         let conn = conn_handle.lookup_topic(topic, ordered).await?;
+        trace!("create new producer");
         let sequence_id = conn.create_producer(name, id, topic, access_mode).await?;
         Ok(Self {
             topic: topic.to_string(),
