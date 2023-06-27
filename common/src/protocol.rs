@@ -50,6 +50,9 @@ impl Decoder for PacketCodec {
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
+        if src.is_empty() {
+            return Ok(None);
+        }
         let (header, header_len) = Header::read(src.iter())?;
         // header + body + other
         let mut bytes = src
@@ -528,7 +531,7 @@ mod tests {
     fn codec_works(packet: Packet) {
         let mut bytes = BytesMut::new();
         PacketCodec.encode(packet.clone(), &mut bytes).unwrap();
-        println!("{:?}", bytes.as_ref());
+        println!("{}: {:?}", packet.packet_type(), bytes.as_ref());
         assert_eq!(packet, PacketCodec.decode(&mut bytes).unwrap().unwrap());
     }
 }

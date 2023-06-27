@@ -151,7 +151,8 @@ impl Reader {
             | Packet::Publish(_)
             | Packet::ConsumeAck(_)
             | Packet::ControlFlow(_)
-            | Packet::LookupTopic(_)) => {
+            | Packet::LookupTopic(_)
+            | Packet::CreateProducer(_)) => {
                 trace!("client::reader: receive {} packet", p.packet_type());
                 if let Err(e) = self.send(p, res_tx, None).await {
                     error!("send packet to broker error: {e}");
