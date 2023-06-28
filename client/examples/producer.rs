@@ -7,7 +7,7 @@ use flexi_logger::{colored_detailed_format, Logger};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // logger init
-    Logger::try_with_str("trace")
+    Logger::try_with_str("trace, mio=off, rustls=off")
         .unwrap()
         .format(colored_detailed_format)
         .start()

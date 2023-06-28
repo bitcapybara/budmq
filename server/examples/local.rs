@@ -24,8 +24,6 @@ struct Args {
     ip: String,
     #[arg(short, long, default_value_t = 9080, env = "BUD_SERVER_PORT")]
     port: u16,
-    #[arg(short, long, default_value = "info", env = "BUD_SERVER_LOG_LEVEL")]
-    log_level: String,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     println!("args: {args:?}");
     // logger init
-    Logger::try_with_str(args.log_level)
+    Logger::try_with_str("trace, mio=off, rustls=off")
         .unwrap()
         .format(colored_detailed_format)
         .start()
