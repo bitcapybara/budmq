@@ -379,10 +379,14 @@ impl ConnectionHandle {
     }
 
     pub async fn lookup_topic(&self, topic_name: &str, ordered: bool) -> Result<Arc<Connection>> {
+        trace!("connection: get_base_connection");
         let conn = self.get_base_connection(ordered).await?;
+        trace!("connection: send lookup topic packet");
         match conn.lookup_topic(topic_name).await? {
-            Some(addr) => self.get_connection(&addr, ordered).await,
-            None => Ok(conn),
+            Some(addr) if addr.socket_addr != self.addr => {
+                self.get_connection(&addr, ordered).await
+            }
+            _ => Ok(conn),
         }
     }
 

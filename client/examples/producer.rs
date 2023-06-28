@@ -1,6 +1,6 @@
 use std::{fs, io::Read, path::Path};
 
-use bud_client::{client::ClientBuilder, producer::Producer};
+use bud_client::client::ClientBuilder;
 use bud_common::{mtls::MtlsProvider, types::AccessMode};
 use flexi_logger::{colored_detailed_format, Logger};
 use log::error;
@@ -22,23 +22,16 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let producer = client
+    let mut producer = client
         .new_producer("test-topic", "test-producer", AccessMode::Exclusive, true)
         .await?;
-    if let Err(e) = produce(producer).await {
-        error!("produce error: {e}")
-    }
-    if let Err(e) = client.close().await {
-        error!("close client error: {e}")
-    }
-    Ok(())
-}
-
-async fn produce(mut producer: Producer) -> anyhow::Result<()> {
     // for _ in 0..10 {
     producer.send(b"hello, world").await?;
     // }
     producer.close().await?;
+    if let Err(e) = client.close().await {
+        error!("close client error: {e}")
+    }
     Ok(())
 }
 

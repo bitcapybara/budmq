@@ -42,8 +42,14 @@ fn main() -> anyhow::Result<()> {
     let server_cert = read_file(&args.cert_dir.join("server-cert.pem"))?;
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
+
+    let socket_ip = if &args.ip == "0.0.0.0" {
+        "127.0.0.1".to_string()
+    } else {
+        args.ip
+    };
     let broker_addr = BrokerAddress {
-        socket_addr: format!("{}:{}", args.ip, args.port).parse()?,
+        socket_addr: format!("{}:{}", socket_ip, args.port).parse()?,
         server_name: "localhost".to_string(),
     };
     let (token, server) = Server::new(provider, &broker_addr);
