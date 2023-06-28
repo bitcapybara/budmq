@@ -41,9 +41,25 @@ use crate::protocol::{Packet, PacketCodec};
 pub mod pool;
 pub mod single;
 
+pub enum ResultWaiter {
+    Sync(oneshot::Sender<Result<Packet>>),
+    Async(oneshot::Sender<Result<()>>),
+}
+
+impl ResultWaiter {
+    pub fn send_err(self, error: Error) {
+        match self {
+            ResultWaiter::Sync(res_tx) => res_tx.send(Err(error)).ok(),
+            ResultWaiter::Async(res_tx) => res_tx.send(Err(error)).ok(),
+        };
+    }
+}
+
 pub struct Request {
+    /// packet send to peer
     pub packet: Packet,
-    pub res_tx: Option<oneshot::Sender<Result<Packet>>>,
+    /// result notify
+    pub res_tx: ResultWaiter,
 }
 
 pub fn new_pool(
@@ -103,27 +119,29 @@ impl<T: PoolRecycle> StreamPool<T> {
                         Some(stream) => stream,
                         None => {
                             self.error.set_disconnect().await;
-                            if let Some(res_tx) = res_tx {
-                                res_tx.send(Err(Error::ConnectionDisconnect)).ok();
-                            }
+                            res_tx.send_err(Error::ConnectionDisconnect);
                             return
                         }
                     };
                     match res_tx {
-                        Some(res_tx) =>  {
+                        ResultWaiter::Sync(res_tx) => {
+                            // send to server
                             if let Err(e) = pooled.framed.send(packet).await {
                                 pooled.set_error().await;
                                 res_tx.send(Err(e.into())).ok();
                                 continue;
                             }
+                            // wait for reply
                             pooled.res_sender.send(res_tx).await.ok();
-                        }
-                        _ => {
+                        },
+                        ResultWaiter::Async(res_tx) => {
                             if let Err(e) = pooled.framed.send(packet).await {
                                 pooled.set_error().await;
-                                error!("io::writer send packet error: {e}");
+                                res_tx.send(Err(e.into())).ok();
+                                continue;
                             }
-                        }
+                            res_tx.send(Ok(())).ok();
+                        },
                     }
                 }
                 _ = self.token.cancelled() => {

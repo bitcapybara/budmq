@@ -9,7 +9,10 @@ use std::{
 };
 
 use bud_common::{
-    io::{writer::Request, SharedError},
+    io::{
+        writer::{Request, ResultWaiter},
+        SharedError,
+    },
     mtls::MtlsProvider,
     protocol::{
         topic::LookupTopic, CloseConsumer, CloseProducer, Connect, ConsumeAck, ControlFlow,
@@ -316,7 +319,7 @@ impl Connection {
         self.request_tx
             .send(Request {
                 packet,
-                res_tx: Some(res_tx),
+                res_tx: ResultWaiter::Sync(res_tx),
             })
             .map_err(|_| Error::Disconnect)?;
         match res_rx.await {
@@ -328,12 +331,15 @@ impl Connection {
     }
 
     async fn send_async(&self, packet: Packet) -> Result<()> {
+        let (res_tx, res_rx) = oneshot::channel();
         self.request_tx
             .send(Request {
                 packet,
-                res_tx: None,
+                res_tx: ResultWaiter::Async(res_tx),
             })
-            .map_err(|_| Error::Disconnect)
+            .map_err(|_| Error::Disconnect)?;
+        res_rx.await.map_err(|_| Error::Disconnect)??;
+        Ok(())
     }
 }
 

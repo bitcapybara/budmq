@@ -130,7 +130,7 @@ impl std::fmt::Display for PacketType {
             PacketType::ConsumeAck => "CONSUMEACK",
             PacketType::ControlFlow => "CONTROLFLOW",
             PacketType::Response => "RESPONSE",
-            PacketType::CreateProducer => "PRODUCER",
+            PacketType::CreateProducer => "CREATE_PRODUCER",
             PacketType::ProducerReceipt => "PRODUCER_RECEIPT",
             PacketType::Ping => "PING",
             PacketType::Pong => "PONG",

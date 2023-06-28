@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bud_common::{
     io::{
-        writer::{new_pool, Request},
+        writer::{new_pool, Request, ResultWaiter},
         Error,
     },
     protocol::Packet,
@@ -100,7 +100,7 @@ impl Writer {
         self.sender
             .send(Request {
                 packet: Packet::Ping,
-                res_tx: Some(res_tx),
+                res_tx: ResultWaiter::Sync(res_tx),
             })
             .await
             .map_err(|_| Error::ConnectionDisconnect)?;

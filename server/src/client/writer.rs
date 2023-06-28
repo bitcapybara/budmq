@@ -1,5 +1,5 @@
 use bud_common::io::{
-    writer::{new_pool, Request},
+    writer::{new_pool, Request, ResultWaiter},
     SharedError,
 };
 use log::trace;
@@ -83,7 +83,7 @@ impl Writer {
             });
 
             select! {
-                res = sender.send(Request { packet , res_tx: Some(res_tx)}) => {
+                res = sender.send(Request { packet , res_tx: ResultWaiter::Sync(res_tx)}) => {
                     if let Err(_e) = res {
                         error.set_disconnect().await;
                     }
