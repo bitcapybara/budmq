@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, net::SocketAddr};
 
 use bud_common::{
     helper::wait,
@@ -40,19 +40,25 @@ impl From<provider::StartError> for Error {
 
 pub struct Server {
     provider: MtlsProvider,
-    addr: BrokerAddress,
+    addr: SocketAddr,
+    broker_addr: BrokerAddress,
     token: CancellationToken,
 }
 
 impl Server {
-    pub fn new(provider: MtlsProvider, addr: &BrokerAddress) -> (CancellationToken, Self) {
+    pub fn new(
+        provider: MtlsProvider,
+        listen_addr: &SocketAddr,
+        broker_addr: &BrokerAddress,
+    ) -> (CancellationToken, Self) {
         let token = CancellationToken::new();
         (
             token.clone(),
             Self {
                 provider,
-                addr: addr.clone(),
+                broker_addr: broker_addr.clone(),
                 token,
+                addr: *listen_addr,
             },
         )
     }
@@ -66,8 +72,13 @@ impl Server {
         // start broker loop
         trace!("server::start: start broker task");
         let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task =
-            Broker::new(&self.addr, meta_storage, message_storage, token.clone()).run(broker_rx);
+        let broker_task = Broker::new(
+            &self.broker_addr,
+            meta_storage,
+            message_storage,
+            token.clone(),
+        )
+        .run(broker_rx);
         let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
@@ -76,7 +87,7 @@ impl Server {
         let server = s2n_quic::Server::builder()
             .with_tls(self.provider)
             .unwrap()
-            .with_io(self.addr.socket_addr)?
+            .with_io(self.addr)?
             .start()?;
         let server_task = Self::handle_accept(server, broker_tx, token.clone());
         let server_handle = tokio::spawn(server_task);

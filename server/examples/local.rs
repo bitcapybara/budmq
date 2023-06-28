@@ -22,6 +22,8 @@ struct Args {
     cert_dir: PathBuf,
     #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_IP")]
     ip: String,
+    #[arg(short, long, default_value = "127.0.0.1", env = "BUD_SERVER_BROKER_IP")]
+    broker_ip: String,
     #[arg(short, long, default_value_t = 9080, env = "BUD_SERVER_PORT")]
     port: u16,
 }
@@ -43,16 +45,12 @@ fn main() -> anyhow::Result<()> {
     let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
     let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
 
-    let socket_ip = if &args.ip == "0.0.0.0" {
-        "127.0.0.1".to_string()
-    } else {
-        args.ip
-    };
     let broker_addr = BrokerAddress {
-        socket_addr: format!("{}:{}", socket_ip, args.port).parse()?,
+        socket_addr: format!("{}:{}", args.broker_ip, args.port).parse()?,
         server_name: "localhost".to_string(),
     };
-    let (token, server) = Server::new(provider, &broker_addr);
+    let addr = format!("{}:{}", args.ip, args.port).parse()?;
+    let (token, server) = Server::new(provider, &addr, &broker_addr);
     run(token, server)?;
     Ok(())
 }
