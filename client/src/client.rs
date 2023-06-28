@@ -4,7 +4,7 @@ use bud_common::{io::writer::Request, mtls::MtlsProvider, types::AccessMode};
 use tokio::sync::mpsc;
 
 use crate::{
-    connection::ConnectionHandle,
+    connection::{self, ConnectionHandle},
     consumer::{self, Consumer, SubscribeMessage},
     producer::{self, Producer},
 };
@@ -14,11 +14,14 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// error from producer
-    #[error("producer error: {0}")]
+    #[error("Producer error: {0}")]
     Producer(#[from] producer::Error),
     /// error from consumer
-    #[error("consumer error: {0}")]
+    #[error("Consumer error: {0}")]
     Consumer(#[from] consumer::Error),
+    /// error from connection
+    #[error("Connection error: {0}")]
+    Connection(#[from] connection::Error),
 }
 
 #[derive(Clone)]
@@ -117,5 +120,11 @@ impl Client {
             self.retry_opts.clone(),
         )
         .await?)
+    }
+
+    pub async fn close(&self) -> Result<()> {
+        let conn = self.conn_handle.get_base_connection(false).await?;
+        conn.disconnect().await?;
+        Ok(())
     }
 }

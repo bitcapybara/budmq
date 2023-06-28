@@ -393,6 +393,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 }
             }
             Packet::CloseProducer(CloseProducer { producer_id }) => {
+                trace!("broker::process_packets: broker receive CLOSE_PRODUCEDR packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
                     return Ok(());
@@ -408,6 +409,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 session.del_producer(producer_id);
             }
             Packet::CloseConsumer(CloseConsumer { consumer_id }) => {
+                trace!("broker::process_packets: broker receive CLOSE_CONSUMER packet");
                 let mut clients = self.clients.write().await;
                 let Some(session) = clients.get_mut(&client_id) else {
                     return Ok(());
@@ -438,7 +440,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
     }
 
     /// process packets from client
-    /// DO NOT BLOCK!!!
     async fn process_packet(
         &self,
         send_tx: mpsc::Sender<SendEvent>,

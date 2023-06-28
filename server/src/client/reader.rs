@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use super::Result;
 use crate::{
     broker::{self, BrokerMessage},
-    client::{self, Error},
+    client::Error,
     WAIT_REPLY_TIMEOUT,
 };
 
@@ -136,7 +136,6 @@ impl Reader {
     }
 
     async fn process_request(&self, request: Request) -> Result<()> {
-        trace!("client::reader: waiting for framed packet");
         let Request { packet, res_tx } = request;
         match packet {
             Packet::Connect(_) => {
@@ -159,23 +158,19 @@ impl Reader {
                     return Err(e);
                 }
             }
+            p @ (Packet::CloseProducer(_) | Packet::CloseConsumer(_) | Packet::Disconnect) => {
+                res_tx.send(None).ok();
+                trace!("client::reader: receive {} packet", p.packet_type());
+                if let Err(e) = self.send_async(p, None).await {
+                    error!("send packet to broker error: {e}");
+                    return Err(e);
+                }
+            }
             Packet::Ping => {
                 // return pong packet directly
                 trace!("client::reader: receive PING packet");
                 let packet = Packet::Pong;
                 res_tx.send(Some(packet)).ok();
-            }
-            Packet::Disconnect => {
-                res_tx.send(None).ok();
-                if let Err(e) = self.broker_tx.send(broker::ClientMessage {
-                    client_id: self.client_id,
-                    packet: Packet::Disconnect,
-                    res_tx: None,
-                    client_tx: None,
-                }) {
-                    error!("send DISCONNECT to broker error: {e}");
-                }
-                return Err(client::Error::Disconnect);
             }
             p => {
                 error!("received unsupported packet: {}", p.packet_type());
@@ -230,5 +225,23 @@ impl Reader {
             }
         });
         Ok(())
+    }
+
+    /// send packet to broker, without waiting for response
+    async fn send_async(
+        &self,
+        packet: Packet,
+        client_tx: Option<UnboundedSender<BrokerMessage>>,
+    ) -> Result<()> {
+        // send to broker
+        trace!("client::reader: send packet to broker");
+        self.broker_tx
+            .send(broker::ClientMessage {
+                client_id: self.client_id,
+                packet,
+                res_tx: None,
+                client_tx,
+            })
+            .map_err(|_| Error::Disconnect)
     }
 }

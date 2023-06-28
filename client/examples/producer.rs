@@ -3,6 +3,7 @@ use std::{fs, io::Read, path::Path};
 use bud_client::{client::ClientBuilder, producer::Producer};
 use bud_common::{mtls::MtlsProvider, types::AccessMode};
 use flexi_logger::{colored_detailed_format, Logger};
+use log::error;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,7 +26,10 @@ async fn main() -> anyhow::Result<()> {
         .new_producer("test-topic", "test-producer", AccessMode::Exclusive, true)
         .await?;
     if let Err(e) = produce(producer).await {
-        println!("produce error: {e}")
+        error!("produce error: {e}")
+    }
+    if let Err(e) = client.close().await {
+        error!("close client error: {e}")
     }
     Ok(())
 }

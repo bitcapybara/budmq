@@ -227,6 +227,10 @@ impl Connection {
         Ok(())
     }
 
+    pub async fn disconnect(&self) -> Result<()> {
+        self.send_async(Packet::Disconnect).await
+    }
+
     pub async fn subscribe(
         &self,
         consumer_id: u64,
