@@ -2,6 +2,7 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::InitialPostion,
 };
+use log::trace;
 use roaring::RoaringTreemap;
 
 use crate::storage::cursor::CursorStorage;
@@ -72,6 +73,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
     }
 
     pub async fn new_message(&mut self, message_id: u64) -> Result<()> {
+        trace!("cursor: new message: {message_id}");
         self.latest_message_id = message_id;
         self.storage.set_latest_cursor_id(message_id).await?;
         Ok(())

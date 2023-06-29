@@ -1,9 +1,6 @@
 use std::{fs, io::Read, path::Path};
 
-use bud_client::{
-    client::ClientBuilder,
-    consumer::{Consumer, SubscribeMessage},
-};
+use bud_client::{client::ClientBuilder, consumer::SubscribeMessage};
 use bud_common::{
     mtls::MtlsProvider,
     types::{InitialPostion, SubType},
@@ -27,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let consumer = client
+    let mut consumer = client
         .new_consumer(
             "test-consumer",
             SubscribeMessage {
@@ -38,19 +35,13 @@ async fn main() -> anyhow::Result<()> {
             },
         )
         .await?;
-    if let Err(e) = consume(consumer).await {
-        println!("consume error: {e}")
-    }
-    Ok(())
-}
-
-async fn consume(mut consumer: Consumer) -> anyhow::Result<()> {
     while let Some(message) = consumer.next().await {
         consumer.ack(&message.id).await?;
         let s = String::from_utf8(message.payload.to_vec())?;
         println!("received a message: {s}");
     }
     consumer.close().await?;
+    client.close().await?;
     Ok(())
 }
 

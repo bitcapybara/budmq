@@ -1,6 +1,7 @@
 use std::{cmp::max, sync::Arc, time::Duration};
 
 use bud_common::types::AccessMode;
+use log::trace;
 use tokio::{sync::mpsc, time::sleep};
 
 use crate::{
@@ -24,6 +25,7 @@ pub async fn consumer_reconnect(
     loop {
         match conn_handle.lookup_topic(&sub_message.topic, false).await {
             Ok(conn) => {
+                trace!("get conn from lookup topic");
                 let (tx, rx) = mpsc::unbounded_channel();
                 match conn
                     .subscribe(consumer_id, consumer_name, sub_message, tx)

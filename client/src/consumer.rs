@@ -6,7 +6,7 @@ use bud_common::{
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::warn;
+use log::{trace, warn};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -86,9 +86,12 @@ impl ConsumeEngine {
         retry_opts: Option<RetryOptions>,
         token: CancellationToken,
     ) -> Result<Self> {
+        trace!("consumer: get conn from lookup topic");
         let conn = conn_handle.lookup_topic(&sub_message.topic, false).await?;
         let (server_tx, server_rx) = mpsc::unbounded_channel();
+        trace!("consumer: subscribe");
         conn.subscribe(id, name, sub_message, server_tx).await?;
+        trace!("consumer: control_flow");
         conn.control_flow(id, CONSUME_CHANNEL_CAPACITY).await?;
         Ok(Self {
             id,
@@ -96,7 +99,7 @@ impl ConsumeEngine {
             consumer_tx,
             conn,
             conn_handle,
-            remain_permits: 0,
+            remain_permits: CONSUME_CHANNEL_CAPACITY,
             token,
             event_rx,
             server_rx,
@@ -123,6 +126,7 @@ impl ConsumeEngine {
             }
 
             if self.remain_permits < CONSUME_CHANNEL_CAPACITY / 2 {
+                trace!("remain permits need add: {}", self.remain_permits);
                 let permits = CONSUME_CHANNEL_CAPACITY - self.remain_permits;
                 match self.conn.control_flow(self.id, permits).await {
                     Ok(_) => {}

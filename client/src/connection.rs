@@ -384,6 +384,11 @@ impl ConnectionHandle {
         trace!("connection: send lookup topic packet");
         match conn.lookup_topic(topic_name).await? {
             Some(addr) if addr.socket_addr != self.addr => {
+                trace!(
+                    "lookup addr: {}, self addr: {}",
+                    addr.socket_addr,
+                    self.addr
+                );
                 self.get_connection(&addr, ordered).await
             }
             _ => Ok(conn),

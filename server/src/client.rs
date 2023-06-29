@@ -84,10 +84,11 @@ impl Client {
             tokio::spawn(Writer::new(&local, handle, client_rx, error, token.clone()).run());
 
         future::join(
-            wait(read_runner, "client read runner"),
-            wait(write_runner, "client write runner"),
+            wait(read_runner, "client read runner", token.clone()),
+            wait(write_runner, "client write runner", token.clone()),
         )
         .await;
+        token.cancel();
         trace!("client::start: exit");
         Ok(())
     }

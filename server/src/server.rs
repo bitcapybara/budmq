@@ -95,9 +95,9 @@ impl Server {
         // wait for tasks done
         future::join(
             // wait for broker
-            wait(broker_handle, "broker task loop"),
+            wait(broker_handle, "broker task loop", token.clone()),
             // wait for server
-            wait(server_handle, "server task loop"),
+            wait(server_handle, "server task loop", token.clone()),
         )
         .await;
         trace!("server::start: server loop exit");

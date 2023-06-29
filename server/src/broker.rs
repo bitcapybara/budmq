@@ -205,8 +205,16 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
         let client_handle = tokio::spawn(client_task);
         trace!("broker::run start handle client message task");
         future::join(
-            wait(send_handle, "broker handle send message"),
-            wait(client_handle, "broker handle client message"),
+            wait(
+                send_handle,
+                "broker handle send message",
+                task_token.clone(),
+            ),
+            wait(
+                client_handle,
+                "broker handle client message",
+                task_token.clone(),
+            ),
         )
         .await;
     }
