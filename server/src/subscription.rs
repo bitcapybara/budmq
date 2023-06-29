@@ -249,6 +249,10 @@ impl<S1: MetaStorage, S2: MessageStorage> Subscription<S1, S2> {
         }
     }
 
+    pub async fn add_message(&self, cursor_id: u64) -> Result<()> {
+        self.dispatcher.update_message_id(cursor_id).await
+    }
+
     pub fn message_notify(&self) {
         match self.notify_tx.try_send(()) {
             Ok(_) | Err(TrySendError::Full(_)) => {}

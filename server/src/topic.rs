@@ -238,6 +238,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             .set_sequence_id(&producer_name, sequence_id)
             .await?;
         for sub in self.subscriptions.values() {
+            sub.add_message(message_id.cursor_id).await?;
             sub.message_notify();
         }
         Ok(())

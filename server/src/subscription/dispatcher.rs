@@ -188,6 +188,12 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
         }
     }
 
+    pub async fn update_message_id(&self, cursor_id: u64) -> Result<()> {
+        let mut cursor = self.cursor.write().await;
+        cursor.new_message(cursor_id).await?;
+        Ok(())
+    }
+
     async fn available_consumer(&self) -> Option<Consumer> {
         let consumers = self.consumers.read().await;
         let Some(cms) = consumers.as_ref() else {
