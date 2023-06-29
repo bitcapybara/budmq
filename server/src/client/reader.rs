@@ -87,7 +87,6 @@ impl Reader {
                             }
                         },
                         Ok(None) => {
-                            error!("server connection closed");
                             self.error.set_disconnect().await;
                             return;
                         }

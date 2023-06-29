@@ -21,21 +21,21 @@ pub struct Request {
 
 pub struct Reader {
     acceptor: StreamAcceptor,
-    tx: mpsc::Sender<Request>,
+    sender: mpsc::Sender<Request>,
     error: SharedError,
     token: CancellationToken,
 }
 
 impl Reader {
     pub fn new(
-        tx: mpsc::Sender<Request>,
+        sender: mpsc::Sender<Request>,
         acceptor: StreamAcceptor,
         error: SharedError,
         token: CancellationToken,
     ) -> Self {
         Self {
             acceptor,
-            tx,
+            sender,
             token,
             error,
         }
@@ -57,7 +57,7 @@ impl Reader {
                             return
                         }
                     };
-                    tokio::spawn(listen_on_stream(stream, self.tx.clone(), self.token.child_token()));
+                    tokio::spawn(listen_on_stream(stream, self.sender.clone(), self.token.child_token()));
                 }
                 _ = self.token.cancelled() => {
                     return
@@ -69,7 +69,7 @@ impl Reader {
 
 async fn listen_on_stream(
     stream: BidirectionalStream,
-    tx: mpsc::Sender<Request>,
+    sender: mpsc::Sender<Request>,
     token: CancellationToken,
 ) {
     let (recv, send) = stream.split();
@@ -93,7 +93,7 @@ async fn listen_on_stream(
                 let (res_tx, res_rx) = oneshot::channel();
                 // send packet to client
                 let token = token.clone();
-                if let Err(e) = tx.send(Request { packet, res_tx }).await {
+                if let Err(e) = sender.send(Request { packet, res_tx }).await {
                     error!("io::reader send packet error: {e}");
                 }
                 // wait for reply and send to server
