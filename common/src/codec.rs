@@ -112,6 +112,66 @@ impl Codec for Bytes {
     }
 }
 
+impl<T: Codec> Codec for Vec<T> {
+    fn decode(buf: &mut Bytes) -> Result<Self> {
+        let mut buf = read_bytes(buf)?;
+        let mut res = Vec::new();
+        while !buf.is_empty() {
+            let mut ele_buf = read_bytes(&mut buf)?;
+            let ele = T::decode(&mut ele_buf)?;
+            res.push(ele);
+        }
+        Ok(res)
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let mut ele_buf = BytesMut::new();
+        for item in self {
+            ele_buf.put_u16(item.size() as u16);
+            item.encode(&mut ele_buf);
+        }
+
+        buf.put_u16(ele_buf.len() as u16);
+        buf.extend(ele_buf);
+    }
+
+    fn size(&self) -> usize {
+        let mut total = 2;
+        for item in self {
+            total += 2 + item.size();
+        }
+        total
+    }
+}
+
+impl<T: Codec> Codec for Option<T> {
+    fn decode(buf: &mut Bytes) -> Result<Self> {
+        let mut buf = read_bytes(buf)?;
+        if buf.is_empty() {
+            return Ok(None);
+        }
+        buf = read_bytes(&mut buf)?;
+        Ok(Some(T::decode(&mut buf)?))
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let mut ele_buf = BytesMut::new();
+        if let Some(item) = self {
+            ele_buf.put_u16(item.size() as u16);
+            item.encode(&mut ele_buf);
+        }
+        buf.put_u16(ele_buf.len() as u16);
+        buf.extend(ele_buf);
+    }
+
+    fn size(&self) -> usize {
+        2 + match self {
+            Some(item) => 2 + item.size(),
+            None => 2,
+        }
+    }
+}
+
 fn assert_len(buf: &Bytes, len: usize) -> Result<()> {
     if buf.len() < len {
         return Err(Error::InsufficientBytes);
@@ -163,4 +223,36 @@ pub fn get_u64(buf: &mut Bytes) -> Result<u64> {
 pub fn get_i64(buf: &mut Bytes) -> Result<i64> {
     assert_len(buf, 8)?;
     Ok(buf.get_i64())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codec_vec() {
+        let v1 = ["aaa", "bbb", "ccc"].map(|s| s.to_string()).to_vec();
+        let mut buf = BytesMut::new();
+        v1.encode(&mut buf);
+        let v2 = <Vec<String>>::decode(&mut buf.freeze()).unwrap();
+        assert_eq!(v1, v2)
+    }
+
+    #[test]
+    fn codec_option() {
+        {
+            let v1 = None;
+            let mut buf = BytesMut::new();
+            v1.encode(&mut buf);
+            let v2 = <Option<String>>::decode(&mut buf.freeze()).unwrap();
+            assert_eq!(v1, v2)
+        }
+        {
+            let v1 = Some("aaaa".to_string());
+            let mut buf = BytesMut::new();
+            v1.encode(&mut buf);
+            let v2 = <Option<String>>::decode(&mut buf.freeze()).unwrap();
+            assert_eq!(v1, v2)
+        }
+    }
 }
