@@ -52,7 +52,7 @@ pub struct BonsaiDB {
 }
 
 impl BonsaiDB {
-    async fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         Ok(Self {
             metas: AsyncDatabase::open::<()>(StorageConfiguration::new("data/meta.db")).await?,
             messages: AsyncDatabase::open::<()>(StorageConfiguration::new("data/message.db"))

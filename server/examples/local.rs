@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bud_common::types::BrokerAddress;
+use bud_common::{storage::bonsaidb::BonsaiDB, types::BrokerAddress};
 use bud_server::{
     common::{mtls::MtlsProvider, storage::memory::MemoryStorage},
     Server,
@@ -72,7 +72,8 @@ async fn run(token: CancellationToken, server: Server) -> anyhow::Result<()> {
     });
 
     // use memory storage
-    let storage = MemoryStorage::new();
+    // let storage = MemoryStorage::new();
+    let storage = BonsaiDB::new().await?;
     // start server
     server.start(storage.clone(), storage).await?;
     Ok(())
