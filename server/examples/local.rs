@@ -5,10 +5,7 @@ use std::{
 };
 
 use bud_common::{storage::bonsaidb::BonsaiDB, types::BrokerAddress};
-use bud_server::{
-    common::{mtls::MtlsProvider, storage::memory::MemoryStorage},
-    Server,
-};
+use bud_server::{common::mtls::MtlsProvider, Server};
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
