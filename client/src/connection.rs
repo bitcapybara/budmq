@@ -2,6 +2,7 @@ pub mod reader;
 pub mod writer;
 
 use std::{
+    borrow::Borrow,
     collections::HashMap,
     io,
     net::{AddrParseError, SocketAddr},
@@ -16,7 +17,8 @@ use bud_common::{
     mtls::MtlsProvider,
     protocol::{
         topic::LookupTopic, CloseConsumer, CloseProducer, Connect, ConsumeAck, ControlFlow,
-        CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
+        CreateProducer, Packet, ProducerReceipt, Publish, PublishBatch, Response, ReturnCode,
+        Subscribe,
     },
     types::{AccessMode, BrokerAddress, MessageId},
 };
@@ -210,6 +212,32 @@ impl Connection {
             sequence_id,
             payload: Bytes::copy_from_slice(data),
             producer_id,
+            produce_time: Utc::now(),
+        }))
+        .await
+    }
+
+    pub async fn publish_batch<T, A>(
+        &self,
+        producer_id: u64,
+        topic: &str,
+        mut start_seq_id: u64,
+        data: T,
+    ) -> Result<()>
+    where
+        T: Borrow<[A]>,
+        A: Borrow<[u8]>,
+    {
+        let mut payloads = Vec::with_capacity(data.borrow().len());
+        for item in data.borrow().iter() {
+            start_seq_id += 1;
+            payloads.push(Bytes::copy_from_slice(item.borrow()));
+        }
+        self.send_ok(Packet::PublishBatch(PublishBatch {
+            producer_id,
+            topic: topic.to_string(),
+            sequence_id: start_seq_id,
+            payloads,
             produce_time: Utc::now(),
         }))
         .await
