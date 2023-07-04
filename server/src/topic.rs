@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bud_common::{
-    protocol::{Publish, ReturnCode, Subscribe},
+    protocol::{Publish, PublishBatch, ReturnCode, Subscribe},
     storage::{MessageStorage, MetaStorage},
     types::{AccessMode, MessageId, SubscriptionInfo, TopicMessage},
 };
@@ -239,6 +239,46 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             .await?;
         for sub in self.subscriptions.values() {
             sub.add_message(message_id.cursor_id).await?;
+            sub.message_notify();
+        }
+        Ok(())
+    }
+
+    pub async fn add_messages(&mut self, message: &PublishBatch) -> Result<()> {
+        let Some(producer_name) = self.producers.get_producer_name(message.producer_id) else {
+            return Err(Error::Response(ReturnCode::ProducerNotFound));
+        };
+        let sequence_id = self
+            .storage
+            .get_sequence_id(&producer_name)
+            .await?
+            .unwrap_or_default();
+        if message.start_seq_id <= sequence_id {
+            return Err(Error::Response(ReturnCode::ProduceMessageDuplicated));
+        }
+        let mut sequence_id = message.start_seq_id;
+        for payload in &message.payloads {
+            let message_id = MessageId {
+                topic_id: self.id,
+                cursor_id: self.storage.get_new_cursor_id().await?,
+            };
+            let topic_message = TopicMessage::new(
+                &self.name,
+                message_id,
+                sequence_id,
+                payload.clone(),
+                message.produce_time,
+            );
+            self.storage.add_message(&topic_message).await?;
+            sequence_id += 1;
+            for sub in self.subscriptions.values() {
+                sub.add_message(message_id.cursor_id).await?;
+            }
+        }
+        self.storage
+            .set_sequence_id(&producer_name, sequence_id)
+            .await?;
+        for sub in self.subscriptions.values() {
             sub.message_notify();
         }
         Ok(())
