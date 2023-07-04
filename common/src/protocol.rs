@@ -16,17 +16,17 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::codec::{self, Codec};
 
-use self::topic::{LookupTopic, LookupTopicResponse};
 pub use self::{
     connect::Connect,
-    consume_ack::ConsumeAck,
+    consume_ack::{ConsumeAck, ConsumeAckBatch},
     control_flow::ControlFlow,
     producer::{CloseProducer, CreateProducer, ProducerReceipt},
-    publish::Publish,
+    publish::{Publish, PublishBatch},
     response::Response,
     response::ReturnCode,
     send::Send,
     subscribe::{CloseConsumer, Subscribe},
+    topic::{LookupTopic, LookupTopicResponse},
     unsubscribe::Unsubscribe,
 };
 
@@ -83,6 +83,10 @@ impl Decoder for PacketCodec {
             PacketType::LookupTopicResponse => {
                 Packet::LookupTopicResponse(LookupTopicResponse::decode(&mut bytes)?)
             }
+            PacketType::PublishBatch => Packet::PublishBatch(PublishBatch::decode(&mut bytes)?),
+            PacketType::ConsumeAckBatch => {
+                Packet::ConsumeAckBatch(ConsumeAckBatch::decode(&mut bytes)?)
+            }
         }))
     }
 }
@@ -117,6 +121,8 @@ pub enum PacketType {
     CloseConsumer,
     LookupTopic,
     LookupTopicResponse,
+    PublishBatch,
+    ConsumeAckBatch,
 }
 
 impl std::fmt::Display for PacketType {
@@ -139,6 +145,8 @@ impl std::fmt::Display for PacketType {
             PacketType::CloseConsumer => "CLOSE_CONSUMER",
             PacketType::LookupTopic => "LOOKUP_TOPIC",
             PacketType::LookupTopicResponse => "LOOKUP_TOPIC_RESPONSE",
+            PacketType::PublishBatch => "PUBLISH_BATCH",
+            PacketType::ConsumeAckBatch => "CONSUMEACK_BATCH",
         };
         write!(f, "{s}")
     }
@@ -163,6 +171,8 @@ pub enum Packet {
     CloseConsumer(CloseConsumer),
     LookupTopic(LookupTopic),
     LookupTopicResponse(LookupTopicResponse),
+    PublishBatch(PublishBatch),
+    ConsumeAckBatch(ConsumeAckBatch),
 }
 
 impl Packet {
@@ -185,6 +195,8 @@ impl Packet {
             Packet::CloseConsumer(p) => p.header(),
             Packet::LookupTopic(p) => p.header(),
             Packet::LookupTopicResponse(p) => p.header(),
+            Packet::PublishBatch(p) => p.header(),
+            Packet::ConsumeAckBatch(p) => p.header(),
         }
     }
 
@@ -207,6 +219,8 @@ impl Packet {
             Packet::CloseConsumer(p) => p.encode(buf),
             Packet::LookupTopic(p) => p.encode(buf),
             Packet::LookupTopicResponse(p) => p.encode(buf),
+            Packet::PublishBatch(p) => p.encode(buf),
+            Packet::ConsumeAckBatch(p) => p.encode(buf),
         }
     }
 
@@ -229,6 +243,8 @@ impl Packet {
             Packet::CloseConsumer(_) => PacketType::CloseConsumer,
             Packet::LookupTopic(_) => PacketType::LookupTopic,
             Packet::LookupTopicResponse(_) => PacketType::LookupTopicResponse,
+            Packet::PublishBatch(_) => PacketType::PublishBatch,
+            Packet::ConsumeAckBatch(_) => PacketType::ConsumeAckBatch,
         }
     }
 
@@ -336,6 +352,8 @@ impl Header {
             15 => PacketType::CloseConsumer,
             16 => PacketType::LookupTopic,
             17 => PacketType::LookupTopicResponse,
+            18 => PacketType::PublishBatch,
+            19 => PacketType::ConsumeAckBatch,
             _ => return Err(codec::Error::Malformed.into()),
         })
     }
@@ -517,6 +535,34 @@ mod tests {
     fn codec_lookup_topic() {
         codec_works(Packet::LookupTopic(LookupTopic {
             topic_name: "test-topic".to_string(),
+        }))
+    }
+
+    #[test]
+    fn codec_publish_batch() {
+        codec_works(Packet::PublishBatch(PublishBatch {
+            producer_id: 9,
+            topic: "topic".to_string(),
+            sequence_id: 1,
+            payloads: vec![Bytes::from_static(b"hello"), Bytes::from_static(b"world")],
+            produce_time: Utc::now(),
+        }))
+    }
+
+    #[test]
+    fn codec_consume_ack_batch() {
+        codec_works(Packet::ConsumeAckBatch(ConsumeAckBatch {
+            consumer_id: 11,
+            message_ids: vec![
+                MessageId {
+                    topic_id: 5,
+                    cursor_id: 6,
+                },
+                MessageId {
+                    topic_id: 5,
+                    cursor_id: 6,
+                },
+            ],
         }))
     }
 
