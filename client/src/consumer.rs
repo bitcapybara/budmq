@@ -259,9 +259,6 @@ impl Stream for Consumer {
     type Item = ConsumeMessage;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.get_mut().consumer_rx.poll_recv(cx) {
-            Poll::Ready(m) => Poll::Ready(m),
-            Poll::Pending => Poll::Pending,
-        }
+        self.get_mut().consumer_rx.poll_recv(cx)
     }
 }
