@@ -21,7 +21,7 @@ pub struct PublishBatch {
     pub topic: String,
     /// Ensure that the message sent by the producer is unique within this topic
     /// indicate the max seq-id of payload
-    pub sequence_id: u64,
+    pub start_seq_id: u64,
     /// message content
     pub payloads: Vec<Bytes>,
     /// produce time

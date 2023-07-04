@@ -543,7 +543,7 @@ mod tests {
         codec_works(Packet::PublishBatch(PublishBatch {
             producer_id: 9,
             topic: "topic".to_string(),
-            sequence_id: 1,
+            start_seq_id: 1,
             payloads: vec![Bytes::from_static(b"hello"), Bytes::from_static(b"world")],
             produce_time: Utc::now(),
         }))

@@ -221,7 +221,7 @@ impl Connection {
         &self,
         producer_id: u64,
         topic: &str,
-        mut start_seq_id: u64,
+        start_seq_id: u64,
         data: T,
     ) -> Result<()>
     where
@@ -230,13 +230,12 @@ impl Connection {
     {
         let mut payloads = Vec::with_capacity(data.borrow().len());
         for item in data.borrow().iter() {
-            start_seq_id += 1;
             payloads.push(Bytes::copy_from_slice(item.borrow()));
         }
         self.send_ok(Packet::PublishBatch(PublishBatch {
             producer_id,
             topic: topic.to_string(),
-            sequence_id: start_seq_id,
+            start_seq_id,
             payloads,
             produce_time: Utc::now(),
         }))
