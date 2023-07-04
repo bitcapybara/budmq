@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use bud_common::{
     protocol::ReturnCode,
@@ -6,6 +10,7 @@ use bud_common::{
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use futures::Stream;
 use log::{trace, warn};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
@@ -224,10 +229,6 @@ impl Consumer {
         })
     }
 
-    pub async fn next(&mut self) -> Option<ConsumeMessage> {
-        self.consumer_rx.recv().await
-    }
-
     pub async fn ack(&self, message_id: &MessageId) -> Result<()> {
         self.event_tx
             .send(ConsumerEvent::Ack(*message_id))
@@ -251,5 +252,16 @@ impl Consumer {
             .map_err(|_| connection::Error::Disconnect)?;
         self.token.cancel();
         Ok(())
+    }
+}
+
+impl Stream for Consumer {
+    type Item = ConsumeMessage;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.get_mut().consumer_rx.poll_recv(cx) {
+            Poll::Ready(m) => Poll::Ready(m),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }

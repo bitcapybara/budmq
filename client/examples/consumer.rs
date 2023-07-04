@@ -6,6 +6,7 @@ use bud_common::{
     types::{InitialPostion, SubType},
 };
 use flexi_logger::{colored_detailed_format, Logger};
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
