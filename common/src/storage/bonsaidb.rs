@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use async_trait::async_trait;
 use bonsaidb::{
     core::keyvalue::{AsyncKeyValue, Numeric, Value},
@@ -52,10 +54,12 @@ pub struct BonsaiDB {
 }
 
 impl BonsaiDB {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(dir: impl AsRef<Path>) -> Result<Self> {
+        let dir = dir.as_ref().join("budmq-data");
         Ok(Self {
-            metas: AsyncDatabase::open::<()>(StorageConfiguration::new("data/meta.db")).await?,
-            messages: AsyncDatabase::open::<()>(StorageConfiguration::new("data/message.db"))
+            metas: AsyncDatabase::open::<()>(StorageConfiguration::new(dir.join("meta.db")))
+                .await?,
+            messages: AsyncDatabase::open::<()>(StorageConfiguration::new(dir.join("message.db")))
                 .await?,
         })
     }

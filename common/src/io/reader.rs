@@ -86,9 +86,9 @@ async fn listen_on_stream(
                     Some(Ok(packet)) => packet,
                     Some(Err(e)) => {
                         error!("io reader decode packet error: {e}");
-                        return;
+                        break;
                     }
-                    None => return
+                    None => break
                 };
                 let (res_tx, res_rx) = oneshot::channel();
                 // send packet to client
@@ -116,8 +116,9 @@ async fn listen_on_stream(
                 }
             }
             _ = token.cancelled() => {
-                return
+                break
             }
         }
     }
+    send_framed.close().await.ok();
 }

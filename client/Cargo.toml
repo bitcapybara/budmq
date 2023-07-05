@@ -18,3 +18,5 @@ thiserror.workspace = true
 anyhow.workspace = true
 flexi_logger.workspace = true
 clap.workspace = true
+signal-hook-tokio.workspace = true
+signal-hook.workspace = true

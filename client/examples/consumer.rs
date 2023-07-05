@@ -7,6 +7,9 @@ use bud_common::{
 };
 use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
+use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
+use signal_hook_tokio::Signals;
+use tokio::select;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,11 +39,25 @@ async fn main() -> anyhow::Result<()> {
             },
         )
         .await?;
-    while let Some(message) = consumer.next().await {
-        consumer.ack(&message.id).await?;
-        let s = String::from_utf8(message.payload.to_vec())?;
-        println!("received a message: {s}");
+
+    let mut signals = Signals::new([SIGINT, SIGTERM, SIGQUIT])?;
+    let handle = signals.handle();
+    loop {
+        select! {
+            msg = consumer.next() => {
+                let Some(message) = msg else {
+                    break
+                };
+                consumer.ack(&message.id).await?;
+                let s = String::from_utf8(message.payload.to_vec())?;
+                println!("received a message: {s}");
+            }
+            _ = signals.next() => {
+                break
+            }
+        }
     }
+    handle.close();
     consumer.close().await?;
     client.close().await?;
     Ok(())

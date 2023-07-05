@@ -23,7 +23,6 @@ use super::Result;
 use crate::{
     broker::{self, BrokerMessage},
     client::Error,
-    WAIT_REPLY_TIMEOUT,
 };
 
 const HANDSHAKE_TIMOUT: Duration = Duration::from_secs(5);
@@ -196,6 +195,7 @@ impl Reader {
         let (broker_res_tx, broker_res_rx) = oneshot::channel();
         // send to broker
         trace!("client::reader: send packet to broker");
+        let packet_type = packet.packet_type();
         self.broker_tx
             .send(broker::ClientMessage {
                 client_id: self.client_id,
@@ -209,18 +209,20 @@ impl Reader {
         let token = self.token.child_token();
         tokio::spawn(async move {
             // wait for reply from broker
-            trace!("client::reader[spawn]: waiting for response from broker");
+            trace!(
+                "client::reader[spawn]: waiting for {} response from broker",
+                packet_type
+            );
             select! {
-                res = timeout(WAIT_REPLY_TIMEOUT, broker_res_rx) => {
+                res = broker_res_rx => {
                     match res {
-                        Ok(Ok(packet)) => {
+                        Ok(packet) => {
                             trace!("client::reader[spawn]: response from broker: {packet:?}" );
                             res_tx.send(Some(packet)).ok();
                         }
-                        Ok(Err(e)) => {
+                        Err(e) => {
                             error!("recv client {local} reply error: {e}")
                         }
-                        Err(_) => error!("process client {local} timeout"),
                     }
                 }
                 _ = token.cancelled() => {}
