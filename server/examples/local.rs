@@ -4,7 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bud_common::{storage::bonsaidb::BonsaiDB, types::BrokerAddress};
+use bud_common::{
+    storage::{mongodb::MongoDB, redis::Redis},
+    types::BrokerAddress,
+};
 use bud_server::{common::mtls::MtlsProvider, Server};
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
@@ -68,10 +71,18 @@ async fn run(token: CancellationToken, server: Server) -> anyhow::Result<()> {
         handle.close();
     });
 
-    // use memory storage
+    // => use memory storage
     // let storage = MemoryStorage::new();
-    let storage = BonsaiDB::new("/tmp").await?;
+    // => use bonsaidb storage
+    // let storage = BonsaiDB::new("/tmp").await?;
+    // => use redis storage
+    let redis_client = redis::Client::open("redis://127.0.0.1:6379")?;
+    let meta = Redis::new(redis_client);
+    // => use mongo storage
+    let mongo_client = mongodb::Client::with_uri_str("mongodb://127.0.0.1:27017").await?;
+    let mongo_database = mongo_client.database("budmq");
+    let message = MongoDB::new(mongo_database);
     // start server
-    server.start(storage.clone(), storage).await?;
+    server.start(meta, message).await?;
     Ok(())
 }

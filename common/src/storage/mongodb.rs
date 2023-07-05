@@ -96,7 +96,7 @@ pub struct MongoDB {
 }
 
 impl MongoDB {
-    fn new(database: Database) -> Self {
+    pub fn new(database: Database) -> Self {
         let cursor = database.collection("corsor");
         Self {
             database,

@@ -39,7 +39,7 @@ impl Drop for Redis {
 }
 
 impl Redis {
-    fn new(client: Client) -> Self {
+    pub fn new(client: Client) -> Self {
         Self {
             client,
             token: CancellationToken::new(),
