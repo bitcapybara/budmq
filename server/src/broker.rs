@@ -615,27 +615,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 if session.get_producer(p.producer_id).is_none() {
                     return Ok(Packet::err_response(ReturnCode::ProducerNotFound));
                 }
-                trace!("broker::process_packets: receive PUBLISH packet");
-                // add to topic
-                let mut topics = self.topics.write().await;
-                let topic = p.topic.clone();
-                match topics.get_mut(&topic) {
-                    Some(topic) => {
-                        trace!("broker::process_packets: add message to topic");
-                        topic.add_message(&p).await.conv()?;
-                    }
-                    None => return Ok(Packet::err_response(ReturnCode::TopicNotExists)),
-                }
-                Ok(Packet::ok_response())
-            }
-            Packet::PublishBatch(p) => {
-                let clients = self.clients.read().await;
-                let Some(session) = clients.get(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected));
-                };
-                if session.get_producer(p.producer_id).is_none() {
-                    return Ok(Packet::err_response(ReturnCode::ProducerNotFound));
-                }
                 trace!("broker::process_packets: receive PUBLISH_BATCH packet");
                 let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
@@ -683,12 +662,14 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
                     return Ok(Packet::err_response(ReturnCode::TopicNotExists))
                 };
-                if topic.id != c.message_id.topic_id {
-                    return Ok(Packet::err_response(ReturnCode::AckTopicMissMatch));
+                for message_id in &c.message_ids {
+                    if topic.id != message_id.topic_id {
+                        return Ok(Packet::err_response(ReturnCode::AckTopicMissMatch));
+                    }
                 }
                 trace!("broker::process_packets: ack message in topic");
                 topic
-                    .consume_ack(&info.sub_name, &c.message_id)
+                    .consume_ack(&info.sub_name, c.message_ids)
                     .await
                     .conv()?;
                 Ok(Packet::ok_response())

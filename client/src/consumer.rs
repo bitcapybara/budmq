@@ -52,7 +52,7 @@ pub struct ConsumeMessage {
 }
 
 pub enum ConsumerEvent {
-    Ack(MessageId),
+    Ack(Vec<MessageId>),
     Unsubscribe,
     Close,
 }
@@ -167,8 +167,8 @@ impl ConsumeEngine {
                         return Ok(());
                     };
                     match event {
-                        ConsumerEvent::Ack(message_id) => {
-                            self.conn.ack(self.id, &message_id).await?;
+                        ConsumerEvent::Ack(message_ids) => {
+                            self.conn.ack(self.id, message_ids).await?;
                         },
                         ConsumerEvent::Unsubscribe => {
                             self.conn.unsubscribe(self.id).await?;
@@ -231,7 +231,7 @@ impl Consumer {
 
     pub async fn ack(&self, message_id: &MessageId) -> Result<()> {
         self.event_tx
-            .send(ConsumerEvent::Ack(*message_id))
+            .send(ConsumerEvent::Ack(vec![*message_id]))
             .await
             .map_err(|_| connection::Error::Disconnect)?;
         Ok(())

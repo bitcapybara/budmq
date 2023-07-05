@@ -18,10 +18,10 @@ use crate::codec::{self, Codec};
 
 pub use self::{
     connect::Connect,
-    consume_ack::{ConsumeAck, ConsumeAckBatch},
+    consume_ack::ConsumeAck,
     control_flow::ControlFlow,
     producer::{CloseProducer, CreateProducer, ProducerReceipt},
-    publish::{Publish, PublishBatch},
+    publish::Publish,
     response::Response,
     response::ReturnCode,
     send::Send,
@@ -83,10 +83,6 @@ impl Decoder for PacketCodec {
             PacketType::LookupTopicResponse => {
                 Packet::LookupTopicResponse(LookupTopicResponse::decode(&mut bytes)?)
             }
-            PacketType::PublishBatch => Packet::PublishBatch(PublishBatch::decode(&mut bytes)?),
-            PacketType::ConsumeAckBatch => {
-                Packet::ConsumeAckBatch(ConsumeAckBatch::decode(&mut bytes)?)
-            }
         }))
     }
 }
@@ -121,8 +117,6 @@ pub enum PacketType {
     CloseConsumer,
     LookupTopic,
     LookupTopicResponse,
-    PublishBatch,
-    ConsumeAckBatch,
 }
 
 impl std::fmt::Display for PacketType {
@@ -145,8 +139,6 @@ impl std::fmt::Display for PacketType {
             PacketType::CloseConsumer => "CLOSE_CONSUMER",
             PacketType::LookupTopic => "LOOKUP_TOPIC",
             PacketType::LookupTopicResponse => "LOOKUP_TOPIC_RESPONSE",
-            PacketType::PublishBatch => "PUBLISH_BATCH",
-            PacketType::ConsumeAckBatch => "CONSUMEACK_BATCH",
         };
         write!(f, "{s}")
     }
@@ -171,8 +163,6 @@ pub enum Packet {
     CloseConsumer(CloseConsumer),
     LookupTopic(LookupTopic),
     LookupTopicResponse(LookupTopicResponse),
-    PublishBatch(PublishBatch),
-    ConsumeAckBatch(ConsumeAckBatch),
 }
 
 impl Packet {
@@ -195,8 +185,6 @@ impl Packet {
             Packet::CloseConsumer(p) => p.header(),
             Packet::LookupTopic(p) => p.header(),
             Packet::LookupTopicResponse(p) => p.header(),
-            Packet::PublishBatch(p) => p.header(),
-            Packet::ConsumeAckBatch(p) => p.header(),
         }
     }
 
@@ -219,8 +207,6 @@ impl Packet {
             Packet::CloseConsumer(p) => p.encode(buf),
             Packet::LookupTopic(p) => p.encode(buf),
             Packet::LookupTopicResponse(p) => p.encode(buf),
-            Packet::PublishBatch(p) => p.encode(buf),
-            Packet::ConsumeAckBatch(p) => p.encode(buf),
         }
     }
 
@@ -243,8 +229,6 @@ impl Packet {
             Packet::CloseConsumer(_) => PacketType::CloseConsumer,
             Packet::LookupTopic(_) => PacketType::LookupTopic,
             Packet::LookupTopicResponse(_) => PacketType::LookupTopicResponse,
-            Packet::PublishBatch(_) => PacketType::PublishBatch,
-            Packet::ConsumeAckBatch(_) => PacketType::ConsumeAckBatch,
         }
     }
 
@@ -352,8 +336,6 @@ impl Header {
             15 => PacketType::CloseConsumer,
             16 => PacketType::LookupTopic,
             17 => PacketType::LookupTopicResponse,
-            18 => PacketType::PublishBatch,
-            19 => PacketType::ConsumeAckBatch,
             _ => return Err(codec::Error::Malformed.into()),
         })
     }
@@ -435,17 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn codec_publish() {
-        codec_works(Packet::Publish(Publish {
-            producer_id: 1,
-            topic: "test-topic".to_string(),
-            sequence_id: 200,
-            payload: Bytes::from_static(b"hello, world"),
-            produce_time: Utc::now(),
-        }))
-    }
-
-    #[test]
     fn codec_send() {
         codec_works(Packet::Send(Send {
             message_id: MessageId {
@@ -456,17 +427,6 @@ mod tests {
             payload: Bytes::from_static(b"hello, world"),
             produce_time: Utc::now(),
             send_time: Utc::now(),
-        }))
-    }
-
-    #[test]
-    fn codec_consume_ack() {
-        codec_works(Packet::ConsumeAck(ConsumeAck {
-            consumer_id: 12345,
-            message_id: MessageId {
-                topic_id: 1,
-                cursor_id: 3,
-            },
         }))
     }
 
@@ -539,8 +499,8 @@ mod tests {
     }
 
     #[test]
-    fn codec_publish_batch() {
-        codec_works(Packet::PublishBatch(PublishBatch {
+    fn codec_publish() {
+        codec_works(Packet::Publish(Publish {
             producer_id: 9,
             topic: "topic".to_string(),
             start_seq_id: 1,
@@ -550,8 +510,8 @@ mod tests {
     }
 
     #[test]
-    fn codec_consume_ack_batch() {
-        codec_works(Packet::ConsumeAckBatch(ConsumeAckBatch {
+    fn codec_consume_ack() {
+        codec_works(Packet::ConsumeAck(ConsumeAck {
             consumer_id: 11,
             message_ids: vec![
                 MessageId {

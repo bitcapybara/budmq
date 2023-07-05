@@ -17,8 +17,7 @@ use bud_common::{
     mtls::MtlsProvider,
     protocol::{
         topic::LookupTopic, CloseConsumer, CloseProducer, Connect, ConsumeAck, ControlFlow,
-        CreateProducer, Packet, ProducerReceipt, Publish, PublishBatch, Response, ReturnCode,
-        Subscribe,
+        CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
     types::{AccessMode, BrokerAddress, MessageId},
 };
@@ -200,24 +199,7 @@ impl Connection {
         }
     }
 
-    pub async fn publish(
-        &self,
-        producer_id: u64,
-        topic: &str,
-        sequence_id: u64,
-        data: &[u8],
-    ) -> Result<()> {
-        self.send_ok(Packet::Publish(Publish {
-            topic: topic.to_string(),
-            sequence_id,
-            payload: Bytes::copy_from_slice(data),
-            producer_id,
-            produce_time: Utc::now(),
-        }))
-        .await
-    }
-
-    pub async fn publish_batch<T, A>(
+    pub async fn publish<T, A>(
         &self,
         producer_id: u64,
         topic: &str,
@@ -232,7 +214,7 @@ impl Connection {
         for item in data.borrow().iter() {
             payloads.push(Bytes::copy_from_slice(item.borrow()));
         }
-        self.send_ok(Packet::PublishBatch(PublishBatch {
+        self.send_ok(Packet::Publish(Publish {
             producer_id,
             topic: topic.to_string(),
             start_seq_id,
@@ -299,10 +281,13 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn ack(&self, consumer_id: u64, message_id: &MessageId) -> Result<()> {
+    pub async fn ack<T>(&self, consumer_id: u64, message_ids: T) -> Result<()>
+    where
+        T: Borrow<[MessageId]>,
+    {
         self.send_ok(Packet::ConsumeAck(ConsumeAck {
             consumer_id,
-            message_id: *message_id,
+            message_ids: message_ids.borrow().to_vec(),
         }))
         .await
     }

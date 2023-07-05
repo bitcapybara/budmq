@@ -73,34 +73,7 @@ impl Producer {
 
     /// use by user to send messages
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
-        loop {
-            match self
-                .conn
-                .publish(self.id, &self.topic, self.sequence_id + 1, data)
-                .await
-            {
-                Ok(_) => {
-                    self.sequence_id += 1;
-                    return Ok(());
-                }
-                Err(connection::Error::Disconnect) => {
-                    if let Err(e) = self.conn.close_producer(self.id).await {
-                        warn!("client CLOSE_PRODUCER error: {e}")
-                    }
-                    (self.conn, self.sequence_id) = producer_reconnect(
-                        &self.retry_opts,
-                        self.ordered,
-                        &self.conn_handle,
-                        &self.name,
-                        self.id,
-                        &self.topic,
-                        self.access_mode,
-                    )
-                    .await?;
-                }
-                Err(e) => return Err(e)?,
-            }
-        }
+        self.send_batch([data]).await
     }
 
     pub async fn send_batch<T, A>(&mut self, data: T) -> Result<()>
@@ -111,7 +84,7 @@ impl Producer {
         loop {
             match self
                 .conn
-                .publish_batch(self.id, &self.topic, self.sequence_id + 1, data.borrow())
+                .publish(self.id, &self.topic, self.sequence_id + 1, data.borrow())
                 .await
             {
                 Ok(_) => {

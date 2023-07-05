@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 use bud_common::{
-    protocol::{Publish, PublishBatch, ReturnCode, Subscribe},
+    protocol::{Publish, ReturnCode, Subscribe},
     storage::{MessageStorage, MetaStorage},
     types::{AccessMode, MessageId, SubscriptionInfo, TopicMessage},
 };
@@ -209,42 +209,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         self.subscriptions.get(sub_name)
     }
 
-    /// save message in topic
-    pub async fn add_message(&mut self, message: &Publish) -> Result<()> {
-        let Some(producer_name) = self.producers.get_producer_name(message.producer_id) else {
-            return Err(Error::Response(ReturnCode::ProducerNotFound));
-        };
-        let sequence_id = self
-            .storage
-            .get_sequence_id(&producer_name)
-            .await?
-            .unwrap_or_default();
-        if message.sequence_id <= sequence_id {
-            return Err(Error::Response(ReturnCode::ProduceMessageDuplicated));
-        }
-        let message_id = MessageId {
-            topic_id: self.id,
-            cursor_id: self.storage.get_new_cursor_id().await?,
-        };
-        let topic_message = TopicMessage::new(
-            &self.name,
-            message_id,
-            message.sequence_id,
-            message.payload.clone(),
-            message.produce_time,
-        );
-        self.storage.add_message(&topic_message).await?;
-        self.storage
-            .set_sequence_id(&producer_name, sequence_id)
-            .await?;
-        for sub in self.subscriptions.values() {
-            sub.add_message(message_id.cursor_id).await?;
-            sub.message_notify();
-        }
-        Ok(())
-    }
-
-    pub async fn add_messages(&mut self, message: &PublishBatch) -> Result<()> {
+    pub async fn add_messages(&mut self, message: &Publish) -> Result<()> {
         let Some(producer_name) = self.producers.get_producer_name(message.producer_id) else {
             return Err(Error::Response(ReturnCode::ProducerNotFound));
         };
@@ -288,13 +253,18 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         Ok(self.storage.get_message(message_id).await?)
     }
 
-    pub async fn consume_ack(&mut self, sub_name: &str, message_id: &MessageId) -> Result<()> {
+    pub async fn consume_ack<T>(&mut self, sub_name: &str, message_ids: T) -> Result<()>
+    where
+        T: Borrow<[MessageId]>,
+    {
         let Some(sp) = self.subscriptions.get(sub_name) else {
             return Ok(());
         };
 
         // ack
-        sp.consume_ack(message_id.cursor_id).await?;
+        for message_id in message_ids.borrow() {
+            sp.consume_ack(message_id.cursor_id).await?;
+        }
 
         // remove acked messages
         let mut lowest_mark = u64::MAX;
