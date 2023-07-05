@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     // for _ in 0..10 {
     producer.send(b"hello, world").await?;
     producer
-        .send_batch(vec!["hello".as_bytes(), "world".as_bytes()])
+        .send_batch(["hello".as_bytes(), "world".as_bytes()])
         .await?;
     // }
     producer.close().await?;

@@ -238,48 +238,8 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                     if res.is_none() {
                         return;
                     }
-                    let mut cursor = self.cursor.write().await;
-                    trace!("dispatcher::run cursor peek a message");
-                    while let Some(next_cursor_id) = cursor.peek_message() {
-                        trace!("dispatcher::run: find available consumers");
-                        let Some(consumer) = self.available_consumer().await else {
-                            continue;
-                        };
-                        // serial processing
-                        trace!("dispatcher::run: send message to broker");
-                        let (res_tx, res_rx) = oneshot::channel();
-                        let event = SendEvent {
-                            client_id: consumer.client_id,
-                            topic_name: consumer.topic_name,
-                            message_id: MessageId { topic_id: self.topic_id, cursor_id: next_cursor_id },
-                            consumer_id: consumer.id,
-                            res_tx,
-                        };
-                        select!{
-                            res = self.send_tx.send(event) => {
-                                if res.is_err() {
-                                    return;
-                                }
-                            }
-                            _ = self.token.cancelled() => {
-                                return;
-                            }
-                        }
-                        trace!("dispatcher::run: waiting for replay");
-                        select! {
-                            res = res_rx => {
-                                if res.is_ok() {
-                                    if let Err(e) = cursor.read_advance().await {
-                                        error!("cursor read advance error: {e}")
-                                    }
-                                    let (client_id, consumer_id) = (consumer.client_id, consumer.id);
-                                    self.decrease_consumer_permits(client_id, consumer_id, 1).await;
-                                }
-                            }
-                            _ = self.token.cancelled() => {
-                                return;
-                            }
-                        }
+                    if self.peek_and_send().await {
+                        return
                     }
                 }
                 _ = self.token.cancelled() => {
@@ -287,5 +247,55 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                 }
             }
         }
+    }
+
+    async fn peek_and_send(&self) -> bool {
+        let mut cursor = self.cursor.write().await;
+        trace!("dispatcher::run cursor peek a message");
+        while let Some(next_cursor_id) = cursor.peek_message() {
+            trace!("dispatcher::run: find available consumers");
+            let Some(consumer) = self.available_consumer().await else {
+                return false;
+            };
+            // serial processing
+            trace!("dispatcher::run: send message to broker");
+            let (res_tx, res_rx) = oneshot::channel();
+            let event = SendEvent {
+                client_id: consumer.client_id,
+                topic_name: consumer.topic_name,
+                message_id: MessageId {
+                    topic_id: self.topic_id,
+                    cursor_id: next_cursor_id,
+                },
+                consumer_id: consumer.id,
+                res_tx,
+            };
+            select! {
+                res = self.send_tx.send(event) => {
+                    if res.is_err() {
+                        return true;
+                    }
+                }
+                _ = self.token.cancelled() => {
+                    return true;
+                }
+            }
+            trace!("dispatcher::run: waiting for replay");
+            select! {
+                res = res_rx => {
+                    if res.is_ok() {
+                        if let Err(e) = cursor.read_advance().await {
+                            error!("cursor read advance error: {e}")
+                        }
+                        let (client_id, consumer_id) = (consumer.client_id, consumer.id);
+                        self.decrease_consumer_permits(client_id, consumer_id, 1).await;
+                    }
+                }
+                _ = self.token.cancelled() => {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
