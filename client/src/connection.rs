@@ -214,6 +214,7 @@ impl Connection {
         for item in data.borrow().iter() {
             payloads.push(Bytes::copy_from_slice(item.borrow()));
         }
+        trace!("producer publish {} messages", payloads.len());
         self.send_ok(Packet::Publish(Publish {
             producer_id,
             topic: topic.to_string(),

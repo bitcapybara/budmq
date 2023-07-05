@@ -54,10 +54,10 @@ impl Producer {
         retry_opts: Option<RetryOptions>,
         conn_handle: ConnectionHandle,
     ) -> Result<Self> {
-        trace!("get connection from lookup topic");
         let conn = conn_handle.lookup_topic(topic, ordered).await?;
-        trace!("create new producer");
+        trace!("get connection from lookup topic");
         let sequence_id = conn.create_producer(name, id, topic, access_mode).await?;
+        trace!("create new producer, seq_id: {sequence_id}");
         Ok(Self {
             topic: topic.to_string(),
             sequence_id,
@@ -84,7 +84,7 @@ impl Producer {
         loop {
             match self
                 .conn
-                .publish(self.id, &self.topic, self.sequence_id + 1, data.borrow())
+                .publish(self.id, &self.topic, self.sequence_id, data.borrow())
                 .await
             {
                 Ok(_) => {

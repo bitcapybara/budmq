@@ -608,6 +608,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 Ok(Packet::ok_response())
             }
             Packet::Publish(p) => {
+                trace!("broker::process_packets: receive PUBLISH packet");
                 let clients = self.clients.read().await;
                 let Some(session) = clients.get(&client_id) else {
                     return Ok(Packet::err_response(ReturnCode::NotConnected));
@@ -615,17 +616,15 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 if session.get_producer(p.producer_id).is_none() {
                     return Ok(Packet::err_response(ReturnCode::ProducerNotFound));
                 }
-                trace!("broker::process_packets: receive PUBLISH_BATCH packet");
                 let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
                 match topics.get_mut(&topic) {
                     Some(topic) => {
                         trace!("broker::process_packets: add message to topic");
-                        topic.add_messages(&p).await.conv()?;
+                        topic.add_messages(&p).await.conv()
                     }
-                    None => return Ok(Packet::err_response(ReturnCode::TopicNotExists)),
+                    None => Ok(Packet::err_response(ReturnCode::TopicNotExists)),
                 }
-                Ok(Packet::ok_response())
             }
             Packet::ControlFlow(c) => {
                 trace!("broker::process_packets: receive CONTROLFLOW packet");

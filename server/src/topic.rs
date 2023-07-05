@@ -5,6 +5,7 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::{AccessMode, MessageId, SubscriptionInfo, TopicMessage},
 };
+use log::trace;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -218,10 +219,11 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             .get_sequence_id(&producer_name)
             .await?
             .unwrap_or_default();
-        if message.start_seq_id <= sequence_id {
+        if message.start_seq_id < sequence_id {
             return Err(Error::Response(ReturnCode::ProduceMessageDuplicated));
         }
         let mut sequence_id = message.start_seq_id;
+        trace!("topic add {} new messages", message.payloads.len());
         for payload in &message.payloads {
             let message_id = MessageId {
                 topic_id: self.id,
@@ -235,10 +237,10 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
                 message.produce_time,
             );
             self.storage.add_message(&topic_message).await?;
-            sequence_id += 1;
             for sub in self.subscriptions.values() {
                 sub.add_message(message_id.cursor_id).await?;
             }
+            sequence_id += 1;
         }
         self.storage
             .set_sequence_id(&producer_name, sequence_id)

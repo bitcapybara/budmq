@@ -159,7 +159,6 @@ impl Reader {
             p @ (Packet::CloseProducer(_) | Packet::CloseConsumer(_) | Packet::Disconnect) => {
                 trace!("client::reader: receive {} packet", p.packet_type());
                 res_tx.send(None).ok();
-                trace!("client::reader: receive {} packet", p.packet_type());
                 if let Err(e) = self.send_async(p, None).await {
                     error!("send packet to broker error: {e}");
                     return Err(e);
