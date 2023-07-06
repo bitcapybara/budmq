@@ -19,9 +19,6 @@ pub enum Error {
     /// error from redis
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
-    /// key already set
-    #[error("Redis key already exists when SET NX")]
-    KeyExists,
     #[error("Parse broker addr error: {0}")]
     ParseAddr(#[from] AddrParseError),
     #[error("Json codec error: {0}")]
@@ -75,7 +72,7 @@ impl MetaStorage for Redis {
             .query_async(&mut conn)
             .await?;
         if res.is_none() {
-            return Err(Error::KeyExists);
+            return Ok(());
         }
         // spawn SET EX
         let client = self.client.clone();

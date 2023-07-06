@@ -19,7 +19,7 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt};
-use log::error;
+use log::{error, trace};
 use s2n_quic::{
     connection::Handle,
     stream::{ReceiveStream, SendStream},
@@ -126,12 +126,14 @@ impl<T: PoolRecycle> StreamPool<T> {
                     match res_tx {
                         ResultWaiter::Sync(res_tx) => {
                             // send to server
+                            trace!("common io writer send packet: {}", packet.packet_type());
                             if let Err(e) = pooled.framed.send(packet).await {
                                 pooled.set_error().await;
                                 res_tx.send(Err(e.into())).ok();
                                 continue;
                             }
                             // wait for reply
+                            trace!("common io writer add send res_tx");
                             pooled.res_sender.send(res_tx).await.ok();
                         },
                         ResultWaiter::Async(res_tx) => {

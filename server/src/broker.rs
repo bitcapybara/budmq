@@ -252,7 +252,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             return Ok(())
         };
         let clients = self.clients.read().await;
-
         let Some(session) = clients.get(&event.client_id) else {
             return Ok(());
         };

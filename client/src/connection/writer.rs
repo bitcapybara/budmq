@@ -70,8 +70,8 @@ impl Writer {
                         Err(_) => {
                             trace!("client send PING to server");
                             match self.ping().await {
-                                Ok(Some(_)) => {},
-                                Ok(None) => {
+                                Ok(Packet::Pong) => {},
+                                Ok(_) => {
                                     trace!("connector::writer::run: miss pong packet");
                                     ping_err_count += 1;
                                     if ping_err_count >= 3 {
@@ -93,7 +93,7 @@ impl Writer {
         }
     }
 
-    async fn ping(&mut self) -> Result<Option<()>> {
+    async fn ping(&mut self) -> Result<Packet> {
         // send ping
         trace!("connector::writer::run: waiting for PONG packet");
         let (res_tx, res_rx) = oneshot::channel();
@@ -104,10 +104,7 @@ impl Writer {
             })
             .await
             .map_err(|_| Error::ConnectionDisconnect)?;
-        match res_rx.await.map_err(|_| Error::ConnectionDisconnect)? {
-            Ok(Packet::Pong) => Ok(Some(())),
-            Ok(_) => Ok(None),
-            Err(e) => Err(e)?,
-        }
+        let packet = res_rx.await.map_err(|_| Error::ConnectionDisconnect)??;
+        Ok(packet)
     }
 }

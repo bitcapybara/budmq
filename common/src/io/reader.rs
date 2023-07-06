@@ -1,5 +1,5 @@
 use futures::{SinkExt, StreamExt};
-use log::error;
+use log::{error, trace};
 use s2n_quic::{connection::StreamAcceptor, stream::BidirectionalStream};
 use tokio::{
     select,
@@ -90,6 +90,7 @@ async fn listen_on_stream(
                     }
                     None => break
                 };
+                trace!("common io reader receive packet: {}", packet.packet_type());
                 let (res_tx, res_rx) = oneshot::channel();
                 // send packet to client
                 let token = token.clone();

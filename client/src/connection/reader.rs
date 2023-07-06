@@ -52,7 +52,7 @@ impl Reader {
                 res = self.receiver.recv() => {
                     match res {
                         Some(request) => {
-                            trace!("connector::reader: accept a new stream");
+                            trace!("connector::reader: new reqeust");
                             if let Err(Error::Disconnect) = self.read(request).await {
                                 return
                             }

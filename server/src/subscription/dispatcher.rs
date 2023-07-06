@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Borrow, sync::Arc};
 
 use bud_common::{
     protocol::ReturnCode,
@@ -218,9 +218,14 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
         }
     }
 
-    pub async fn consume_ack(&self, cursor_id: u64) -> Result<()> {
+    pub async fn consume_ack<T>(&self, cursor_ids: T) -> Result<()>
+    where
+        T: Borrow<[u64]>,
+    {
         let mut cursor = self.cursor.write().await;
-        cursor.ack(cursor_id).await?;
+        for cursor_id in cursor_ids.borrow() {
+            cursor.ack(*cursor_id).await?;
+        }
         Ok(())
     }
 
@@ -250,9 +255,8 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
     }
 
     async fn peek_and_send(&self) -> bool {
-        let mut cursor = self.cursor.write().await;
         trace!("dispatcher::run cursor peek a message");
-        while let Some(next_cursor_id) = cursor.peek_message() {
+        while let Some(next_cursor_id) = self.get_next_cursor().await {
             trace!("dispatcher::run: find available consumers");
             let Some(consumer) = self.available_consumer().await else {
                 return false;
@@ -284,6 +288,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
             select! {
                 res = res_rx => {
                     if res.is_ok() {
+                        let mut cursor = self.cursor.write().await;
                         if let Err(e) = cursor.read_advance().await {
                             error!("cursor read advance error: {e}")
                         }
@@ -297,5 +302,10 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
             }
         }
         false
+    }
+
+    async fn get_next_cursor(&self) -> Option<u64> {
+        let cursor = self.cursor.read().await;
+        cursor.peek_message()
     }
 }

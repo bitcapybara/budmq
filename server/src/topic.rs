@@ -264,9 +264,12 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         };
 
         // ack
-        for message_id in message_ids.borrow() {
-            sp.consume_ack(message_id.cursor_id).await?;
-        }
+        let ids = message_ids
+            .borrow()
+            .iter()
+            .map(|m| m.cursor_id)
+            .collect::<Vec<u64>>();
+        sp.consume_ack(ids).await?;
 
         // remove acked messages
         let mut lowest_mark = u64::MAX;

@@ -1,7 +1,7 @@
 mod cursor;
 mod dispatcher;
 
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 use bud_common::{
     protocol::{ReturnCode, Subscribe},
@@ -262,8 +262,11 @@ impl<S1: MetaStorage, S2: MessageStorage> Subscription<S1, S2> {
         }
     }
 
-    pub async fn consume_ack(&self, cursor_id: u64) -> Result<()> {
-        self.dispatcher.consume_ack(cursor_id).await
+    pub async fn consume_ack<T>(&self, cursor_ids: T) -> Result<()>
+    where
+        T: Borrow<[u64]>,
+    {
+        self.dispatcher.consume_ack(cursor_ids).await
     }
 
     pub async fn delete_position(&self) -> u64 {
