@@ -1,7 +1,7 @@
 use std::{net::AddrParseError, time::Duration};
 
 use async_trait::async_trait;
-use log::{error, trace};
+use log::error;
 use redis::{AsyncCommands, Client};
 use tokio::{select, time};
 use tokio_util::sync::CancellationToken;
