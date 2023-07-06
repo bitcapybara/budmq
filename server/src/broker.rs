@@ -47,28 +47,15 @@ pub enum Error {
     UnsupportedPacket(PacketType),
 }
 
-trait ResultConv {
-    fn conv(self) -> Result<Packet>;
-}
-
-impl ResultConv for topic::Result<()> {
-    fn conv(self) -> Result<Packet> {
-        match self {
-            Ok(_) => Ok(Packet::ok_response()),
-            Err(topic::Error::Response(code)) => Ok(Packet::err_response(code)),
-            Err(e) => Err(e)?,
+macro_rules! err_conv {
+    ($path: ident, $stmt: expr) => {
+        if let Err(e) = $stmt {
+            match e {
+                $path::Error::Response(code) => return Ok(Packet::err_response(code)),
+                e => Err(e)?,
+            }
         }
-    }
-}
-
-impl ResultConv for subscription::Result<()> {
-    fn conv(self) -> Result<Packet> {
-        match self {
-            Ok(_) => Ok(Packet::ok_response()),
-            Err(subscription::Error::Response(code)) => Ok(Packet::err_response(code)),
-            Err(e) => Err(e)?,
-        }
-    }
+    };
 }
 
 /// messages from client to broker
@@ -545,11 +532,11 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     Some(topic) => match topic.get_subscription(&sub.sub_name) {
                         Some(sp) => {
                             trace!("broker::process_packets: add consumer to subscription");
-                            sp.add_consumer(client_id, &sub).await.conv()?;
+                            err_conv!(subscription, sp.add_consumer(client_id, &sub).await);
                         }
                         None => {
                             trace!("broker::process_packets: add subscription to topic");
-                            topic
+                            if let Err(e) = topic
                                 .add_subscription(
                                     topic.id,
                                     client_id,
@@ -559,7 +546,14 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                                     self.token.child_token(),
                                 )
                                 .await
-                                .conv()?;
+                            {
+                                match e {
+                                    topic::Error::Response(code) => {
+                                        return Ok(Packet::err_response(code))
+                                    }
+                                    e => Err(e)?,
+                                }
+                            }
                         }
                     },
                     None => {
@@ -578,17 +572,19 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                         )
                         .await?;
                         trace!("broker::process_packets: add subscription to topic");
-                        topic
-                            .add_subscription(
-                                topic_id,
-                                client_id,
-                                sub.consumer_id,
-                                &sub,
-                                send_tx.clone(),
-                                self.token.child_token(),
-                            )
-                            .await
-                            .conv()?;
+                        err_conv!(
+                            topic,
+                            topic
+                                .add_subscription(
+                                    topic_id,
+                                    client_id,
+                                    sub.consumer_id,
+                                    &sub,
+                                    send_tx.clone(),
+                                    self.token.child_token(),
+                                )
+                                .await
+                        );
                         topics.insert(sub.topic.clone(), topic);
                     }
                 }
@@ -632,7 +628,8 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 match topics.get_mut(&topic) {
                     Some(topic) => {
                         trace!("broker::process_packets: add message to topic");
-                        topic.add_messages(&p).await.conv()
+                        err_conv!(topic, topic.add_messages(&p).await);
+                        Ok(Packet::ok_response())
                     }
                     None => Ok(Packet::err_response(ReturnCode::TopicNotExists)),
                 }
@@ -678,10 +675,10 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     }
                 }
                 trace!("broker::process_packets: ack message in topic");
-                topic
-                    .consume_ack(&info.sub_name, c.message_ids)
-                    .await
-                    .conv()?;
+                err_conv!(
+                    topic,
+                    topic.consume_ack(&info.sub_name, c.message_ids).await
+                );
                 Ok(Packet::ok_response())
             }
             Packet::LookupTopic(p) => {
