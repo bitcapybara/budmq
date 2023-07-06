@@ -96,6 +96,16 @@ impl MetaStorage for BonsaiDB {
         self.metas.set_key(key, &broker_addr).await?;
         Ok(())
     }
+    async fn unregister_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
+        match self.get_topic_owner(topic_name).await? {
+            Some(addr) if addr.socket_addr == broker_addr.socket_addr => {
+                let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);
+                self.metas.delete_key(key).await?;
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
 
     async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         let key = format!("{}-{}", BROKER_TOPIC_KEY, topic_name);

@@ -59,6 +59,17 @@ impl<M: MetaStorage> BrokerStorage<M> {
             .map_err(|e| Error::Storage(e.to_string()))
     }
 
+    pub async fn unregister_topic(
+        &self,
+        topic_name: &str,
+        broker_addr: &BrokerAddress,
+    ) -> Result<()> {
+        self.storage
+            .unregister_topic(topic_name, broker_addr)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
+    }
+
     pub async fn get_topic_broker_addr(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         self.storage
             .get_topic_owner(topic_name)

@@ -20,6 +20,12 @@ pub trait MetaStorage: Clone + Send + Sync + 'static {
         broker_addr: &BrokerAddress,
     ) -> Result<(), Self::Error>;
 
+    async fn unregister_topic(
+        &self,
+        topic_name: &str,
+        broker_addr: &BrokerAddress,
+    ) -> Result<(), Self::Error>;
+
     async fn get_topic_owner(&self, topic_name: &str)
         -> Result<Option<BrokerAddress>, Self::Error>;
 

@@ -1,7 +1,7 @@
 use std::{net::AddrParseError, time::Duration};
 
 use async_trait::async_trait;
-use log::error;
+use log::{error, trace};
 use redis::{AsyncCommands, Client};
 use tokio::{select, time};
 use tokio_util::sync::CancellationToken;
@@ -9,6 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::types::{BrokerAddress, SubscriptionInfo};
 
 use super::MetaStorage;
+
+const KEY_PREFIX: &str = "BUDMQ";
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -26,10 +28,18 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(Clone)]
 pub struct Redis {
     client: Client,
     token: CancellationToken,
+}
+
+impl Clone for Redis {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            token: CancellationToken::new(),
+        }
+    }
 }
 
 impl Drop for Redis {
@@ -57,7 +67,7 @@ impl MetaStorage for Redis {
         let broker_addr = serde_json::to_string(broker_addr)?;
         let res: Option<String> = redis::Cmd::new()
             .arg("SET")
-            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
+            .arg(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}")) // key
             .arg(&broker_addr) // value
             .arg("NX")
             .arg("EX")
@@ -72,9 +82,12 @@ impl MetaStorage for Redis {
         let token = self.token.child_token();
         let topic_name = topic_name.to_string();
         tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(5));
+            interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+            interval.tick().await;
             loop {
                 select! {
-                    _ = time::sleep(Duration::from_secs(5)) => {
+                    _ = interval.tick() => {
                         let mut conn = match client.get_async_connection().await {
                             Ok(conn) => conn,
                             Err(e) => {
@@ -84,7 +97,7 @@ impl MetaStorage for Redis {
                         };
                         if let Err(e) = redis::Cmd::new()
                             .arg("SET")
-                            .arg(format!("BUDMQ_TOPIC_BROKER:{topic_name}")) // key
+                            .arg(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}")) // key
                             .arg(&broker_addr) // value
                             .arg("EX")
                             .arg(10)
@@ -102,22 +115,25 @@ impl MetaStorage for Redis {
         });
         Ok(())
     }
+    async fn unregister_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
+        let Some(addr) = self.get_topic_owner(topic_name).await? else {
+            return Ok(())
+        };
+        if addr.socket_addr != broker_addr.socket_addr {
+            return Ok(());
+        }
+        let mut conn = self.client.get_async_connection().await?;
+        redis::Cmd::del(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}"))
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
+    }
 
     async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
         let mut conn = self.client.get_async_connection().await?;
         // GET broker id
-        let broker_id: String = {
-            match redis::Cmd::get(format!("BUDMQ_TOPIC_BROKER:{topic_name}"))
-                .query_async(&mut conn)
-                .await?
-            {
-                Some(broker_id) => broker_id,
-                None => return Ok(None),
-            }
-        };
-        // GET broker addr
         let addr: String = {
-            match redis::Cmd::get(format!("BUDMQ_BROKER_ONLINE:{broker_id}"))
+            match redis::Cmd::get(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}"))
                 .query_async(&mut conn)
                 .await?
             {
@@ -133,7 +149,7 @@ impl MetaStorage for Redis {
         // HSET
         let content = serde_json::to_string(info)?;
         redis::Cmd::hset(
-            format!("BUDMQ_SUBSCRIPTIONS:{}", &info.topic),
+            format!("{KEY_PREFIX}:SUBSCRIPTIONS:{}", &info.topic),
             &info.name,
             content,
         )
@@ -146,7 +162,7 @@ impl MetaStorage for Redis {
         let mut conn = self.client.get_async_connection().await?;
         // HSCAN
         let mut subs = conn
-            .hscan::<_, String>(format!("BUDMQ_SUBSCRIPTIONS:{topic_name}"))
+            .hscan::<_, String>(format!("{KEY_PREFIX}:SUBSCRIPTIONS:{topic_name}"))
             .await?;
         let mut res = vec![];
         let mut is_val = false;
@@ -164,7 +180,7 @@ impl MetaStorage for Redis {
     async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
         // HDEL
-        redis::Cmd::hdel(format!("BUDMQ_SUBSCRIPTIONS:{topic_name}"), name)
+        redis::Cmd::hdel(format!("{KEY_PREFIX}:SUBSCRIPTIONS:{topic_name}"), name)
             .query_async(&mut conn)
             .await?;
         Ok(())
@@ -172,16 +188,22 @@ impl MetaStorage for Redis {
 
     async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
         let mut conn = self.client.get_async_connection().await?;
-        Ok(redis::Cmd::get(k).query_async(&mut conn).await?)
+        Ok(redis::Cmd::get(format!("{KEY_PREFIX}:{k}"))
+            .query_async(&mut conn)
+            .await?)
     }
 
     async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
         let mut conn = self.client.get_async_connection().await?;
-        Ok(redis::Cmd::set(k, v).query_async(&mut conn).await?)
+        Ok(redis::Cmd::set(format!("{KEY_PREFIX}:{k}"), v)
+            .query_async(&mut conn)
+            .await?)
     }
 
     async fn inc_u64(&self, k: &str, v: u64) -> Result<u64> {
         let mut conn = self.client.get_async_connection().await?;
-        Ok(redis::Cmd::incr(k, v).query_async(&mut conn).await?)
+        Ok(redis::Cmd::incr(format!("{KEY_PREFIX}:{k}"), v)
+            .query_async(&mut conn)
+            .await?)
     }
 }

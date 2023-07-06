@@ -217,6 +217,16 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             ),
         )
         .await;
+        let topics = self.topics.read().await;
+        for topic_name in topics.keys() {
+            if let Err(e) = self
+                .broker_storage
+                .unregister_topic(topic_name, &self.addr)
+                .await
+            {
+                error!("broker unregister topic error: {e}");
+            }
+        }
     }
 
     /// process send event from all subscriptions
@@ -229,7 +239,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             select! {
                 event = send_rx.recv() => {
                     let Some(event) = event else {
-                        token.cancel();
                         return
                     };
                     trace!("broker::handle_send_message task: receive a message");
@@ -314,7 +323,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             select! {
                 msg = broker_rx.recv() => {
                     let Some(msg) = msg else {
-                        token.cancel();
                         return
                     };
                     trace!("broker::receive_client: receive a message from client");
@@ -516,6 +524,9 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                         sequence_id
                     }
                 };
+                self.broker_storage
+                    .register_topic(&topic_name, &self.addr)
+                    .await?;
                 session.add_producer(producer_id, &topic_name);
                 Ok(Packet::ProducerReceipt(ProducerReceipt { sequence_id }))
             }
@@ -566,9 +577,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                             self.token.child_token(),
                         )
                         .await?;
-                        self.broker_storage
-                            .register_topic(&sub.topic, &self.addr)
-                            .await?;
                         trace!("broker::process_packets: add subscription to topic");
                         topic
                             .add_subscription(
@@ -584,6 +592,9 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                         topics.insert(sub.topic.clone(), topic);
                     }
                 }
+                self.broker_storage
+                    .register_topic(&sub.topic, &self.addr)
+                    .await?;
                 // add consumer to session
                 trace!("broker::process_packets: add consumer to session");
                 session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);

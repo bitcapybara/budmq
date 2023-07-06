@@ -77,6 +77,16 @@ impl MetaStorage for MemoryStorage {
         *broker = Some(broker_addr.clone());
         Ok(())
     }
+    async fn unregister_topic(&self, _topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
+        let mut broker = self.broker_addr.write().await;
+        let Some(addr) = broker.as_ref() else {
+            return Ok(())
+        };
+        if addr.socket_addr == broker_addr.socket_addr {
+            *broker = None;
+        }
+        Ok(())
+    }
 
     async fn get_topic_owner(&self, _topic_name: &str) -> Result<Option<BrokerAddress>> {
         let broker = self.broker_addr.read().await;
