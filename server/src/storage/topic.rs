@@ -4,6 +4,7 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
+use log::trace;
 
 use super::{Error, Result};
 
@@ -66,8 +67,7 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
         self.message_storage
             .put_message(message)
             .await
-            .map_err(|e| Error::Storage(e.to_string()))?;
-        Ok(())
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn get_message(&self, message_id: &MessageId) -> Result<Option<TopicMessage>> {

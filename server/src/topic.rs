@@ -243,7 +243,7 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         Ok(self.storage.get_message(message_id).await?)
     }
 
-    pub async fn consume_ack<T>(&mut self, sub_name: &str, message_ids: T) -> Result<()>
+    pub async fn consume_ack<T>(&self, sub_name: &str, message_ids: T) -> Result<()>
     where
         T: Borrow<[MessageId]>,
     {

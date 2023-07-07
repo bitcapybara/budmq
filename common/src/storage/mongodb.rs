@@ -195,14 +195,9 @@ impl MessageStorage for MongoDB {
             "topic_name": topic_name,
             "sub_name": sub_name,
         };
-        let opts = FindOneOptions::builder()
-            .projection(Some(doc! {
-                "bytes": 1
-            }))
-            .build();
         let bytes = self
             .cursor
-            .find_one(Some(filter), Some(opts))
+            .find_one(Some(filter), None)
             .await?
             .map(|c| c.bytes);
         Ok(bytes)
