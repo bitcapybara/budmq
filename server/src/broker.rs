@@ -8,7 +8,7 @@ use bud_common::{
         Packet, PacketType, ProducerReceipt, ReturnCode, Send, Unsubscribe,
     },
     storage::{MessageStorage, MetaStorage},
-    types::BrokerAddress,
+    types::{BrokerAddress, MessageId, TopicMessage},
 };
 use chrono::Utc;
 use futures::future;
@@ -85,6 +85,7 @@ struct ProducerInfo {
 
 /// One session per client
 /// Save a client's connection information
+#[derive(Clone)]
 struct Session {
     /// send to client
     client_tx: mpsc::UnboundedSender<BrokerMessage>,
@@ -240,20 +241,38 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
         }
     }
 
+    async fn get_message(
+        &self,
+        topic_name: &str,
+        message_id: &MessageId,
+    ) -> Result<Option<TopicMessage>> {
+        let topics = self.topics.read().await;
+        let Some(topic) = topics.get(topic_name) else {
+            error!("Send packet error: topic {} not found", topic_name);
+            return Ok(None);
+        };
+        let Some(message) = topic.get_message(message_id).await? else {
+            error!("Send packet error: message {:?} not found", message_id);
+            return Ok(None);
+        };
+        Ok(Some(message))
+    }
+
+    async fn get_session_sender(
+        &self,
+        client_id: u64,
+    ) -> Option<mpsc::UnboundedSender<BrokerMessage>> {
+        let clients = self.clients.read().await;
+        clients.get(&client_id).map(|s| s.client_tx.clone())
+    }
+
     async fn process_send_event(&self, event: SendEvent) -> Result<()> {
         trace!("broker::process_send_event: send packet to consumer: {event}");
-        let topics = self.topics.read().await;
-        let Some(topic) = topics.get(&event.topic_name) else {
-            error!("Send packet error: topic {} not found", event.topic_name);
+        let Some(message) = self.get_message(&event.topic_name, &event.message_id).await? else {
             return Ok(())
         };
-        let Some(message) = topic.get_message(&event.message_id).await? else {
-            error!("Send packet error: message {:?} not found", event.message_id);
+        let Some(session_sender) = self.get_session_sender(event.client_id).await else {
             return Ok(())
-        };
-        let clients = self.clients.read().await;
-        let Some(session) = clients.get(&event.client_id) else {
-            return Ok(());
         };
         trace!(
             "broker::process_send_event: send to client: {}",
@@ -270,7 +289,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             }),
             res_tx,
         };
-        if session.client_tx.send(message).is_err() {
+        if session_sender.send(message).is_err() {
             error!("Send message to client channel dropped")
         }
         trace!("broker::process_send_event: send response to subscription");
@@ -360,9 +379,12 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             }
             Packet::Disconnect => {
                 trace!("broker::process_packets: broker receive DISCONNECT packet");
-                let mut clients = self.clients.write().await;
-                let Some(mut session) = clients.remove(&client_id) else {
-                    return Ok(())
+                let mut session = {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.remove(&client_id) else {
+                        return Ok(())
+                    };
+                    session.clone()
                 };
                 trace!("broker::process_packets: remove client: {}", client_id);
                 // remove consumer
@@ -396,28 +418,35 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             }
             Packet::CloseProducer(CloseProducer { producer_id }) => {
                 trace!("broker::process_packets: broker receive CLOSE_PRODUCEDR packet");
-                let mut clients = self.clients.write().await;
-                let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(());
-                };
-                let Some(producer_info) = session.get_producer(producer_id) else {
-                    return Ok(())
+                let producer_info = {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.get_mut(&client_id) else {
+                        return Ok(());
+                    };
+                    session.del_producer(producer_id);
+                    let Some(producer_info) = session.get_producer(producer_id) else {
+                        return Ok(())
+                    };
+                    producer_info.clone()
                 };
                 let mut topics = self.topics.write().await;
                 let Some(topic) = topics.get_mut(&producer_info.topic_name) else {
                     return Ok(());
                 };
                 topic.del_producer(producer_id);
-                session.del_producer(producer_id);
             }
             Packet::CloseConsumer(CloseConsumer { consumer_id }) => {
                 trace!("broker::process_packets: broker receive CLOSE_CONSUMER packet");
-                let mut clients = self.clients.write().await;
-                let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(());
-                };
-                let Some(consumer_info) = session.get_consumer(consumer_id) else {
-                    return Ok(());
+                let consumer_info = {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.get_mut(&client_id) else {
+                        return Ok(());
+                    };
+                    session.del_consumer(consumer_id);
+                    let Some(consumer_info) = session.get_consumer(consumer_id) else {
+                        return Ok(());
+                    };
+                    consumer_info.clone()
                 };
                 let mut topics = self.topics.write().await;
                 let Some(topic) = topics.get_mut(&consumer_info.topic_name) else {
@@ -427,7 +456,6 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     return Ok(());
                 };
                 subscription.del_consumer(client_id, consumer_id).await?;
-                session.del_consumer(consumer_id);
             }
             _ => {
                 let packet = self
@@ -455,12 +483,15 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 access_mode,
                 producer_id,
             }) => {
-                let mut clients = self.clients.write().await;
-                let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected));
-                };
-                if session.has_producer(producer_id) {
-                    return Ok(Packet::err_response(ReturnCode::ProducerDuplicated));
+                {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.get_mut(&client_id) else {
+                        return Ok(Packet::err_response(ReturnCode::NotConnected));
+                    };
+                    if session.has_producer(producer_id) {
+                        return Ok(Packet::err_response(ReturnCode::ProducerDuplicated));
+                    }
+                    session.add_producer(producer_id, &topic_name);
                 }
                 let mut topics = self.topics.write().await;
                 let sequence_id = match topics.get_mut(&topic_name) {
@@ -513,17 +544,21 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 self.broker_storage
                     .register_topic(&topic_name, &self.addr)
                     .await?;
-                session.add_producer(producer_id, &topic_name);
                 Ok(Packet::ProducerReceipt(ProducerReceipt { sequence_id }))
             }
             Packet::Subscribe(sub) => {
                 trace!("broker::process_packets: receive SUBSCRIBE packet");
-                let mut clients = self.clients.write().await;
-                let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected));
-                };
-                if session.consumers.contains_key(&sub.consumer_id) {
-                    return Ok(Packet::err_response(ReturnCode::ConsumerDuplicated));
+                {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.get_mut(&client_id) else {
+                        return Ok(Packet::err_response(ReturnCode::NotConnected));
+                    };
+                    if session.consumers.contains_key(&sub.consumer_id) {
+                        return Ok(Packet::err_response(ReturnCode::ConsumerDuplicated));
+                    }
+                    // add consumer to session
+                    trace!("broker::process_packets: add consumer to session");
+                    session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
                 }
                 // add subscription into topic
                 let mut topics = self.topics.write().await;
@@ -590,37 +625,40 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 self.broker_storage
                     .register_topic(&sub.topic, &self.addr)
                     .await?;
-                // add consumer to session
-                trace!("broker::process_packets: add consumer to session");
-                session.add_consumer(sub.consumer_id, &sub.sub_name, &sub.topic);
                 Ok(Packet::ok_response())
             }
             Packet::Unsubscribe(Unsubscribe { consumer_id }) => {
                 trace!("broker::process_packets: receive UNSUBSCRIBE packet");
-                let mut clients = self.clients.write().await;
-                let Some(session) = clients.get_mut(&client_id) else {
-                    return Ok(Packet::ok_response());
-                };
-                let Some(info) = session.consumers.get(&consumer_id) else {
-                    return Ok(Packet::ok_response());
+                let info = {
+                    let mut clients = self.clients.write().await;
+                    let Some(session) = clients.get_mut(&client_id) else {
+                        return Ok(Packet::ok_response());
+                    };
+                    trace!("broker::process_packets: remove consumer from session");
+                    session.del_consumer(consumer_id);
+
+                    let Some(info) = session.consumers.get(&consumer_id) else {
+                        return Ok(Packet::ok_response());
+                    };
+                    info.clone()
                 };
                 let mut topics = self.topics.write().await;
                 if let Some(tp) = topics.get_mut(&info.topic_name) {
                     trace!("broker::process_packets: remove subscription from topic");
                     tp.del_subscription(&info.sub_name).await?;
                 }
-                trace!("broker::process_packets: remove consumer from session");
-                session.del_consumer(consumer_id);
                 Ok(Packet::ok_response())
             }
             Packet::Publish(p) => {
                 trace!("broker::process_packets: receive PUBLISH packet");
-                let clients = self.clients.read().await;
-                let Some(session) = clients.get(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected));
-                };
-                if session.get_producer(p.producer_id).is_none() {
-                    return Ok(Packet::err_response(ReturnCode::ProducerNotFound));
+                {
+                    let clients = self.clients.read().await;
+                    let Some(session) = clients.get(&client_id) else {
+                        return Ok(Packet::err_response(ReturnCode::NotConnected));
+                    };
+                    if session.get_producer(p.producer_id).is_none() {
+                        return Ok(Packet::err_response(ReturnCode::ProducerNotFound));
+                    }
                 }
                 let mut topics = self.topics.write().await;
                 let topic = p.topic.clone();
@@ -635,13 +673,16 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             }
             Packet::ControlFlow(c) => {
                 trace!("broker::process_packets: receive CONTROLFLOW packet");
-                let clients = self.clients.read().await;
-                // add permits to subscription
-                let Some(session) = clients.get(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected));
-                };
-                let Some(info) = session.consumers.get(&c.consumer_id) else {
-                    return Ok(Packet::err_response(ReturnCode::ConsumerNotFound));
+                let info = {
+                    let clients = self.clients.read().await;
+                    // add permits to subscription
+                    let Some(session) = clients.get(&client_id) else {
+                        return Ok(Packet::err_response(ReturnCode::NotConnected));
+                    };
+                    let Some(info) = session.consumers.get(&c.consumer_id) else {
+                        return Ok(Packet::err_response(ReturnCode::ConsumerNotFound));
+                    };
+                    info.clone()
                 };
                 let topics = self.topics.read().await;
                 let Some(topic) = topics.get(&info.topic_name) else {
@@ -657,12 +698,15 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
             }
             Packet::ConsumeAck(c) => {
                 trace!("broker::process_packets: receive CONSUMEACK packet");
-                let clients = self.clients.read().await;
-                let Some(session) = clients.get(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected))
-                };
-                let Some(info) = session.consumers.get(&c.consumer_id) else {
-                    return Ok(Packet::err_response(ReturnCode::ConsumerNotFound))
+                let info = {
+                    let clients = self.clients.read().await;
+                    let Some(session) = clients.get(&client_id) else {
+                        return Ok(Packet::err_response(ReturnCode::NotConnected))
+                    };
+                    let Some(info) = session.consumers.get(&c.consumer_id) else {
+                        return Ok(Packet::err_response(ReturnCode::ConsumerNotFound))
+                    };
+                    info.clone()
                 };
                 let mut topics = self.topics.write().await;
                 let Some(topic) = topics.get_mut(&info.topic_name) else {
