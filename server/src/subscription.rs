@@ -268,10 +268,6 @@ impl<S1: MetaStorage, S2: MessageStorage> Subscription<S1, S2> {
     {
         self.dispatcher.consume_ack(cursor_ids).await
     }
-
-    pub async fn delete_position(&self) -> u64 {
-        self.dispatcher.delete_position().await
-    }
 }
 
 impl<S1, S2> Drop for Subscription<S1, S2> {

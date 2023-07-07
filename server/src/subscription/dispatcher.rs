@@ -229,11 +229,6 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
         Ok(())
     }
 
-    pub async fn delete_position(&self) -> u64 {
-        let cursor = self.cursor.read().await;
-        cursor.delete_position()
-    }
-
     /// notify_rx receive event from subscription
     pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) {
         trace!("dispatcher::run: start dispatcher task loop");

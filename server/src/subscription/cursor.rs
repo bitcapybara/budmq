@@ -2,7 +2,7 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::InitialPostion,
 };
-use log::trace;
+use log::{error, trace};
 use roaring::RoaringTreemap;
 
 use crate::storage::cursor::CursorStorage;
@@ -19,8 +19,6 @@ pub struct Cursor<S1, S2> {
     read_position: u64,
     /// high water mark
     latest_message_id: u64,
-    /// low water mark
-    delete_position: u64,
     /// message ack info
     acked: RoaringTreemap,
     /// storage
@@ -46,14 +44,9 @@ impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
         Ok(Self {
             read_position,
             latest_message_id,
-            delete_position,
             acked,
             storage,
         })
-    }
-
-    pub fn delete_position(&self) -> u64 {
-        self.delete_position
     }
 
     pub fn peek_message(&self) -> Option<u64> {
@@ -82,25 +75,13 @@ impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
     pub async fn ack(&mut self, cursor_id: u64) -> Result<()> {
         // set message acked
         self.acked.insert(cursor_id);
-        // update delete_position
-        if cursor_id - self.delete_position > 1 {
-            return Ok(());
-        }
-        let Some(max) = self.acked.max() else {
-            return Ok(());
-        };
-        let prev_delete_pos = self.delete_position;
-        for i in cursor_id..max {
-            if self.acked.contains(i) {
-                self.delete_position = i;
-            } else {
-                break;
+        let storage = self.storage.clone();
+        let acked = self.acked.clone();
+        tokio::spawn(async move {
+            if let Err(e) = storage.set_ack_bits(&acked).await {
+                error!("save cursor error: {e}")
             }
-        }
-        // remove all values less than delete position
-        self.acked
-            .remove_range(prev_delete_pos..self.delete_position);
-        self.storage.set_ack_bits(&self.acked).await?;
+        });
         Ok(())
     }
 }

@@ -1,13 +1,9 @@
-use std::{
-    ops::{Bound, RangeBounds, RangeInclusive},
-    sync::atomic::AtomicU64,
-};
+use std::sync::atomic::AtomicU64;
 
 use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
-use log::warn;
 
 use super::{Error, Result};
 
@@ -81,47 +77,11 @@ impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
             .map_err(|e| Error::Storage(e.to_string()))
     }
 
-    pub async fn delete_range<R>(&self, topic_id: u64, cursor_range: R) -> Result<()>
-    where
-        R: RangeBounds<u64>,
-    {
-        let Some(range) = Self::get_range(cursor_range) else {
-            warn!("delete message with invalid range");
-            return Ok(());
-        };
-        for i in range {
-            self.message_storage
-                .del_message(&MessageId {
-                    topic_id,
-                    cursor_id: i,
-                })
-                .await
-                .map_err(|e| Error::Storage(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn get_range<R>(range: R) -> Option<RangeInclusive<u64>>
-    where
-        R: RangeBounds<u64>,
-    {
-        let start = match range.start_bound() {
-            Bound::Included(&i) => i,
-            Bound::Excluded(&u64::MAX) => return None,
-            Bound::Excluded(&i) => i + 1,
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&i) => i,
-            Bound::Excluded(&0) => return None,
-            Bound::Excluded(&i) => i - 1,
-            Bound::Unbounded => u64::MAX,
-        };
-        if end < start {
-            return None;
-        }
-
-        Some(start..=end)
+    pub async fn del_message(&self, message_id: &MessageId) -> Result<()> {
+        self.message_storage
+            .del_message(message_id)
+            .await
+            .map_err(|e| Error::Storage(e.to_string()))
     }
 
     pub async fn get_sequence_id(&self, producer_name: &str) -> Result<Option<u64>> {

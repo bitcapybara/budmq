@@ -119,8 +119,6 @@ pub struct Topic<M, S> {
     producers: TopicProducers,
     /// message storage
     storage: TopicStorage<M, S>,
-    /// delete position
-    delete_position: u64,
 }
 
 impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
@@ -135,11 +133,6 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
         let storage = TopicStorage::new(topic, meta_storage.clone(), message_storage.clone())?;
 
         let loaded_subscriptions = storage.all_aubscriptions().await?;
-        let mut delete_position = if loaded_subscriptions.is_empty() {
-            0
-        } else {
-            u64::MAX
-        };
         let mut subscriptions = HashMap::with_capacity(loaded_subscriptions.len());
         for sub in loaded_subscriptions {
             let subscription = Subscription::new(
@@ -153,17 +146,12 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
                 token.child_token(),
             )
             .await?;
-            let sub_delete_pos = subscription.delete_position().await;
-            if sub_delete_pos < delete_position {
-                delete_position = sub_delete_pos;
-            }
             subscriptions.insert(sub.name, subscription);
         }
         Ok(Self {
             name: topic.to_string(),
             subscriptions,
             storage,
-            delete_position,
             producers: TopicProducers(None),
             id,
         })
@@ -271,23 +259,9 @@ impl<M: MetaStorage, S: MessageStorage> Topic<M, S> {
             .collect::<Vec<u64>>();
         sp.consume_ack(ids).await?;
 
-        // remove acked messages
-        let mut lowest_mark = u64::MAX;
-        for sub in self.subscriptions.values() {
-            let delete_position = sub.delete_position().await;
-            if delete_position < lowest_mark {
-                lowest_mark = delete_position;
-            }
+        for id in message_ids.borrow() {
+            self.storage.del_message(id).await?;
         }
-
-        if lowest_mark - self.delete_position < 1 {
-            return Ok(());
-        }
-
-        self.storage
-            .delete_range(self.id, self.delete_position..lowest_mark)
-            .await?;
-        self.delete_position = lowest_mark;
         Ok(())
     }
 
