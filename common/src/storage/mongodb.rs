@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use mongodb::{
     bson::{doc, spec::BinarySubtype, Binary, Bson, DateTime},
-    options::{FindOneOptions, UpdateOptions},
+    options::{FindOneOptions, ReplaceOptions},
     Collection, Database,
 };
 use tokio::sync::RwLock;
@@ -142,18 +142,8 @@ impl MessageStorage for MongoDB {
                 "cursor_id": cursor_id as i64
             },
         };
-        let update = doc! {
-            "message_id": {
-                "topic_id": msg.message_id.topic_id as i64,
-                "cursor_id": msg.message_id.cursor_id as i64
-            },
-            "topic_name": msg.topic_name,
-            "sequence_id": msg.sequence_id as i64,
-            "payload": binary(&msg.payload),
-            "produce_time": msg.produce_time
-        };
-        let opts = UpdateOptions::builder().upsert(Some(true)).build();
-        collection.update_one(filter, update, Some(opts)).await?;
+        let opts = ReplaceOptions::builder().upsert(Some(true)).build();
+        collection.replace_one(filter, msg, Some(opts)).await?;
         Ok(())
     }
 
@@ -190,13 +180,13 @@ impl MessageStorage for MongoDB {
             "topic_name": topic_name.to_string(),
             "sub_name": sub_name.to_string()
         };
-        let update = doc! {
-            "topic_name": topic_name.to_string(),
-            "sub_name": sub_name.to_string(),
-            "bytes": binary(bytes)
+        let cursor = MongoCursor {
+            topic_name: topic_name.to_string(),
+            sub_name: sub_name.to_string(),
+            bytes: bytes.to_vec(),
         };
-        let opts = UpdateOptions::builder().upsert(Some(true)).build();
-        self.cursor.update_one(filter, update, Some(opts)).await?;
+        let opts = ReplaceOptions::builder().upsert(Some(true)).build();
+        self.cursor.replace_one(filter, cursor, Some(opts)).await?;
         Ok(())
     }
 
