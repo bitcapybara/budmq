@@ -88,7 +88,7 @@ pub struct TopicMessage {
     /// topic name
     pub topic_name: String,
     /// producer sequence id
-    pub seq_id: u64,
+    pub sequence_id: u64,
     /// message payload
     pub payload: Bytes,
     /// produce time
@@ -105,7 +105,7 @@ impl TopicMessage {
     ) -> Self {
         Self {
             topic_name: topic.to_string(),
-            seq_id,
+            sequence_id: seq_id,
             payload,
             message_id,
             produce_time,

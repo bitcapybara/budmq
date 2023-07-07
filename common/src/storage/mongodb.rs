@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use bytes::Bytes;
 use mongodb::{
-    bson::{doc, DateTime},
-    options::FindOneOptions,
+    bson::{doc, spec::BinarySubtype, Binary, Bson, DateTime},
+    options::{FindOneOptions, UpdateOptions},
     Collection, Database,
 };
 use tokio::sync::RwLock;
@@ -50,7 +50,7 @@ impl From<MongoMessageId> for MessageId {
 pub struct MongoTopicMessage {
     pub message_id: MongoMessageId,
     pub topic_name: String,
-    pub seq_id: u64,
+    pub sequence_id: u64,
     pub payload: Vec<u8>,
     pub produce_time: DateTime,
 }
@@ -60,7 +60,7 @@ impl From<&TopicMessage> for MongoTopicMessage {
         Self {
             message_id: m.message_id.into(),
             topic_name: m.topic_name.clone(),
-            seq_id: m.seq_id,
+            sequence_id: m.sequence_id,
             payload: m.payload.to_vec(),
             produce_time: m.produce_time.into(),
         }
@@ -72,7 +72,7 @@ impl From<MongoTopicMessage> for TopicMessage {
         Self {
             message_id: m.message_id.into(),
             topic_name: m.topic_name,
-            seq_id: m.seq_id,
+            sequence_id: m.sequence_id,
             payload: Bytes::copy_from_slice(&m.payload),
             produce_time: m.produce_time.into(),
         }
@@ -82,7 +82,7 @@ impl From<MongoTopicMessage> for TopicMessage {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct MongoCursor {
     pub topic_name: String,
-    pub sub_naem: String,
+    pub sub_name: String,
     pub bytes: Vec<u8>,
 }
 
@@ -118,15 +118,42 @@ impl MongoDB {
     }
 }
 
+fn binary(bytes: &[u8]) -> Bson {
+    Bson::Binary(Binary {
+        subtype: BinarySubtype::Generic,
+        bytes: bytes.to_vec(),
+    })
+}
+
 #[async_trait]
 impl MessageStorage for MongoDB {
     type Error = Error;
 
     async fn put_message(&self, msg: &TopicMessage) -> Result<()> {
-        let MessageId { topic_id, .. } = msg.message_id;
+        let MessageId {
+            topic_id,
+            cursor_id,
+        } = msg.message_id;
         let collection = self.get_collection(topic_id).await;
         let msg: MongoTopicMessage = msg.into();
-        collection.insert_one(msg, None).await?;
+        let filter = doc! {
+            "message_id": {
+                "topic_id": topic_id as i64,
+                "cursor_id": cursor_id as i64
+            },
+        };
+        let update = doc! {
+            "message_id": {
+                "topic_id": msg.message_id.topic_id as i64,
+                "cursor_id": msg.message_id.cursor_id as i64
+            },
+            "topic_name": msg.topic_name,
+            "sequence_id": msg.sequence_id as i64,
+            "payload": binary(&msg.payload),
+            "produce_time": msg.produce_time
+        };
+        let opts = UpdateOptions::builder().upsert(Some(true)).build();
+        collection.update_one(filter, update, Some(opts)).await?;
         Ok(())
     }
 
@@ -159,12 +186,17 @@ impl MessageStorage for MongoDB {
     }
 
     async fn save_cursor(&self, topic_name: &str, sub_name: &str, bytes: &[u8]) -> Result<()> {
-        let cursor = MongoCursor {
-            topic_name: topic_name.to_string(),
-            sub_naem: sub_name.to_string(),
-            bytes: bytes.to_vec(),
+        let filter = doc! {
+            "topic_name": topic_name.to_string(),
+            "sub_name": sub_name.to_string()
         };
-        self.cursor.insert_one(cursor, None).await?;
+        let update = doc! {
+            "topic_name": topic_name.to_string(),
+            "sub_name": sub_name.to_string(),
+            "bytes": binary(bytes)
+        };
+        let opts = UpdateOptions::builder().upsert(Some(true)).build();
+        self.cursor.update_one(filter, update, Some(opts)).await?;
         Ok(())
     }
 
