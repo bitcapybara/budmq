@@ -4,7 +4,6 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::{MessageId, SubscriptionInfo, TopicMessage},
 };
-use log::trace;
 
 use super::{Error, Result};
 

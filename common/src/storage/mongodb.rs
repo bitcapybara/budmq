@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use mongodb::{
     bson::{doc, spec::BinarySubtype, Binary, Bson, DateTime},
-    options::{FindOneOptions, ReplaceOptions},
+    options::ReplaceOptions,
     Collection, Database,
 };
 use tokio::sync::RwLock;

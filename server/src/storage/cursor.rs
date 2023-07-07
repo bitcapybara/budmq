@@ -1,5 +1,4 @@
 use bud_common::storage::{MessageStorage, MetaStorage};
-use log::trace;
 use roaring::RoaringTreemap;
 
 use super::{Error, Result};
