@@ -20,7 +20,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone)]
-pub struct MemoryStorage {
+pub struct MemoryDB {
     /// str_key -> bytes_value
     metas: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     /// broker
@@ -33,7 +33,7 @@ pub struct MemoryStorage {
     messages: Arc<RwLock<HashMap<u64, HashMap<u64, TopicMessage>>>>,
 }
 
-impl MemoryStorage {
+impl MemoryDB {
     pub fn new() -> Self {
         Self {
             metas: Arc::new(RwLock::new(HashMap::new())),
@@ -62,14 +62,14 @@ impl MemoryStorage {
     }
 }
 
-impl Default for MemoryStorage {
+impl Default for MemoryDB {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl MetaStorage for MemoryStorage {
+impl MetaStorage for MemoryDB {
     type Error = Error;
 
     async fn register_topic(&self, _topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
@@ -155,7 +155,7 @@ impl MetaStorage for MemoryStorage {
 }
 
 #[async_trait]
-impl MessageStorage for MemoryStorage {
+impl MessageStorage for MemoryDB {
     type Error = Error;
 
     async fn put_message(&self, msg: &TopicMessage) -> Result<()> {

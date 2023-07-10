@@ -4,10 +4,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bud_common::{
-    storage::{mongodb::MongoDB, redis::Redis},
-    types::BrokerAddress,
-};
+#[cfg(feature = "bonsaidb")]
+use bud_common::storage::bonsaidb::BonsaiDB;
+#[cfg(all(
+    not(feature = "redis"),
+    not(feature = "mongodb"),
+    not(feature = "bonsaidb")
+))]
+use bud_common::storage::memory::MemoryDB;
+#[cfg(feature = "mongodb")]
+use bud_common::storage::mongodb::MongoDB;
+#[cfg(feature = "redis")]
+use bud_common::storage::redis::Redis;
+
+use bud_common::types::BrokerAddress;
 use bud_server::{common::mtls::MtlsProvider, Server};
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
@@ -77,19 +87,39 @@ async fn run(token: CancellationToken, server: Server) -> anyhow::Result<()> {
         token.cancel();
         handle.close();
     });
-
-    // => use memory storage
-    // let storage = MemoryStorage::new();
-    // => use bonsaidb storage
-    // let storage = BonsaiDB::new("/tmp").await?;
-    // => use redis storage
-    let redis_client = redis::Client::open("redis://127.0.0.1:6379")?;
-    let meta = Redis::new(redis_client);
-    // => use mongo storage
-    let mongo_client = mongodb::Client::with_uri_str("mongodb://127.0.0.1:27017").await?;
-    let mongo_database = mongo_client.database("budmq");
-    let message = MongoDB::new(mongo_database);
+    let (meta, message) = storage().await?;
     // start server
     server.start(meta, message).await?;
     Ok(())
+}
+
+#[cfg(all(feature = "redis", feature = "mongodb"))]
+async fn storage() -> anyhow::Result<(Redis, MongoDB)> {
+    log::trace!("redis and mongodb storage loaded");
+    let redis_client = redis::Client::open("redis://127.0.0.1:6379")?;
+    let meta = Redis::new(redis_client);
+    let mongo_client = mongodb::Client::with_uri_str("mongodb://127.0.0.1:27017").await?;
+    let mongo_database = mongo_client.database("budmq");
+    let message = MongoDB::new(mongo_database);
+    Ok((meta, message))
+}
+
+#[cfg(feature = "bonsaidb")]
+async fn storage() -> anyhow::Result<(BonsaiDB, BonsaiDB)> {
+    log::trace!("bonsaidb storage loaded");
+    let meta = BonsaiDB::new("/tmp").await?;
+    let message = meta.clone();
+    Ok((meta, message))
+}
+
+#[cfg(all(
+    not(feature = "redis"),
+    not(feature = "mongodb"),
+    not(feature = "bonsaidb")
+))]
+async fn storage() -> anyhow::Result<(MemoryDB, MemoryDB)> {
+    log::trace!("memorydb storage loaded");
+    let meta = MemoryDB::new();
+    let message = meta.clone();
+    Ok((meta, message))
 }

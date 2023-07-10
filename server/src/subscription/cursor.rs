@@ -89,7 +89,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
 #[cfg(test)]
 mod tests {
 
-    use bud_common::storage::memory::MemoryStorage;
+    use bud_common::storage::memory::MemoryDB;
 
     use super::*;
 
@@ -98,8 +98,8 @@ mod tests {
         let mut cursor = Cursor::new(
             "test-topic",
             "test-sub",
-            MemoryStorage::new(),
-            MemoryStorage::new(),
+            MemoryDB::new(),
+            MemoryDB::new(),
             InitialPostion::Latest,
         )
         .await
