@@ -16,7 +16,7 @@
 ## Usage
 
 see examples for details:
-* [server](./server/examples/local.rs)
+* [server](./server/examples/server.rs)
 * [consumer](./client/examples/consumer.rs)
 * [producer](./client/examples/producer.rs)
 
