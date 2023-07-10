@@ -3,9 +3,15 @@
 ## Features
 
 * Server and Client are provided as crates
-* Network transport layer based on QUIC protocol: connection reconnect and stream pool supported
-* distributed deployment: each broker can be deployed independently
-* custom storage implementation: `MetaStorage` for meta data, `MessageStorage` for topic messages
+* Network transport layer based on QUIC protocol
+  * connection reconnect
+  * stream pool
+  * request pipeline
+* distributed deployment
+  * each broker can be deployed independently
+* custom storage implementation
+  * `MetaStorage` for meta data
+  * `MessageStorage` for topic messages
 
 ## Usage
 
