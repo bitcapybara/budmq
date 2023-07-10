@@ -119,6 +119,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
     }
 
     pub async fn del_consumer(&self, client_id: u64, consumer_id: u64) {
+        trace!("delete consumer: {consumer_id}, client_id: {client_id}");
         let mut consumers = self.consumers.write().await;
         let Some(cms) = consumers.as_mut() else {
             return;
@@ -256,6 +257,11 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
             let Some(consumer) = self.available_consumer().await else {
                 return false;
             };
+            trace!(
+                "find consumer: {}, client_id: {}",
+                consumer.id,
+                consumer.client_id
+            );
             // serial processing
             trace!("dispatcher::run: send message to broker");
             let (res_tx, res_rx) = oneshot::channel();

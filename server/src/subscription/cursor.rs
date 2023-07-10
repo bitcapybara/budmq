@@ -38,7 +38,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Cursor<S1, S2> {
         let acked = storage.get_ack_bits().await?.unwrap_or_default();
         let delete_position = acked.min().unwrap_or_default();
         let read_position = match init_position {
-            InitialPostion::Latest => storage.get_read_position().await?.unwrap_or_default(),
+            InitialPostion::Latest => latest_message_id,
             InitialPostion::Earliest => delete_position + 1,
         };
         Ok(Self {

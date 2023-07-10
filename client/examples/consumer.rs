@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
             SubscribeMessage {
                 topic: "test-topic".to_string(),
                 sub_name: "test-subscription".to_string(),
-                sub_type: SubType::Exclusive,
+                sub_type: SubType::Shared,
                 initial_postion: InitialPostion::Latest,
             },
         )

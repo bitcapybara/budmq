@@ -252,6 +252,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
         trace!("broker::process_send_event: send packet to consumer: {event}");
         let state = self.state.read().await;
         let Some(session) = state.clients.get(&event.client_id) else {
+            error!("Send packet error: client {} not found", &event.client_id);
             return Ok(())
         };
         let Some(topic) = state.topics.get(&event.topic_name) else {
@@ -409,10 +410,12 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 let Some(producer_info) = session.del_producer(producer_id) else {
                     return Ok(())
                 };
+                session.del_producer(producer_id);
                 let Some(topic) = state.topics.get_mut(&producer_info.topic_name) else {
                     return Ok(());
                 };
                 topic.del_producer(producer_id);
+                trace!("broker::process_packets: broker delete producer: {producer_id}");
             }
             Packet::CloseConsumer(CloseConsumer { consumer_id }) => {
                 trace!("broker::process_packets: broker receive CLOSE_CONSUMER packet");
@@ -420,10 +423,10 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 let Some(session) = state.clients.get_mut(&client_id) else {
                     return Ok(());
                 };
-                session.del_consumer(consumer_id);
                 let Some(consumer_info) = session.get_consumer(consumer_id) else {
                     return Ok(());
                 };
+                session.del_consumer(consumer_id);
                 let Some(topic) = state.topics.get_mut(&consumer_info.topic_name) else {
                     return Ok(());
                 };
