@@ -132,3 +132,9 @@ pub struct BrokerAddress {
     pub socket_addr: SocketAddr,
     pub server_name: String,
 }
+
+impl std::fmt::Display for BrokerAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} -> {}", self.socket_addr, self.server_name)
+    }
+}

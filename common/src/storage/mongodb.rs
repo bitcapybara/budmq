@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::{
     error::WrapError,
     types::{MessageId, TopicMessage},
+    wrap_error_impl,
 };
 
 use super::MessageStorage;
@@ -25,22 +26,7 @@ pub enum Error {
     MongoDB(String),
 }
 
-impl<T> WrapError<T, Error> for std::result::Result<T, mongodb::error::Error> {
-    fn wrap<C>(self, context: C) -> std::result::Result<T, Error>
-    where
-        C: std::fmt::Display + Send + Sync + 'static,
-    {
-        self.map_err(|e| Error::MongoDB(format!("{e}: {context}")))
-    }
-
-    fn with_wrap<F, C>(self, context: F) -> std::result::Result<T, Error>
-    where
-        F: FnOnce() -> C,
-        C: std::fmt::Display + Send + Sync + 'static,
-    {
-        self.map_err(|e| Error::MongoDB(format!("{e}: {}", context())))
-    }
-}
+wrap_error_impl!(mongodb::error::Error, Error::MongoDB);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct MongoMessageId {

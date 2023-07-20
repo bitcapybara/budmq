@@ -12,7 +12,9 @@ use bytes::{Bytes, BytesMut};
 
 use crate::{
     codec::{self, Codec},
+    error::WrapError,
     types::{BrokerAddress, MessageId, SubscriptionInfo, TopicMessage},
+    wrap_error_impl,
 };
 
 use super::{MessageStorage, MetaStorage};
@@ -34,6 +36,8 @@ pub enum Error {
     #[error("Protocol codec error: {0}")]
     Codec(#[from] codec::Error),
 }
+
+wrap_error_impl!(bonsaidb::local::Error, Error::BonsaiDB);
 
 impl From<bonsaidb::local::Error> for Error {
     fn from(e: bonsaidb::local::Error) -> Self {

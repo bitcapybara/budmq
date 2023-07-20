@@ -1,12 +1,16 @@
-use std::{net::AddrParseError, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use log::error;
-use redis::{AsyncCommands, Client};
+use redis::{aio, AsyncCommands, Client};
 use tokio::{select, time};
 use tokio_util::sync::CancellationToken;
 
-use crate::types::{BrokerAddress, SubscriptionInfo};
+use crate::{
+    error::WrapError,
+    types::{BrokerAddress, SubscriptionInfo},
+    wrap_error_impl,
+};
 
 use super::MetaStorage;
 
@@ -18,12 +22,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     /// error from redis
     #[error("Redis error: {0}")]
-    Redis(#[from] redis::RedisError),
+    Redis(String),
     #[error("Parse broker addr error: {0}")]
-    ParseAddr(#[from] AddrParseError),
+    ParseAddr(String),
     #[error("Json codec error: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(String),
 }
+
+wrap_error_impl!(redis::RedisError, Error::Redis);
+wrap_error_impl!(std::net::AddrParseError, Error::ParseAddr);
+wrap_error_impl!(serde_json::Error, Error::Json);
 
 pub struct Redis {
     client: Client,
@@ -52,6 +60,13 @@ impl Redis {
             token: CancellationToken::new(),
         }
     }
+
+    async fn get_async_connection(&self) -> Result<aio::Connection> {
+        self.client
+            .get_async_connection()
+            .await
+            .wrap("get async connection error")
+    }
 }
 
 #[async_trait]
@@ -59,18 +74,20 @@ impl MetaStorage for Redis {
     type Error = Error;
 
     async fn register_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         // SET EX NX
-        let broker_addr = serde_json::to_string(broker_addr)?;
+        let broker_addr_str =
+            serde_json::to_string(broker_addr).wrap("marshal broker addr to json error")?;
         let res: Option<String> = redis::Cmd::new()
             .arg("SET")
             .arg(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}")) // key
-            .arg(&broker_addr) // value
+            .arg(&broker_addr_str) // value
             .arg("NX")
             .arg("EX")
             .arg(10)
             .query_async(&mut conn)
-            .await?;
+            .await
+            .with_wrap(|| format!("broker {broker_addr} register topic {topic_name} error"))?;
         if res.is_none() {
             return Ok(());
         }
@@ -95,7 +112,7 @@ impl MetaStorage for Redis {
                         if let Err(e) = redis::Cmd::new()
                             .arg("SET")
                             .arg(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}")) // key
-                            .arg(&broker_addr) // value
+                            .arg(&broker_addr_str) // value
                             .arg("EX")
                             .arg(10)
                             .query_async::<_, String>(&mut conn)
@@ -119,53 +136,60 @@ impl MetaStorage for Redis {
         if addr.socket_addr != broker_addr.socket_addr {
             return Ok(());
         }
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         redis::Cmd::del(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}"))
             .query_async(&mut conn)
-            .await?;
+            .await
+            .with_wrap(|| format!("broker unregister topic {topic_name} error"))?;
         Ok(())
     }
 
     async fn get_topic_owner(&self, topic_name: &str) -> Result<Option<BrokerAddress>> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         // GET broker id
         let addr: String = {
             match redis::Cmd::get(format!("{KEY_PREFIX}:TOPIC_BROKER:{topic_name}"))
                 .query_async(&mut conn)
-                .await?
+                .await
+                .with_wrap(|| format!("get topic {topic_name} owner error"))?
             {
                 Some(addr) => addr,
                 None => return Ok(None),
             }
         };
-        Ok(Some(serde_json::from_str(&addr)?))
+        Ok(Some(
+            serde_json::from_str(&addr).wrap("unmarshal broker addr error")?,
+        ))
     }
 
     async fn add_subscription(&self, info: &SubscriptionInfo) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         // HSET
-        let content = serde_json::to_string(info)?;
+        let content = serde_json::to_string(info).wrap("marshal subscription info error")?;
         redis::Cmd::hset(
             format!("{KEY_PREFIX}:SUBSCRIPTIONS:{}", &info.topic),
             &info.name,
             content,
         )
         .query_async(&mut conn)
-        .await?;
+        .await
+        .with_wrap(|| format!("hset topic {} subscription {} error", info.topic, info.name))?;
         Ok(())
     }
 
     async fn all_subscription(&self, topic_name: &str) -> Result<Vec<SubscriptionInfo>> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         // HSCAN
         let mut subs = conn
             .hscan::<_, String>(format!("{KEY_PREFIX}:SUBSCRIPTIONS:{topic_name}"))
-            .await?;
+            .await
+            .with_wrap(|| format!("hscan all subscriptions in topic {topic_name} error"))?;
         let mut res = vec![];
         let mut is_val = false;
         while let Some(content) = subs.next_item().await {
             if is_val {
-                let sub: SubscriptionInfo = serde_json::from_str(&content)?;
+                let sub: SubscriptionInfo =
+                    serde_json::from_str(&content).wrap("unmarshal subscription error")?;
                 res.push(sub);
             } else {
                 is_val = true
@@ -175,32 +199,36 @@ impl MetaStorage for Redis {
     }
 
     async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         // HDEL
         redis::Cmd::hdel(format!("{KEY_PREFIX}:SUBSCRIPTIONS:{topic_name}"), name)
             .query_async(&mut conn)
-            .await?;
+            .await
+            .with_wrap(|| format!("hdel topic {topic_name} subscription {name} error"))?;
         Ok(())
     }
 
     async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         Ok(redis::Cmd::get(format!("{KEY_PREFIX}:{k}"))
             .query_async(&mut conn)
-            .await?)
+            .await
+            .with_wrap(|| format!("get {k} value error"))?)
     }
 
     async fn put_u64(&self, k: &str, v: u64) -> Result<()> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         Ok(redis::Cmd::set(format!("{KEY_PREFIX}:{k}"), v)
             .query_async(&mut conn)
-            .await?)
+            .await
+            .with_wrap(|| format!("put {k} value error"))?)
     }
 
     async fn inc_u64(&self, k: &str, v: u64) -> Result<u64> {
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_async_connection().await?;
         Ok(redis::Cmd::incr(format!("{KEY_PREFIX}:{k}"), v)
             .query_async(&mut conn)
-            .await?)
+            .await
+            .with_wrap(|| format!("inc {k} {v} error"))?)
     }
 }
