@@ -1,6 +1,8 @@
 use bud_common::storage::{MessageStorage, MetaStorage};
 use roaring::RoaringTreemap;
 
+use crate::error::WrapError;
+
 use super::{Error, Result};
 
 #[derive(Clone)]
@@ -64,18 +66,19 @@ impl<S1: MetaStorage, S2: MessageStorage> CursorStorage<S1, S2> {
     }
 
     pub async fn get_ack_bits(&self) -> Result<Option<RoaringTreemap>> {
-        Ok(self
-            .message_storage
+        self.message_storage
             .load_cursor(&self.topic_name, &self.sub_name)
             .await
             .map_err(|e| Error::Storage(e.to_string()))?
             .map(|b| RoaringTreemap::deserialize_from(b.as_slice()))
-            .transpose()?)
+            .transpose()
+            .wrap("deserialze corsur data error")
     }
 
     pub async fn set_ack_bits(&self, bits: &RoaringTreemap) -> Result<()> {
         let mut bytes = Vec::with_capacity(bits.serialized_size());
-        bits.serialize_into(&mut bytes)?;
+        bits.serialize_into(&mut bytes)
+            .wrap("serialize cursor data error")?;
         self.message_storage
             .save_cursor(&self.topic_name, &self.sub_name, &bytes)
             .await

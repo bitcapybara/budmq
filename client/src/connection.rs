@@ -1,13 +1,7 @@
 pub mod reader;
 pub mod writer;
 
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    io,
-    net::{AddrParseError, SocketAddr},
-    sync::Arc,
-};
+use std::{borrow::Borrow, collections::HashMap, io, net::SocketAddr, sync::Arc};
 
 use bud_common::{
     io::{
@@ -20,6 +14,7 @@ use bud_common::{
         CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
     },
     types::{AccessMode, BrokerAddress, MessageId},
+    wrap_error_impl,
 };
 use bytes::Bytes;
 use chrono::Utc;
@@ -31,7 +26,10 @@ use s2n_quic::{
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use crate::consumer::{ConsumeMessage, SubscribeMessage};
+use crate::{
+    consumer::{ConsumeMessage, SubscribeMessage},
+    error::WrapError,
+};
 
 use self::{reader::Reader, writer::Writer};
 
@@ -53,14 +51,17 @@ pub enum Error {
     CommonIo(#[from] bud_common::io::Error),
     /// error when create new client
     #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
+    Io(String),
     /// s2n quic errors
     #[error("QUIC error: {0}")]
     Quic(String),
     /// parse socket addr
     #[error("Parse socket addr error: {0}")]
-    SocketAddr(#[from] AddrParseError),
+    SocketAddr(String),
 }
+
+wrap_error_impl!(io::Error, Error::Io);
+wrap_error_impl!(std::net::AddrParseError, Error::SocketAddr);
 
 impl From<s2n_quic::provider::StartError> for Error {
     fn from(e: s2n_quic::provider::StartError) -> Self {
@@ -308,10 +309,18 @@ impl Connection {
             }))
             .await?
         {
-            Packet::LookupTopicResponse(p) => Ok(Some(BrokerAddress {
-                socket_addr: p.broker_addr.parse()?,
-                server_name: p.server_name,
-            })),
+            Packet::LookupTopicResponse(p) => {
+                let socket_addr = p.broker_addr.parse::<SocketAddr>().with_wrap(|| {
+                    format!(
+                        "parse topic {topic_name} owner broker {} socket addr error",
+                        &p.server_name
+                    )
+                })?;
+                Ok(Some(BrokerAddress {
+                    socket_addr,
+                    server_name: p.server_name,
+                }))
+            }
             Packet::Response(Response { code }) if code == ReturnCode::TopicNotExists => Ok(None),
             _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
@@ -481,7 +490,8 @@ impl ConnectionHandle {
         let client: client::Client = client::Client::builder()
             .with_tls(self.provider.clone())
             .unwrap()
-            .with_io("0.0.0.0:0")?
+            .with_io("0.0.0.0:0")
+            .wrap("client build with io error")?
             .start()?;
         let connector = s2n_quic::client::Connect::new(addr.socket_addr)
             .with_server_name(addr.server_name.as_str());

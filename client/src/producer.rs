@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, net::AddrParseError, sync::Arc};
+use std::{borrow::Borrow, sync::Arc};
 
 use bud_common::{protocol::ReturnCode, types::AccessMode};
 use bytes::Bytes;
@@ -18,9 +18,6 @@ pub enum Error {
     /// error from connection
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
-    /// parse SocketAddr
-    #[error("Parse socket addr error: {0}")]
-    SocketAddr(#[from] AddrParseError),
 }
 
 pub struct ProducerMessage {
