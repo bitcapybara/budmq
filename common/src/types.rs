@@ -81,6 +81,12 @@ impl MessageId {
     }
 }
 
+impl std::fmt::Display for MessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}::{}", self.topic_id, self.cursor_id)
+    }
+}
+
 #[derive(Debug, Clone, bud_derive::Codec)]
 pub struct TopicMessage {
     /// message id

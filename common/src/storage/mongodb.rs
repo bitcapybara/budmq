@@ -9,7 +9,10 @@ use mongodb::{
 };
 use tokio::sync::RwLock;
 
-use crate::types::{MessageId, TopicMessage};
+use crate::{
+    error::WrapError,
+    types::{MessageId, TopicMessage},
+};
 
 use super::MessageStorage;
 
@@ -19,7 +22,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     /// error from mongodb
     #[error("MongoDB error: {0}")]
-    MongoDB(#[from] mongodb::error::Error),
+    MongoDB(String),
+}
+
+impl<T> WrapError<T, Error> for std::result::Result<T, mongodb::error::Error> {
+    fn wrap<C>(self, context: C) -> std::result::Result<T, Error>
+    where
+        C: std::fmt::Display + Send + Sync + 'static,
+    {
+        self.map_err(|e| Error::MongoDB(format!("{e}: {context}")))
+    }
+
+    fn with_wrap<F, C>(self, context: F) -> std::result::Result<T, Error>
+    where
+        F: FnOnce() -> C,
+        C: std::fmt::Display + Send + Sync + 'static,
+    {
+        self.map_err(|e| Error::MongoDB(format!("{e}: {}", context())))
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -135,7 +155,7 @@ impl MessageStorage for MongoDB {
             cursor_id,
         } = msg.message_id;
         let collection = self.get_collection(topic_id).await;
-        let msg: MongoTopicMessage = msg.into();
+        let mongo_msg: MongoTopicMessage = msg.into();
         let filter = doc! {
             "message_id": {
                 "topic_id": topic_id as i64,
@@ -143,35 +163,48 @@ impl MessageStorage for MongoDB {
             },
         };
         let opts = ReplaceOptions::builder().upsert(Some(true)).build();
-        collection.replace_one(filter, msg, Some(opts)).await?;
+        collection
+            .replace_one(filter, mongo_msg, Some(opts))
+            .await
+            .with_wrap(|| format!("put message {} error", msg.message_id))?;
         Ok(())
     }
 
     async fn get_message(&self, id: &MessageId) -> Result<Option<TopicMessage>> {
-        let MessageId { topic_id, .. } = id;
+        let MessageId {
+            topic_id,
+            cursor_id,
+        } = id;
         let collection = self.get_collection(*topic_id).await;
         let filter = doc! {
             "message_id": {
-                "topic_id": id.topic_id as i64,
-                "cursor_id": id.cursor_id as i64
+                "topic_id": *topic_id as i64,
+                "cursor_id": *cursor_id as i64
             },
         };
         Ok(collection
             .find_one(Some(filter), None)
-            .await?
+            .await
+            .with_wrap(|| format!("get message {id} error"))?
             .map(|m| m.into()))
     }
 
     async fn del_message(&self, id: &MessageId) -> Result<()> {
-        let MessageId { topic_id, .. } = id;
+        let MessageId {
+            topic_id,
+            cursor_id,
+        } = id;
         let collection = self.get_collection(*topic_id).await;
         let filter = doc! {
             "message_id": {
-                "topic_id": id.topic_id as i64,
-                "cursor_id": id.cursor_id as i64
+                "topic_id": *topic_id as i64,
+                "cursor_id": *cursor_id as i64
             },
         };
-        collection.delete_one(filter, None).await?;
+        collection
+            .delete_one(filter, None)
+            .await
+            .with_wrap(|| format!("del message {id} error"))?;
         Ok(())
     }
 
@@ -186,7 +219,10 @@ impl MessageStorage for MongoDB {
             bytes: bytes.to_vec(),
         };
         let opts = ReplaceOptions::builder().upsert(Some(true)).build();
-        self.cursor.replace_one(filter, cursor, Some(opts)).await?;
+        self.cursor
+            .replace_one(filter, cursor, Some(opts))
+            .await
+            .with_wrap(|| format!("save cursor {topic_name} error"))?;
         Ok(())
     }
 
@@ -198,7 +234,8 @@ impl MessageStorage for MongoDB {
         let bytes = self
             .cursor
             .find_one(Some(filter), None)
-            .await?
+            .await
+            .with_wrap(|| format!("load cursor {topic_name} error"))?
             .map(|c| c.bytes);
         Ok(bytes)
     }
