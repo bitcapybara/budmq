@@ -13,7 +13,7 @@ parking_lot = "0.12.1"
 rustls-pemfile.workspace = true
 redis = { version = "0.23.0", features = ["tokio-comp"], optional = true }
 s2n-quic.workspace = true
-serde = { version = "1.0.168", features = ["derive"] }
+serde = { version = "1.0.173", features = ["derive"] }
 tokio.workspace = true
 tokio-util.workspace = true
 bud-derive = { version = "0.1.0", path = "../derive" }
@@ -21,4 +21,4 @@ bonsaidb = { version = "0.4.1", features = ["local", "local-async"], optional = 
 mongodb = { version = "2.6.0", features = ["bson-chrono-0_4"], optional = true }
 chrono = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
-serde_json = { version = "1.0.100", optional = true }
+serde_json = { version = "1.0.103", optional = true }
