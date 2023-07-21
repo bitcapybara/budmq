@@ -1,21 +1,33 @@
-use std::{fs, io::Read, path::Path};
+use std::{
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use bud_client::client::ClientBuilder;
 use bud_common::{mtls::MtlsProvider, types::AccessMode};
+use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
 use log::error;
 
+#[derive(clap::Parser)]
+struct Args {
+    #[arg(short, default_value = "./certs")]
+    certs: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
     // logger init
     Logger::try_with_str("trace, mio=off, rustls=off")
         .unwrap()
         .format(colored_detailed_format)
         .start()
         .unwrap();
-    let ca_cert = read_file("./certs/ca-cert.pem")?;
-    let client_cert = read_file("./certs/client-cert.pem")?;
-    let client_key_cert = read_file("./certs/client-key.pem")?;
+    let ca_cert = read_file(args.certs.join("ca-cert.pem"))?;
+    let client_cert = read_file(args.certs.join("client-cert.pem"))?;
+    let client_key_cert = read_file(args.certs.join("client-key.pem"))?;
     let provider = MtlsProvider::new(&ca_cert, &client_cert, &client_key_cert)?;
     let mut client = ClientBuilder::new("127.0.0.1:9080".parse()?, "localhost", provider)
         .keepalive(10000)
