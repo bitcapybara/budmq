@@ -8,9 +8,9 @@ members = [
 
 [workspace.dependencies]
 anyhow = "1.0.72"
-async-trait = "0.1.71"
+async-trait = "0.1.72"
 bytes = "1.4.0"
-clap = { version = "4.3.17", features = ["derive", "env"] }
+clap = { version = "4.3.19", features = ["derive", "env"] }
 chrono = { version = "0.4.26", default-features = false, features = ["clock"] }
 rustls-pemfile = "1.0.3"
 flexi_logger = "0.25.5"
@@ -20,9 +20,9 @@ bud-derive = { version = "0.1.0", path = "./derive" }
 log = "0.4.19"
 openssl = { version = "0.10.55", features = ["vendored"] }
 roaring = "0.10.1"
-s2n-quic = { version = "1.24.0", features = ["provider-address-token-default", "provider-tls-rustls"] }
+s2n-quic = { version = "1.25.0", features = ["provider-address-token-default", "provider-tls-rustls"] }
 signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
 signal-hook = "0.3.17"
 tokio = "1.29.1"
 tokio-util = { version = "0.7.8", features = ["codec"] }
-thiserror = "1.0.43"
+thiserror = "1.0.44"
