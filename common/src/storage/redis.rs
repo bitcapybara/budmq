@@ -131,7 +131,7 @@ impl MetaStorage for Redis {
     }
     async fn unregister_topic(&self, topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
         let Some(addr) = self.get_topic_owner(topic_name).await? else {
-            return Ok(())
+            return Ok(());
         };
         if addr.socket_addr != broker_addr.socket_addr {
             return Ok(());

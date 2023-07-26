@@ -265,7 +265,7 @@ impl<T: PoolRecycle> PooledStream<T> {
 
     async fn set_error(&mut self) {
         let Some(stream) = &mut self.stream else {
-            return
+            return;
         };
         stream.error.store(true, Ordering::Release);
     }

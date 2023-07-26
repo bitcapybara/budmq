@@ -80,7 +80,7 @@ impl MetaStorage for MemoryDB {
     async fn unregister_topic(&self, _topic_name: &str, broker_addr: &BrokerAddress) -> Result<()> {
         let mut broker = self.broker_addr.write().await;
         let Some(addr) = broker.as_ref() else {
-            return Ok(())
+            return Ok(());
         };
         if addr.socket_addr == broker_addr.socket_addr {
             *broker = None;

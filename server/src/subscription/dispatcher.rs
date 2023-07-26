@@ -129,9 +129,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                 consumers.clear();
             }
             Consumers::Shared(s) => {
-                let Some(c) = s.get(&client_id) else {
-                    return
-                };
+                let Some(c) = s.get(&client_id) else { return };
                 if c.id == consumer_id {
                     s.remove(&client_id);
                 }
@@ -176,8 +174,8 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
             }
             Consumers::Shared(shared) => {
                 let Some(c) = shared.get_mut(&client_id) else {
-                        return
-                    };
+                    return;
+                };
                 if c.id == consumer_id {
                     if addition {
                         c.permits += update;

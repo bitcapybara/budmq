@@ -148,7 +148,7 @@ impl MetaStorage for BonsaiDB {
         let id_key = topic_key(topic_name, SUBSCRIPTION_NAMES_KEY);
         let names = self.get(&id_key).await?;
         let Some(names) = names else {
-            return Ok(vec![])
+            return Ok(vec![]);
         };
 
         let names = {
@@ -174,9 +174,7 @@ impl MetaStorage for BonsaiDB {
     async fn del_subscription(&self, topic_name: &str, name: &str) -> Result<()> {
         let id_key = topic_key(topic_name, SUBSCRIPTION_NAMES_KEY);
         let names = self.get(&id_key).await?;
-        let Some(names) = names else {
-            return Ok(())
-        };
+        let Some(names) = names else { return Ok(()) };
         let names = {
             let mut buf = Bytes::copy_from_slice(&names);
             String::decode(&mut buf)?
@@ -195,7 +193,7 @@ impl MetaStorage for BonsaiDB {
 
     async fn get_u64(&self, k: &str) -> Result<Option<u64>> {
         let Some(v) = self.metas.get_key(k).await? else {
-            return Ok(None)
+            return Ok(None);
         };
         match v {
             Value::Numeric(Numeric::UnsignedInteger(n)) => Ok(Some(n)),

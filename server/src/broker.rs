@@ -253,14 +253,17 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
         let state = self.state.read().await;
         let Some(session) = state.clients.get(&event.client_id) else {
             error!("Send packet error: client {} not found", &event.client_id);
-            return Ok(())
+            return Ok(());
         };
         let Some(topic) = state.topics.get(&event.topic_name) else {
             error!("Send packet error: topic {} not found", &event.topic_name);
             return Ok(());
         };
         let Some(message) = topic.get_message(&event.message_id).await? else {
-            error!("Send packet error: message {:?} not found", &event.message_id);
+            error!(
+                "Send packet error: message {:?} not found",
+                &event.message_id
+            );
             return Ok(());
         };
         trace!(
@@ -343,11 +346,11 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 trace!("broker::process_packets: broker receive CONNECT packet");
                 let Some(res_tx) = msg.res_tx else {
                     error!("Connect res_tx channel not found");
-                    return Ok(())
+                    return Ok(());
                 };
                 let Some(client_tx) = msg.client_tx else {
                     error!("Connect client_tx channel not found");
-                    return Ok(())
+                    return Ok(());
                 };
                 let mut state = self.state.write().await;
                 if state.clients.contains_key(&client_id) {
@@ -370,7 +373,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 trace!("broker::process_packets: broker receive DISCONNECT packet");
                 let mut state = self.state.write().await;
                 let Some(mut session) = state.clients.remove(&client_id) else {
-                    return Ok(())
+                    return Ok(());
                 };
                 trace!("broker::process_packets: remove client: {}", client_id);
                 // remove consumer
@@ -408,7 +411,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     return Ok(());
                 };
                 let Some(producer_info) = session.del_producer(producer_id) else {
-                    return Ok(())
+                    return Ok(());
                 };
                 session.del_producer(producer_id);
                 let Some(topic) = state.topics.get_mut(&producer_info.topic_name) else {
@@ -647,7 +650,7 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                     return Ok(Packet::err_response(ReturnCode::ConsumerNotFound));
                 };
                 let Some(topic) = state.topics.get(&info.topic_name) else {
-                    return Ok(Packet::err_response(ReturnCode::TopicNotExists))
+                    return Ok(Packet::err_response(ReturnCode::TopicNotExists));
                 };
                 let Some(sp) = topic.get_subscription(&info.sub_name) else {
                     return Ok(Packet::err_response(ReturnCode::SubscriptionNotFound));
@@ -661,13 +664,13 @@ impl<M: MetaStorage, S: MessageStorage> Broker<M, S> {
                 trace!("broker::process_packets: receive CONSUMEACK packet");
                 let state = self.state.read().await;
                 let Some(session) = state.clients.get(&client_id) else {
-                    return Ok(Packet::err_response(ReturnCode::NotConnected))
+                    return Ok(Packet::err_response(ReturnCode::NotConnected));
                 };
                 let Some(info) = session.consumers.get(&c.consumer_id) else {
-                    return Ok(Packet::err_response(ReturnCode::ConsumerNotFound))
+                    return Ok(Packet::err_response(ReturnCode::ConsumerNotFound));
                 };
                 let Some(topic) = state.topics.get(&info.topic_name) else {
-                    return Ok(Packet::err_response(ReturnCode::TopicNotExists))
+                    return Ok(Packet::err_response(ReturnCode::TopicNotExists));
                 };
                 for message_id in &c.message_ids {
                     if topic.id != message_id.topic_id {

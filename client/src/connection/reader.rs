@@ -89,7 +89,9 @@ impl Reader {
             Packet::Send(s) => {
                 let Some(sender) = self.consumers.get(&s.consumer_id) else {
                     warn!("recv a message but consumer not found");
-                    let packet = Packet::Response(Response {  code: ReturnCode::ConsumerNotFound });
+                    let packet = Packet::Response(Response {
+                        code: ReturnCode::ConsumerNotFound,
+                    });
                     res_tx.send(Some(packet)).ok();
                     return Ok(());
                 };
