@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use bud_common::{
     protocol::ReturnCode,
@@ -6,6 +6,7 @@ use bud_common::{
     types::{InitialPostion, MessageId},
 };
 use log::{error, trace};
+use rand::seq::SliceRandom;
 use tokio::{
     select,
     sync::{mpsc, oneshot, RwLock},
@@ -13,7 +14,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    cursor::Cursor, Consumer, Consumers, Error, Result, SendEvent, SubType, TopicConsumers,
+    cursor::Cursor, Consumer, Consumers, Error, Result, SendEvent, SubType, SubscriptionConsumers,
 };
 
 /// task:
@@ -26,7 +27,7 @@ pub struct Dispatcher<S1, S2> {
     /// topic_name
     topic_name: String,
     /// save all consumers in memory
-    consumers: Arc<RwLock<TopicConsumers>>,
+    consumers: Arc<RwLock<SubscriptionConsumers>>,
     /// cursor
     cursor: Arc<RwLock<Cursor<S1, S2>>>,
     send_tx: mpsc::Sender<SendEvent>,
@@ -35,70 +36,6 @@ pub struct Dispatcher<S1, S2> {
 }
 
 impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
-    /// load from storage
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        topic_id: u64,
-        topic_name: &str,
-        sub_name: &str,
-        meta_storage: S1,
-        message_storage: S2,
-        init_position: InitialPostion,
-        send_tx: mpsc::Sender<SendEvent>,
-        token: CancellationToken,
-    ) -> Result<Self> {
-        Ok(Self {
-            consumers: Arc::new(RwLock::new(TopicConsumers::empty())),
-            cursor: Arc::new(RwLock::new(
-                Cursor::new(
-                    topic_name,
-                    sub_name,
-                    meta_storage,
-                    message_storage,
-                    init_position,
-                )
-                .await?,
-            )),
-            send_tx,
-            token,
-            topic_id,
-            topic_name: topic_name.to_string(),
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn with_consumer(
-        topic_id: u64,
-        topic_name: &str,
-        consumer: Consumer,
-        meta_storage: S1,
-        message_storage: S2,
-        init_position: InitialPostion,
-        send_tx: mpsc::Sender<SendEvent>,
-        token: CancellationToken,
-    ) -> Result<Self> {
-        let sub_name = consumer.sub_name.clone();
-        let consumers = Arc::new(RwLock::new(TopicConsumers::from_consumer(consumer)));
-        let cursor = Arc::new(RwLock::new(
-            Cursor::new(
-                topic_name,
-                &sub_name,
-                meta_storage,
-                message_storage,
-                init_position,
-            )
-            .await?,
-        ));
-        Ok(Self {
-            consumers,
-            cursor,
-            send_tx,
-            token,
-            topic_id,
-            topic_name: topic_name.to_string(),
-        })
-    }
-
     pub async fn add_consumer(&self, consumer: Consumer) -> Result<()> {
         let mut consumers = self.consumers.write().await;
         match consumers.as_mut() {
@@ -108,88 +45,21 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                     SubType::Exclusive => {
                         return Err(Error::Response(ReturnCode::UnexpectedSubType))
                     }
-                    SubType::Shared => {
-                        shared.insert(consumer.client_id, consumer);
-                    }
+                    SubType::Shared => match shared.get_mut(&consumer.client_id) {
+                        Some(consumers) => {
+                            consumers.insert(consumer.id, consumer);
+                        }
+                        None => {
+                            let client_id = consumer.client_id;
+                            let mut consumers = HashMap::new();
+                            consumers.insert(consumer.id, consumer);
+                            shared.insert(client_id, consumers);
+                        }
+                    },
                 },
             },
             None => consumers.set(consumer.into()),
         }
-        Ok(())
-    }
-
-    pub async fn del_consumer(&self, client_id: u64, consumer_id: u64) {
-        trace!("delete consumer: {consumer_id}, client_id: {client_id}");
-        let mut consumers = self.consumers.write().await;
-        let Some(cms) = consumers.as_mut() else {
-            return;
-        };
-        match cms {
-            Consumers::Exclusive(c) if c.client_id == client_id && c.id == consumer_id => {
-                consumers.clear();
-            }
-            Consumers::Shared(s) => {
-                let Some(c) = s.get(&client_id) else { return };
-                if c.id == consumer_id {
-                    s.remove(&client_id);
-                }
-                if s.is_empty() {
-                    consumers.clear()
-                }
-            }
-            _ => {}
-        }
-    }
-
-    pub async fn increase_consumer_permits(&self, client_id: u64, consumer_id: u64, increase: u32) {
-        self.update_consumer_permits(client_id, consumer_id, true, increase)
-            .await
-    }
-
-    async fn decrease_consumer_permits(&self, client_id: u64, consumer_id: u64, decrease: u32) {
-        self.update_consumer_permits(client_id, consumer_id, false, decrease)
-            .await
-    }
-
-    async fn update_consumer_permits(
-        &self,
-        client_id: u64,
-        consumer_id: u64,
-        addition: bool,
-        update: u32,
-    ) {
-        let mut consumers = self.consumers.write().await;
-        let Some(cms) = consumers.as_mut() else {
-            return;
-        };
-        match cms {
-            Consumers::Exclusive(ex) => {
-                if client_id == ex.client_id && consumer_id == ex.id {
-                    if addition {
-                        ex.permits += update;
-                    } else {
-                        ex.permits -= update;
-                    }
-                }
-            }
-            Consumers::Shared(shared) => {
-                let Some(c) = shared.get_mut(&client_id) else {
-                    return;
-                };
-                if c.id == consumer_id {
-                    if addition {
-                        c.permits += update;
-                    } else {
-                        c.permits -= update;
-                    }
-                }
-            }
-        }
-    }
-
-    pub async fn update_message_id(&self, cursor_id: u64) -> Result<()> {
-        let mut cursor = self.cursor.write().await;
-        cursor.new_message(cursor_id).await?;
         Ok(())
     }
 
@@ -206,13 +76,21 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                     None
                 }
             }
-            Consumers::Shared(cs) => {
-                for c in cs.values() {
-                    if c.permits > 0 {
-                        return Some(c.clone());
+            Consumers::Shared(clients) => {
+                let mut rg = rand::thread_rng();
+                let mut consumers = Vec::new();
+                for client in clients.values() {
+                    for c in client.values() {
+                        if c.permits > 0 {
+                            consumers.push(c);
+                        }
                     }
                 }
-                None
+                consumers
+                    .choose_weighted(&mut rg, |x| 1000 - x.permits)
+                    .ok()
+                    .cloned()
+                    .cloned()
             }
         }
     }
@@ -228,24 +106,73 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
         Ok(())
     }
 
-    /// notify_rx receive event from subscription
-    pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) {
-        trace!("dispatcher::run: start dispatcher task loop");
-        loop {
-            select! {
-                res = notify_rx.recv() => {
-                    if res.is_none() {
-                        return;
-                    }
-                    if self.peek_and_send().await {
-                        return
-                    }
-                }
-                _ = self.token.cancelled() => {
+    async fn decrease_consumer_permits(&self, client_id: u64, consumer_id: u64, decrease: u32) {
+        self.update_consumer_permits(client_id, consumer_id, false, decrease)
+            .await
+    }
+
+    pub async fn del_consumer(&self, client_id: u64, consumer_id: u64) {
+        trace!("delete consumer: {consumer_id}, client_id: {client_id}");
+        let mut consumers = self.consumers.write().await;
+        let Some(cms) = consumers.as_mut() else {
+            return;
+        };
+        match cms {
+            Consumers::Exclusive(c) if c.client_id == client_id && c.id == consumer_id => {
+                consumers.clear();
+            }
+            Consumers::Shared(clients) => {
+                let Some(consumers) = clients.get_mut(&client_id) else {
                     return;
+                };
+                consumers.remove(&consumer_id);
+                if consumers.is_empty() {
+                    clients.remove(&client_id);
                 }
             }
+            _ => {}
         }
+    }
+
+    async fn get_next_cursor(&self) -> Option<u64> {
+        let cursor = self.cursor.read().await;
+        cursor.peek_message()
+    }
+
+    pub async fn increase_consumer_permits(&self, client_id: u64, consumer_id: u64, increase: u32) {
+        self.update_consumer_permits(client_id, consumer_id, true, increase)
+            .await
+    }
+
+    /// load from storage
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        topic_id: u64,
+        topic_name: &str,
+        sub_name: &str,
+        meta_storage: S1,
+        message_storage: S2,
+        init_position: InitialPostion,
+        send_tx: mpsc::Sender<SendEvent>,
+        token: CancellationToken,
+    ) -> Result<Self> {
+        Ok(Self {
+            consumers: Arc::new(RwLock::new(SubscriptionConsumers::empty())),
+            cursor: Arc::new(RwLock::new(
+                Cursor::new(
+                    topic_name,
+                    sub_name,
+                    meta_storage,
+                    message_storage,
+                    init_position,
+                )
+                .await?,
+            )),
+            send_tx,
+            token,
+            topic_id,
+            topic_name: topic_name.to_string(),
+        })
     }
 
     async fn peek_and_send(&self) -> bool {
@@ -303,8 +230,101 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
         false
     }
 
-    async fn get_next_cursor(&self) -> Option<u64> {
-        let cursor = self.cursor.read().await;
-        cursor.peek_message()
+    /// notify_rx receive event from subscription
+    pub async fn run(self, mut notify_rx: mpsc::Receiver<()>) {
+        trace!("dispatcher::run: start dispatcher task loop");
+        loop {
+            select! {
+                res = notify_rx.recv() => {
+                    if res.is_none() {
+                        return;
+                    }
+                    if self.peek_and_send().await {
+                        return
+                    }
+                }
+                _ = self.token.cancelled() => {
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn update_consumer_permits(
+        &self,
+        client_id: u64,
+        consumer_id: u64,
+        addition: bool,
+        update: u32,
+    ) {
+        let mut consumers = self.consumers.write().await;
+        let Some(cms) = consumers.as_mut() else {
+            return;
+        };
+        match cms {
+            Consumers::Exclusive(ex) => {
+                if client_id == ex.client_id && consumer_id == ex.id {
+                    if addition {
+                        ex.permits += update;
+                    } else {
+                        ex.permits -= update;
+                    }
+                }
+            }
+            Consumers::Shared(clients) => {
+                let Some(consumers) = clients.get_mut(&client_id) else {
+                    return;
+                };
+                let Some(c) = consumers.get_mut(&consumer_id) else {
+                    return;
+                };
+                if c.id == consumer_id {
+                    if addition {
+                        c.permits += update;
+                    } else {
+                        c.permits -= update;
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn update_message_id(&self, cursor_id: u64) -> Result<()> {
+        let mut cursor = self.cursor.write().await;
+        cursor.new_message(cursor_id).await?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn with_consumer(
+        topic_id: u64,
+        topic_name: &str,
+        consumer: Consumer,
+        meta_storage: S1,
+        message_storage: S2,
+        init_position: InitialPostion,
+        send_tx: mpsc::Sender<SendEvent>,
+        token: CancellationToken,
+    ) -> Result<Self> {
+        let sub_name = consumer.sub_name.clone();
+        let consumers = Arc::new(RwLock::new(consumer.into()));
+        let cursor = Arc::new(RwLock::new(
+            Cursor::new(
+                topic_name,
+                &sub_name,
+                meta_storage,
+                message_storage,
+                init_position,
+            )
+            .await?,
+        ));
+        Ok(Self {
+            consumers,
+            cursor,
+            send_tx,
+            token,
+            topic_id,
+            topic_name: topic_name.to_string(),
+        })
     }
 }

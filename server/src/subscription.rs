@@ -79,25 +79,14 @@ impl Consumer {
     }
 }
 
-struct TopicConsumers(Option<Consumers>);
+struct SubscriptionConsumers(Option<Consumers>);
 
-impl TopicConsumers {
+impl SubscriptionConsumers {
     fn empty() -> Self {
         Self(None)
     }
     fn new(consumers: Consumers) -> Self {
         Self(Some(consumers))
-    }
-    fn from_consumer(consumer: Consumer) -> Self {
-        let consumers_type = match consumer.sub_type {
-            SubType::Exclusive => Consumers::Exclusive(consumer),
-            SubType::Shared => {
-                let mut map = HashMap::new();
-                map.insert(consumer.client_id, consumer);
-                Consumers::Shared(map)
-            }
-        };
-        Self(Some(consumers_type))
     }
     fn set(&mut self, consumers: Consumers) {
         self.0 = Some(consumers)
@@ -111,13 +100,19 @@ impl TopicConsumers {
     }
 }
 
-impl AsMut<Option<Consumers>> for TopicConsumers {
+impl From<Consumer> for SubscriptionConsumers {
+    fn from(consumer: Consumer) -> Self {
+        SubscriptionConsumers(Some(consumer.into()))
+    }
+}
+
+impl AsMut<Option<Consumers>> for SubscriptionConsumers {
     fn as_mut(&mut self) -> &mut Option<Consumers> {
         &mut self.0
     }
 }
 
-impl AsRef<Option<Consumers>> for TopicConsumers {
+impl AsRef<Option<Consumers>> for SubscriptionConsumers {
     fn as_ref(&self) -> &Option<Consumers> {
         &self.0
     }
@@ -126,8 +121,8 @@ impl AsRef<Option<Consumers>> for TopicConsumers {
 /// clients sub to this subscription
 enum Consumers {
     Exclusive(Consumer),
-    // key = client_id
-    Shared(HashMap<u64, Consumer>),
+    /// key1 = client_id, key2 = consumer_id
+    Shared(HashMap<u64, HashMap<u64, Consumer>>),
 }
 
 impl From<Consumer> for Consumers {
@@ -135,9 +130,12 @@ impl From<Consumer> for Consumers {
         match consumer.sub_type {
             SubType::Exclusive => Self::Exclusive(consumer),
             SubType::Shared => {
+                let client_id = consumer.client_id;
+                let mut clients = HashMap::new();
                 let mut consumers = HashMap::new();
-                consumers.insert(consumer.client_id, consumer);
-                Self::Shared(consumers)
+                consumers.insert(consumer.id, consumer);
+                clients.insert(client_id, consumers);
+                Self::Shared(clients)
             }
         }
     }
