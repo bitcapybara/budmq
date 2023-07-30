@@ -15,7 +15,11 @@
 
 ## Usage
 
-see examples for details:
+1. generate cert files
+```bash
+./certs/generate_certs.sh
+```
+2. see examples for details:
 * [server](./server/examples/server.rs)
 * [consumer](./client/examples/consumer.rs)
 * [producer](./client/examples/producer.rs)
