@@ -181,7 +181,7 @@ impl<T: Codec> Codec for Option<T> {
     fn size(&self) -> usize {
         2 + match self {
             Some(item) => 2 + item.size(),
-            None => 2,
+            None => 0,
         }
     }
 }
