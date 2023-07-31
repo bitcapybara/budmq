@@ -408,6 +408,8 @@ mod tests {
             sub_name: "test-subname".to_string(),
             sub_type: SubType::Exclusive,
             initial_position: InitialPostion::Latest,
+            default_permits: 1000,
+            weight: None,
         }))
     }
 

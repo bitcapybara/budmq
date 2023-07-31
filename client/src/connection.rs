@@ -259,6 +259,8 @@ impl Connection {
             sub_type: sub.sub_type,
             initial_position: sub.initial_postion,
             consumer_name: consumer_name.to_string(),
+            default_permits: sub.default_permits,
+            weight: sub.weight,
         }))
         .await?;
         self.register_tx

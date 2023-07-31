@@ -21,8 +21,6 @@ use crate::{
     retry_op::consumer_reconnect,
 };
 
-pub const CONSUME_CHANNEL_CAPACITY: u32 = 1000;
-
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +31,67 @@ pub enum Error {
     /// error from connection underline
     #[error("Connection error: {0}")]
     Connection(#[from] connection::Error),
+    /// invalid weight
+    #[error("Invalid weight number: {0}")]
+    Weight(u8),
+}
+
+pub struct SubscribeBuilder {
+    pub topic: String,
+    pub sub_name: String,
+    pub sub_type: SubType,
+    pub initial_postion: InitialPostion,
+    pub default_permits: u32,
+    pub weight: Option<u8>,
+}
+
+impl SubscribeBuilder {
+    pub fn new(topic: &str, sub_name: &str) -> Self {
+        Self {
+            topic: topic.to_string(),
+            sub_name: sub_name.to_string(),
+            sub_type: SubType::default(),
+            initial_postion: InitialPostion::default(),
+            default_permits: 1000,
+            weight: None,
+        }
+    }
+
+    pub fn sub_type(mut self, sub_type: SubType) -> Self {
+        self.sub_type = sub_type;
+        self
+    }
+
+    pub fn initial_position(mut self, initial_position: InitialPostion) -> Self {
+        self.initial_postion = initial_position;
+        self
+    }
+
+    pub fn default_permits(mut self, permits: u32) -> Self {
+        self.default_permits = permits;
+        self
+    }
+
+    /// number 1~10, default to 5 in server
+    pub fn weight(mut self, weight: u8) -> Result<Self> {
+        if !(1..=10).contains(&weight) {
+            Err(Error::Weight(weight))
+        } else {
+            self.weight = Some(weight);
+            Ok(self)
+        }
+    }
+
+    pub fn build(self) -> SubscribeMessage {
+        SubscribeMessage {
+            topic: self.topic,
+            sub_name: self.sub_name,
+            sub_type: self.sub_type,
+            initial_postion: self.initial_postion,
+            default_permits: self.default_permits,
+            weight: self.weight,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -41,6 +100,8 @@ pub struct SubscribeMessage {
     pub sub_name: String,
     pub sub_type: SubType,
     pub initial_postion: InitialPostion,
+    pub default_permits: u32,
+    pub weight: Option<u8>,
 }
 
 pub struct ConsumeMessage {
@@ -77,6 +138,8 @@ pub struct ConsumeEngine {
     retry_opts: Option<RetryOptions>,
     /// token to notify exit
     token: CancellationToken,
+    /// default permits
+    default_permits: u32,
 }
 
 impl ConsumeEngine {
@@ -90,6 +153,7 @@ impl ConsumeEngine {
         conn_handle: ConnectionHandle,
         retry_opts: Option<RetryOptions>,
         token: CancellationToken,
+        default_permits: u32,
     ) -> Result<Self> {
         trace!("consumer: get conn from lookup topic");
         let conn = conn_handle.lookup_topic(&sub_message.topic, false).await?;
@@ -97,19 +161,20 @@ impl ConsumeEngine {
         trace!("consumer: subscribe");
         conn.subscribe(id, name, sub_message, server_tx).await?;
         trace!("consumer: control_flow");
-        conn.control_flow(id, CONSUME_CHANNEL_CAPACITY).await?;
+        conn.control_flow(id, default_permits).await?;
         Ok(Self {
             id,
             sub_message: sub_message.clone(),
             consumer_tx,
             conn,
             conn_handle,
-            remain_permits: CONSUME_CHANNEL_CAPACITY,
+            remain_permits: default_permits,
             token,
             event_rx,
             server_rx,
             name: name.to_string(),
             retry_opts,
+            default_permits,
         })
     }
 
@@ -125,14 +190,15 @@ impl ConsumeEngine {
                     &self.sub_message,
                     &self.retry_opts,
                     &self.conn_handle,
+                    self.default_permits,
                 )
                 .await?;
-                self.remain_permits = CONSUME_CHANNEL_CAPACITY;
+                self.remain_permits = self.default_permits;
             }
 
-            if self.remain_permits < CONSUME_CHANNEL_CAPACITY / 2 {
+            if self.remain_permits < self.default_permits / 2 {
                 trace!("remain permits need add: {}", self.remain_permits);
-                let permits = CONSUME_CHANNEL_CAPACITY - self.remain_permits;
+                let permits = self.default_permits - self.remain_permits;
                 match self.conn.control_flow(self.id, permits).await {
                     Ok(_) => {}
                     Err(connection::Error::Disconnect) => {
@@ -145,13 +211,14 @@ impl ConsumeEngine {
                             &self.sub_message,
                             &self.retry_opts,
                             &self.conn_handle,
+                            self.default_permits,
                         )
                         .await?;
                     }
                     Err(e) => return Err(e.into()),
                 }
             }
-            self.remain_permits = CONSUME_CHANNEL_CAPACITY;
+            self.remain_permits = self.default_permits;
 
             select! {
                 res = self.server_rx.recv() => {
@@ -206,7 +273,7 @@ impl Consumer {
         sub_message: &SubscribeMessage,
         retry_opts: Option<RetryOptions>,
     ) -> Result<Self> {
-        let (tx, rx) = mpsc::channel(CONSUME_CHANNEL_CAPACITY as usize);
+        let (tx, rx) = mpsc::channel(sub_message.default_permits as usize);
         let (event_tx, event_rx) = mpsc::channel(1);
         let token = CancellationToken::new();
         let engine = ConsumeEngine::new(
@@ -218,6 +285,7 @@ impl Consumer {
             conn_handle,
             retry_opts.clone(),
             token.clone(),
+            sub_message.default_permits,
         )
         .await?;
         tokio::spawn(engine.run());

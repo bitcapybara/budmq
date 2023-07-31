@@ -7,7 +7,7 @@ use tokio::{sync::mpsc, time::sleep};
 use crate::{
     client::RetryOptions,
     connection::{self, Connection, ConnectionHandle},
-    consumer::{ConsumeMessage, SubscribeMessage, CONSUME_CHANNEL_CAPACITY},
+    consumer::{ConsumeMessage, SubscribeMessage},
 };
 
 pub async fn consumer_reconnect(
@@ -16,6 +16,7 @@ pub async fn consumer_reconnect(
     sub_message: &SubscribeMessage,
     retry_opts: &Option<RetryOptions>,
     conn_handle: &ConnectionHandle,
+    default_permits: u32,
 ) -> connection::Result<(Arc<Connection>, mpsc::UnboundedReceiver<ConsumeMessage>)> {
     let Some(retry_opts) = retry_opts else {
         return Err(connection::Error::Disconnect);
@@ -31,10 +32,7 @@ pub async fn consumer_reconnect(
                     .subscribe(consumer_id, consumer_name, sub_message, tx)
                     .await
                 {
-                    Ok(()) => match conn
-                        .control_flow(consumer_id, CONSUME_CHANNEL_CAPACITY)
-                        .await
-                    {
+                    Ok(()) => match conn.control_flow(consumer_id, default_permits).await {
                         Ok(()) => return Ok((conn, rx)),
                         Err(e) => {
                             handle_error(e, retry_opts.max_retry_count, &mut count, &mut delay)

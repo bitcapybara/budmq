@@ -15,6 +15,10 @@ pub struct Subscribe {
     pub sub_type: SubType,
     /// consume init position
     pub initial_position: InitialPostion,
+    /// default permits
+    pub default_permits: u32,
+    /// weight
+    pub weight: Option<u8>,
 }
 
 #[derive(Debug, PartialEq, Clone, bud_derive::PacketCodec)]

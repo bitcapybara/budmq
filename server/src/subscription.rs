@@ -59,6 +59,8 @@ pub struct Consumer {
     sub_name: String,
     sub_type: SubType,
     init_pos: InitialPostion,
+    default_permits: u32,
+    weight: u8,
 }
 
 impl Consumer {
@@ -71,6 +73,8 @@ impl Consumer {
             client_id,
             id: consumer_id,
             sub_name: sub.sub_name.clone(),
+            default_permits: sub.default_permits,
+            weight: sub.weight.unwrap_or(5),
         }
     }
 

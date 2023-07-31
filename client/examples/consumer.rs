@@ -4,17 +4,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bud_client::{client::ClientBuilder, consumer::SubscribeMessage};
-use bud_common::{
-    mtls::MtlsProvider,
-    types::{InitialPostion, SubType},
-};
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use tokio::select;
+
+use bud_client::{client::ClientBuilder, consumer::SubscribeBuilder};
+use bud_common::mtls::MtlsProvider;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -43,12 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let mut consumer = client
         .new_consumer(
             "test-consumer",
-            SubscribeMessage {
-                topic: "test-topic".to_string(),
-                sub_name: "test-subscription".to_string(),
-                sub_type: SubType::Shared,
-                initial_postion: InitialPostion::Latest,
-            },
+            SubscribeBuilder::new("test-topic", "test-subscription").build(),
         )
         .await?;
 

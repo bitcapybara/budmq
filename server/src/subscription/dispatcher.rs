@@ -87,7 +87,7 @@ impl<S1: MetaStorage, S2: MessageStorage> Dispatcher<S1, S2> {
                     }
                 }
                 consumers
-                    .choose_weighted(&mut rg, |x| 1000 - x.permits)
+                    .choose_weighted(&mut rg, |x| 1000 - x.permits + x.weight as u32 * 100)
                     .ok()
                     .cloned()
                     .cloned()

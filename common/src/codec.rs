@@ -42,6 +42,20 @@ impl Codec for DateTime<Utc> {
     }
 }
 
+impl Codec for u8 {
+    fn decode(buf: &mut Bytes) -> Result<Self> {
+        get_u8(buf)
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u8(*self)
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
 impl Codec for u16 {
     fn decode(buf: &mut Bytes) -> Result<Self> {
         get_u16(buf)

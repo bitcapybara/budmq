@@ -26,6 +26,12 @@ impl TryFrom<u8> for SubType {
     }
 }
 
+impl Default for SubType {
+    fn default() -> Self {
+        Self::Shared
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, bud_derive::Codec,
 )]
@@ -47,6 +53,12 @@ impl TryFrom<u8> for InitialPostion {
     }
 }
 
+impl Default for InitialPostion {
+    fn default() -> Self {
+        Self::Latest
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, bud_derive::Codec)]
 #[repr(u8)]
 pub enum AccessMode {
@@ -63,6 +75,12 @@ impl TryFrom<u8> for AccessMode {
             2 => Self::Shared,
             _ => return Err(Self::Error::Malformed),
         })
+    }
+}
+
+impl Default for AccessMode {
+    fn default() -> Self {
+        Self::Shared
     }
 }
 
