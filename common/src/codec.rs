@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -28,8 +28,7 @@ impl Codec for DateTime<Utc> {
         let timestmp = get_i64(buf)?;
         let (sec, nano) = (timestmp / 1_000_000_000, (timestmp % 1_000_000_000) as u32);
         let ndt = NaiveDateTime::from_timestamp_opt(sec, nano).ok_or(Error::Malformed)?;
-        let dt = DateTime::<Utc>::from_utc(ndt, Utc);
-        Ok(dt)
+        Ok(Utc.from_utc_datetime(&ndt))
     }
 
     fn encode(&self, buf: &mut BytesMut) {

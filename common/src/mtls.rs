@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{io::Cursor, sync::Arc};
 
 use s2n_quic::provider::tls::{
     self,
@@ -33,7 +33,7 @@ impl tls::Provider for MtlsProvider {
             .with_cipher_suites(DEFAULT_CIPHERSUITES)
             .with_safe_default_kx_groups()
             .with_protocol_versions(PROTOCOL_VERSIONS)?
-            .with_client_cert_verifier(verifier)
+            .with_client_cert_verifier(Arc::new(verifier))
             .with_single_cert(self.cert_chain, self.private_key)?;
         cfg.ignore_client_order = true;
         cfg.alpn_protocols = vec![b"h3".to_vec()];
@@ -46,7 +46,7 @@ impl tls::Provider for MtlsProvider {
             .with_safe_default_kx_groups()
             .with_protocol_versions(PROTOCOL_VERSIONS)?
             .with_root_certificates(self.root_store)
-            .with_single_cert(self.cert_chain, self.private_key)?;
+            .with_client_auth_cert(self.cert_chain, self.private_key)?;
         cfg.alpn_protocols = vec![b"h3".to_vec()];
         Ok(cfg.into())
     }
