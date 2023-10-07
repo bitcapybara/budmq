@@ -26,8 +26,8 @@ tokio = { workspace = true, features = [ "rt-multi-thread" ] }
 signal-hook-tokio.workspace = true
 signal-hook.workspace = true
 futures.workspace = true
-redis = { version = "0.23.2", features = ["tokio-comp"] }
-mongodb = { version = "2.6.1", features = ["bson-chrono-0_4"] }
+redis = { version = "0.23.3", features = ["tokio-comp"] }
+mongodb = { version = "2.7.0", features = ["bson-chrono-0_4"] }
 url = "2.4.1"
 
 [features]

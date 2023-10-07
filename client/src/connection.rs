@@ -323,7 +323,9 @@ impl Connection {
                     server_name: p.server_name,
                 }))
             }
-            Packet::Response(Response { code }) if code == ReturnCode::TopicNotExists => Ok(None),
+            Packet::Response(Response {
+                code: ReturnCode::TopicNotExists,
+            }) => Ok(None),
             _ => Err(Error::FromPeer(ReturnCode::UnexpectedPacket)),
         }
     }

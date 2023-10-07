@@ -32,7 +32,9 @@ impl Codec for DateTime<Utc> {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        let timestamp = self.timestamp_nanos();
+        let timestamp = self
+            .timestamp_nanos_opt()
+            .expect("value can not be represented in a timestamp with nanosecond precision.");
         buf.put_i64(timestamp);
     }
 
