@@ -6,7 +6,7 @@ use bud_common::{
     storage::{MessageStorage, MetaStorage},
     types::BrokerAddress,
 };
-use futures::future;
+
 use log::{error, trace};
 use s2n_quic::{connection, provider, Connection};
 use tokio::{select, sync::mpsc};
@@ -69,17 +69,6 @@ impl Server {
         message_storage: S,
     ) -> Result<()> {
         let token = self.token.child_token();
-        // start broker loop
-        trace!("server::start: start broker task");
-        let (broker_tx, broker_rx) = mpsc::unbounded_channel();
-        let broker_task = Broker::new(
-            &self.broker_addr,
-            meta_storage,
-            message_storage,
-            token.clone(),
-        )
-        .run(broker_rx);
-        let broker_handle = tokio::spawn(broker_task);
 
         // start server loop
         // unwrap: with_tls error is infallible
@@ -89,26 +78,28 @@ impl Server {
             .unwrap()
             .with_io(self.addr)?
             .start()?;
-        let server_task = Self::handle_accept(server, broker_tx, token.clone());
+        // start broker loop
+        let broker = Broker::new(
+            &self.broker_addr,
+            meta_storage,
+            message_storage,
+            token.clone(),
+        );
+        let server_task = Self::handle_accept(server, broker, token.clone());
         let server_handle = tokio::spawn(server_task);
 
-        // wait for tasks done
-        future::join(
-            // wait for broker
-            wait(broker_handle, "broker", token.clone()),
-            // wait for server
-            wait(server_handle, "server", token.clone()),
-        )
-        .await;
-        trace!("server::start: server loop exit");
+        wait(server_handle, "server", token.clone()).await;
         Ok(())
     }
 
-    async fn handle_accept(
+    async fn handle_accept<M, S>(
         mut server: s2n_quic::Server,
-        broker_tx: mpsc::UnboundedSender<broker::ClientMessage>,
+        broker: Broker<M, S>,
         token: CancellationToken,
-    ) {
+    ) where
+        M: MetaStorage,
+        S: MessageStorage,
+    {
         let mut client_id_gen = 0;
         loop {
             select! {
@@ -127,8 +118,12 @@ impl Server {
                     };
                     let client_id = client_id_gen;
                     client_id_gen += 1;
+                    // start a broker for each client
+                    let (broker_tx, broker_rx) = mpsc::unbounded_channel();
+                    let broker = broker.clone();
+                    tokio::spawn(broker.run(broker_rx));
                     // start client
-                    let task = Self::handle_conn(client_addr, client_id, conn, broker_tx.clone());
+                    let task = Self::handle_conn(client_addr, client_id, conn, broker_tx);
                     tokio::spawn(task);
                 }
                 _ = token.cancelled() => {
