@@ -8,8 +8,8 @@ pub struct BrokerStorage<M> {
 }
 
 impl<M: MetaStorage> BrokerStorage<M> {
-    const MAX_TOPIC_ID_KEY: &str = "MAX_TOPIC_ID";
-    const TOPIC_ID_KEY: &str = "TOPIC_ID";
+    const MAX_TOPIC_ID_KEY: &'static str = "MAX_TOPIC_ID";
+    const TOPIC_ID_KEY: &'static str = "TOPIC_ID";
 
     pub fn new(storage: M) -> Self {
         Self { storage }

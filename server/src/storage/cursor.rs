@@ -14,8 +14,8 @@ pub struct CursorStorage<S1, S2> {
 }
 
 impl<S1: MetaStorage, S2: MessageStorage> CursorStorage<S1, S2> {
-    const READ_POSITION_KEY: &str = "READ_POSITION";
-    const LATEST_MESSAGE_ID_KEY: &str = "LATEST_MESSAGE_ID";
+    const READ_POSITION_KEY: &'static str = "READ_POSITION";
+    const LATEST_MESSAGE_ID_KEY: &'static str = "LATEST_MESSAGE_ID";
 
     pub fn new(
         topic_name: &str,

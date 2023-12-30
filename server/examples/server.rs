@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(feature = "bonsaidb")]
+#[cfg(all(feature = "bonsaidb", not(any(feature = "redis", feature = "mongodb"))))]
 use bud_common::storage::bonsaidb::BonsaiDB;
 #[cfg(all(
     not(feature = "redis"),
@@ -104,7 +104,7 @@ async fn storage() -> anyhow::Result<(Redis, MongoDB)> {
     Ok((meta, message))
 }
 
-#[cfg(feature = "bonsaidb")]
+#[cfg(all(feature = "bonsaidb", not(any(feature = "redis", feature = "mongodb"))))]
 async fn storage() -> anyhow::Result<(BonsaiDB, BonsaiDB)> {
     log::trace!("bonsaidb storage loaded");
     let meta = BonsaiDB::new("/tmp").await?;

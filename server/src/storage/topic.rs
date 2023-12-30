@@ -15,12 +15,12 @@ pub struct TopicStorage<M, S> {
 }
 
 impl<M: MetaStorage, S: MessageStorage> TopicStorage<M, S> {
-    const TOPIC_KEY: &[u8] = "TOPIC".as_bytes();
-    const PRODUCER_SEQUENCE_ID_KEY: &str = "PRODUCER_SEQUENCE_ID";
-    const SUBSCRIPTION_NAMES_KEY: &str = "SUBSCRIPTION_NAMES";
-    const SUBSCRIPTION_KEY: &str = "SUBSCRIPTION";
-    const LATEST_CURSOR_ID_KEY: &str = "LATEST_CURSOR_ID";
-    const MESSAGE_KEY: &str = "MESSAGE";
+    const TOPIC_KEY: &'static [u8] = "TOPIC".as_bytes();
+    const PRODUCER_SEQUENCE_ID_KEY: &'static str = "PRODUCER_SEQUENCE_ID";
+    const SUBSCRIPTION_NAMES_KEY: &'static str = "SUBSCRIPTION_NAMES";
+    const SUBSCRIPTION_KEY: &'static str = "SUBSCRIPTION";
+    const LATEST_CURSOR_ID_KEY: &'static str = "LATEST_CURSOR_ID";
+    const MESSAGE_KEY: &'static str = "MESSAGE";
 
     pub fn new(topic_name: &str, meta_storage: M, message_storage: S) -> Result<Self> {
         Ok(Self {
