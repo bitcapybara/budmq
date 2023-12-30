@@ -1,5 +1,5 @@
 [workspace]
-resolver = "1"
+resolver = "2"
 members = [
   "client",
   "common",
@@ -13,8 +13,7 @@ async-trait = "0.1.73"
 bytes = "1.5.0"
 clap = { version = "4.4.6", features = ["derive", "env"] }
 chrono = { version = "0.4.31", default-features = false, features = ["clock"] }
-rustls-pemfile = "1.0.3"
-flexi_logger = "0.25.6"
+flexi_logger = "0.27.3"
 futures = "0.3.28"
 bud-common = { version = "0.1.0", path = "./common" }
 bud-derive = { version = "0.1.0", path = "./derive" }

@@ -1,12 +1,8 @@
-# immediately bail if any command fails
 set -e
 
 echo "generating CA private key and certificate"
 openssl req -nodes -new -x509 -keyout ca-key.pem -out ca-cert.pem -days 65536 -config config/ca.cnf
 
-# secp384r1 is an arbitrarily chosen curve that is supported by the default
-# security policy in s2n-tls.
-# https://github.com/aws/s2n-tls/blob/main/docs/USAGE-GUIDE.md#chart-security-policy-version-to-supported-curvesgroups
 echo "generating server private key and CSR"
 openssl req  -new -nodes -newkey ec -pkeyopt ec_paramgen_curve:secp384r1 -keyout server-key.pem -out server.csr -config config/server.cnf
 

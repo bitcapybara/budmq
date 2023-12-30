@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 #[cfg(all(feature = "bonsaidb", not(any(feature = "redis", feature = "mongodb"))))]
 use bud_common::storage::bonsaidb::BonsaiDB;
@@ -17,8 +13,9 @@ use bud_common::storage::mongodb::MongoDB;
 #[cfg(feature = "redis")]
 use bud_common::storage::redis::Redis;
 
+use bud_common::mtls::Certificate;
 use bud_common::types::BrokerAddress;
-use bud_server::{common::mtls::MtlsProvider, Server};
+use bud_server::Server;
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
 use futures::StreamExt;
@@ -29,10 +26,10 @@ use url::Url;
 
 #[derive(Debug, clap::Parser)]
 struct Args {
+    /// tls 证书目录
     #[arg(short, long, default_value = "./certs", env = "BUD_SERVER_CERTS_DIR")]
     cert_dir: PathBuf,
-    #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_IP")]
-    ip: String,
+    /// 用于客户端访问的节点地址
     #[arg(
         short,
         long,
@@ -40,6 +37,10 @@ struct Args {
         env = "BUD_SERVER_NAME"
     )]
     url: String,
+    /// 节点监听的 ip 地址
+    #[arg(short, long, default_value = "0.0.0.0", env = "BUD_SERVER_IP")]
+    ip: String,
+    /// 节点监听的端口
     #[arg(short, long, default_value_t = 9080, env = "BUD_SERVER_PORT")]
     port: u16,
 }
@@ -56,26 +57,25 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     // start server
-    let ca = read_file(&args.cert_dir.join("ca-cert.pem"))?;
-    let server_cert = read_file(&args.cert_dir.join("server-cert.pem"))?;
-    let server_key = read_file(&args.cert_dir.join("server-key.pem"))?;
-    let provider = MtlsProvider::new(&ca, &server_cert, &server_key)?;
-
     let server_url = Url::parse(&args.url)?;
     let broker_addr = BrokerAddress {
         socket_addr: server_url.socket_addrs(|| Some(args.port))?[0],
         server_name: server_url.domain().unwrap().to_string(),
     };
     let addr = format!("{}:{}", args.ip, args.port).parse()?;
-    let (token, server) = Server::new(provider, &addr, &broker_addr);
+    let (token, server) = Server::new(
+        bud_common::mtls::Certs {
+            ca_cert: args.cert_dir.join("ca-cert.pem"),
+            endpoint_cert: bud_common::mtls::EndpointCerts::Server(Certificate {
+                certificate: args.cert_dir.join("server-cert.pem"),
+                private_key: args.cert_dir.join("server-key.pem"),
+            }),
+        },
+        &addr,
+        &broker_addr,
+    );
     run(token, server)?;
     Ok(())
-}
-
-fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
-    let mut buf = vec![];
-    fs::File::open(path)?.read_to_end(&mut buf)?;
-    Ok(buf)
 }
 
 #[tokio::main]

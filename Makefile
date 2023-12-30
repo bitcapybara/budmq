@@ -1,3 +1,6 @@
+init:
+	cd ./certs && ./generate_certs.sh
+
 fmt:
 	cargo fmt -- --check
 

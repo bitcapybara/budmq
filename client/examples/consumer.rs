@@ -1,8 +1,7 @@
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+#[path = "common/lib.rs"]
+mod common;
+
+use std::path::PathBuf;
 
 use clap::Parser;
 use flexi_logger::{colored_detailed_format, Logger};
@@ -11,8 +10,8 @@ use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use tokio::select;
 
+use crate::common::client_certs;
 use bud_client::{client::ClientBuilder, consumer::SubscribeBuilder};
-use bud_common::mtls::MtlsProvider;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -29,14 +28,14 @@ async fn main() -> anyhow::Result<()> {
         .format(colored_detailed_format)
         .start()
         .unwrap();
-    let ca_cert = read_file(args.certs.join("ca-cert.pem"))?;
-    let client_cert = read_file(args.certs.join("client-cert.pem"))?;
-    let client_key_cert = read_file(args.certs.join("client-key.pem"))?;
-    let provider = MtlsProvider::new(&ca_cert, &client_cert, &client_key_cert)?;
-    let mut client = ClientBuilder::new("127.0.0.1:9080".parse()?, "localhost", provider)
-        .keepalive(10000)
-        .build()
-        .await?;
+    let mut client = ClientBuilder::new(
+        "127.0.0.1:9080".parse()?,
+        "localhost",
+        client_certs(args.certs),
+    )
+    .keepalive(10000)
+    .build()
+    .await?;
 
     let mut consumer = client
         .new_consumer(
@@ -66,10 +65,4 @@ async fn main() -> anyhow::Result<()> {
     consumer.close().await?;
     client.close().await?;
     Ok(())
-}
-
-fn read_file(path: impl AsRef<Path>) -> anyhow::Result<Vec<u8>> {
-    let mut buf = vec![];
-    fs::File::open(path)?.read_to_end(&mut buf)?;
-    Ok(buf)
 }

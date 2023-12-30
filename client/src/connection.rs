@@ -3,12 +3,12 @@ pub mod writer;
 
 use std::{borrow::Borrow, collections::HashMap, io, net::SocketAddr, sync::Arc};
 
+use bud_common::mtls::Certs;
 use bud_common::{
     io::{
         writer::{Request, ResultWaiter},
         SharedError,
     },
-    mtls::MtlsProvider,
     protocol::{
         topic::LookupTopic, CloseConsumer, CloseProducer, Connect, ConsumeAck, ControlFlow,
         CreateProducer, Packet, ProducerReceipt, Publish, Response, ReturnCode, Subscribe,
@@ -22,6 +22,7 @@ use log::{error, trace};
 use s2n_quic::{
     client,
     connection::{self, Handle},
+    provider::tls,
 };
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -65,6 +66,12 @@ wrap_error_impl!(std::net::AddrParseError, Error::SocketAddr);
 
 impl From<s2n_quic::provider::StartError> for Error {
     fn from(e: s2n_quic::provider::StartError) -> Self {
+        Self::Quic(e.to_string())
+    }
+}
+
+impl From<tls::default::error::Error> for Error {
+    fn from(e: tls::default::error::Error) -> Self {
         Self::Quic(e.to_string())
     }
 }
@@ -374,23 +381,18 @@ impl Connection {
 pub struct ConnectionHandle {
     addr: SocketAddr,
     server_name: String,
-    provider: MtlsProvider,
+    certs: Certs,
     /// broker_addr -> connection
     conns: Arc<Mutex<HashMap<SocketAddr, ConnectionState>>>,
     keepalive: u16,
 }
 
 impl ConnectionHandle {
-    pub fn new(
-        addr: &SocketAddr,
-        server_name: &str,
-        provider: MtlsProvider,
-        keepalive: u16,
-    ) -> Self {
+    pub fn new(addr: &SocketAddr, server_name: &str, certs: Certs, keepalive: u16) -> Self {
         Self {
             addr: addr.to_owned(),
             server_name: server_name.to_string(),
-            provider,
+            certs,
             conns: Arc::new(Mutex::new(HashMap::new())),
             keepalive,
         }
@@ -488,11 +490,18 @@ impl ConnectionHandle {
     }
 
     async fn connect_inner(&self, addr: &BrokerAddress, ordered: bool) -> Result<Arc<Connection>> {
+        let tls = tls::default::Client::builder()
+            .with_certificate(self.certs.ca_cert.as_path())?
+            .with_client_identity(
+                self.certs.endpoint_cert.ca(),
+                self.certs.endpoint_cert.key(),
+            )?
+            .build()?;
         // TODO loop retry backoff
         // unwrap safe: with_tls error is infallible
         trace!("connector::connect: create client and connect");
         let client: client::Client = client::Client::builder()
-            .with_tls(self.provider.clone())
+            .with_tls(tls)
             .unwrap()
             .with_io("0.0.0.0:0")
             .wrap("client build with io error")?

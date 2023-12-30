@@ -1,6 +1,8 @@
 use std::{net::SocketAddr, time::Duration};
 
-use bud_common::{io::writer::Request, mtls::MtlsProvider, types::AccessMode};
+use bud_common::mtls::Certs;
+use bud_common::{io::writer::Request, types::AccessMode};
+
 use tokio::sync::mpsc;
 
 use crate::{
@@ -33,7 +35,7 @@ pub struct RetryOptions {
 pub struct ClientBuilder {
     addr: SocketAddr,
     server_name: String,
-    provider: MtlsProvider,
+    certs: Certs,
     // default to 10000ms
     keepalive: u16,
     retry_opts: Option<RetryOptions>,
@@ -41,10 +43,10 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     const DEFAULT_KEEPALIVE_MS: u16 = 10000;
-    pub fn new(addr: SocketAddr, server_name: &str, provider: MtlsProvider) -> Self {
+    pub fn new(addr: SocketAddr, server_name: &str, certs: Certs) -> Self {
         Self {
             addr,
-            provider,
+            certs,
             keepalive: Self::DEFAULT_KEEPALIVE_MS,
             server_name: server_name.to_string(),
             retry_opts: None,
@@ -65,7 +67,7 @@ impl ClientBuilder {
         // Channel for sending messages to the server
         let (server_tx, _server_rx) = mpsc::unbounded_channel();
         let conn_handle =
-            ConnectionHandle::new(&self.addr, &self.server_name, self.provider, self.keepalive);
+            ConnectionHandle::new(&self.addr, &self.server_name, self.certs, self.keepalive);
 
         Ok(Client {
             server_tx,

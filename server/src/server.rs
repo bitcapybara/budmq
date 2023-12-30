@@ -2,13 +2,17 @@ use std::{io, net::SocketAddr};
 
 use bud_common::{
     helper::wait,
-    mtls::MtlsProvider,
     storage::{MessageStorage, MetaStorage},
     types::BrokerAddress,
 };
 
+use bud_common::mtls::Certs;
 use log::{error, trace};
-use s2n_quic::{connection, provider, Connection};
+use s2n_quic::{
+    connection,
+    provider::{self, tls},
+    Connection,
+};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -32,14 +36,20 @@ pub enum Error {
     Connection(#[from] connection::Error),
 }
 
-impl From<provider::StartError> for Error {
-    fn from(e: provider::StartError) -> Self {
+impl From<tls::default::error::Error> for Error {
+    fn from(e: tls::default::error::Error) -> Self {
         Self::StartUp(e.to_string())
     }
 }
 
+impl From<provider::StartError> for Error {
+    fn from(value: provider::StartError) -> Self {
+        Self::StartUp(value.to_string())
+    }
+}
+
 pub struct Server {
-    provider: MtlsProvider,
+    certs: Certs,
     addr: SocketAddr,
     broker_addr: BrokerAddress,
     token: CancellationToken,
@@ -47,7 +57,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(
-        provider: MtlsProvider,
+        certs: Certs,
         listen_addr: &SocketAddr,
         broker_addr: &BrokerAddress,
     ) -> (CancellationToken, Self) {
@@ -55,7 +65,7 @@ impl Server {
         (
             token.clone(),
             Self {
-                provider,
+                certs,
                 broker_addr: broker_addr.clone(),
                 token,
                 addr: *listen_addr,
@@ -70,11 +80,20 @@ impl Server {
     ) -> Result<()> {
         let token = self.token.child_token();
 
+        let tls = tls::default::Server::builder()
+            .with_trusted_certificate(self.certs.ca_cert.as_path())?
+            .with_certificate(
+                self.certs.endpoint_cert.ca(),
+                self.certs.endpoint_cert.key(),
+            )?
+            .with_client_authentication()?
+            .build()?;
+
         // start server loop
         // unwrap: with_tls error is infallible
         trace!("server::start: start accept task");
         let server = s2n_quic::Server::builder()
-            .with_tls(self.provider)
+            .with_tls(tls)
             .unwrap()
             .with_io(self.addr)?
             .start()?;

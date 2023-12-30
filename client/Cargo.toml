@@ -20,3 +20,4 @@ flexi_logger.workspace = true
 clap.workspace = true
 signal-hook-tokio.workspace = true
 signal-hook.workspace = true
+tokio = { workspace = true, features = [ "rt-multi-thread" ] }
