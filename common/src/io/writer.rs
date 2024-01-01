@@ -193,11 +193,14 @@ async fn start_recv(
     token: CancellationToken,
 ) {
     loop {
+        // pipeline, 按照发送的顺序接收响应
         select! {
+            // 按发送的顺序取出响应回执
             res_tx = res_receiver.recv() => {
                 let Some(res_tx) = res_tx else {
                     return;
                 };
+                // 获取到响应，发送到回执
                 match framed.next().await {
                     Some(Ok(resp)) => {
                         res_tx.send(Ok(resp)).ok();
